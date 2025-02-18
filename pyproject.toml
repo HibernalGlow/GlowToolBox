@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "GlowToolBox"
+version = "0.1.9"
+authors = [
+  { name="HibernalGlow", email="hibernalglow@gmail.com" },
+]
+description = "A collection of useful tools for image processing and file management"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "pillow>=9.0.0",
+    "numpy>=1.20.0",
+    "opencv-python>=4.5.0",
+    "pytest>=7.0.0",
+    "black>=22.0.0",
+    "flake8>=4.0.0"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/HibernalGlow/GlowToolBox"
+"Bug Tracker" = "https://github.com/HibernalGlow/GlowToolBox/issues" 
