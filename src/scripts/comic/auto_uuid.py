@@ -523,11 +523,26 @@ def generate_uuid(existing_uuids):
         if new_uuid not in existing_uuids:
             return new_uuid
 
-def get_artist_name(target_directory, archive_path):
-    """从压缩文件路径中提取艺术家名称。"""
-    archive_path = Path(archive_path)
-    relative_path = archive_path.relative_to(target_directory).parts
-    return relative_path[0] if len(relative_path) > 0 else ""
+def get_artist_name(target_directory, archive_path, mode='multi'):
+    """从压缩文件路径中提取艺术家名称。
+    
+    Args:
+        target_directory: 目标目录路径
+        archive_path: 压缩文件路径
+        mode: 处理模式，'multi'表示多人模式，'single'表示单人模式
+        
+    Returns:
+        str: 艺术家名称
+    """
+    if mode == 'single':
+        # 单人模式：使用输入路径的最后一个文件夹作为画师名称
+        target_path = Path(target_directory)
+        return target_path.name
+    else:
+        # 多人模式：使用输入路径下的一级子文件夹作为画师名称
+        archive_path = Path(archive_path)
+        relative_path = archive_path.relative_to(target_directory).parts
+        return relative_path[0] if len(relative_path) > 0 else ""
 
 def get_relative_path(target_directory, archive_path):
     """获取相对路径。"""
@@ -750,7 +765,7 @@ def process_single_archive(archive_path, target_directory, uuid_directory, times
         json_filename = f"{uuid_value}.json"
         
         # 获取文件信息
-        artist_name = get_artist_name(target_directory, archive_path)
+        artist_name = get_artist_name(target_directory, archive_path, args.mode if hasattr(args, 'mode') else 'multi')
         archive_name = os.path.basename(archive_path)
         relative_path = get_relative_path(target_directory, archive_path)
         
