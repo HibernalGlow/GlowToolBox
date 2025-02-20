@@ -161,84 +161,131 @@ class TextualLogHandler(logging.Handler):
     def __init__(self, app):
         super().__init__()
         self.app = app
-        self.path_regex = re.compile(r'([A-Za-z]:\\[^\s]+|/([^\s/]+/){2,}[^\s/]+)')  # 匹配Windows和Unix路径
+        self.path_regex = re.compile(r'([A-Za-z]:\\[^\s]+|/([^\s/]+/){2,}[^\s/]+|\S+\.[a-zA-Z0-9]+)')
+        self.max_msg_length = 80  # 调整为更合理的长度
+        self.max_filename_length = 40  # 文件名最大长度
+
+    def _truncate_path(self, path: str, max_length: int = None) -> str:
+        """智能路径截断处理
         
-    def _truncate_path(self, path: str, max_length: int = 35) -> str:
-        """路径截断处理（保证最后一个层级完整）"""
+        Args:
+            path: 需要截断的路径或文件名
+            max_length: 最大允许长度，如果不指定则使用 max_filename_length
+            
+        Returns:
+            截断后的字符串
+        """
+        if max_length is None:
+            max_length = self.max_filename_length
+            
         if len(path) <= max_length:
             return path
             
-        # 分解路径为组成部分
-        sep = '/' if '/' in path else '\\'
-        parts = path.split(sep)
-        drive = parts[0] + sep if sep == '\\' and ':' in parts[0] else ''  # 保留Windows驱动器
+        # 检查是否是带扩展名的文件
+        base, ext = os.path.splitext(path)
+        if ext:
+            # 确保扩展名完整保留
+            ext_len = len(ext)
+            if ext_len + 4 >= max_length:  # 如果扩展名太长
+                return f"...{ext[-max_length+3:]}"
+            
+            # 计算基础名称可用长度
+            base_length = max_length - ext_len - 3  # 3是...的长度
+            if base_length > 0:
+                # 如果基础名称包含方括号，尝试保留方括号内的内容
+                bracket_match = re.match(r'(.*?)(\[.*?\])(.*?)$', base)
+                if bracket_match:
+                    prefix, brackets, suffix = bracket_match.groups()
+                    if len(brackets) + ext_len + 6 <= max_length:  # 包括...和可能的连接符
+                        available_space = max_length - (len(brackets) + ext_len + 6)
+                        if available_space > 0:
+                            prefix_len = min(len(prefix), available_space // 2)
+                            suffix_len = min(len(suffix), available_space - prefix_len)
+                            return f"{prefix[:prefix_len]}...{brackets}...{ext}"
+                
+                # 常规截断
+                return f"{base[:base_length]}...{ext}"
+            return f"...{ext}"
         
-        # 分离最后一个层级（文件/文件夹）
-        if len(parts) < 2:
-            return path[:max_length]  # 无法分割时直接截断
-            
-        last_part = parts[-1]
-        remaining_length = max_length - len(last_part) - 4  # 保留空间给...和分隔符
-        
-        if remaining_length <= 0:
-            # 空间不足时强制显示最后部分
-            return f"...{sep}{last_part}"[-max_length:]
-            
-        # 构建前缀部分
-        prefix = sep.join(parts[:-1])
-        if len(prefix) > remaining_length:
-            # 需要截断前缀部分
-            prefix_parts = []
-            current_len = 0
-            for part in parts[:-1]:
-                if current_len + len(part) + 1 <= remaining_length:
-                    prefix_parts.append(part)
-                    current_len += len(part) + 1
-                else:
-                    break
-            if prefix_parts:
-                return f"{sep.join(prefix_parts)}...{sep}{last_part}"
-            return f"...{sep}{last_part}"
-            
-        return f"{prefix}{sep}{last_part}"
+        # 不是文件名的情况
+        return f"{path[:max_length-3]}..."
 
     def emit(self, record):
         """处理日志记录"""
         try:
             msg = self.format(record)
             
-            # 路径截断处理
-            msg = self.path_regex.sub(
-                lambda m: self._truncate_path(m.group()), 
-                msg
-            )
-            
             # 检查是否是真正的进度条（同时包含@和%）
-            is_real_progress = '@' in msg and ('%' in msg 
-                                            #    or '/100' in msg
-                                               )
+            is_real_progress = '@' in msg and '%' in msg
             
-            # 修正分组索引错误
-            progress_match = re.match(r'^\[@(\w+)\](.*)$', msg)  # 简化正则
-            normal_match = re.match(r'^\[#(\w+)\](.*)$', msg)    # 简化正则
+            # 提取面板标签
+            progress_match = re.match(r'^\[@(\w+)\](.*)$', msg)
+            normal_match = re.match(r'^\[#(\w+)\](.*)$', msg)
             
-            if progress_match and is_real_progress:
-                # 真正的进度条
+            # 获取标签和内容
+            panel_name = None
+            content = msg
+            tag = ""
+            
+            if progress_match:
                 panel_name = progress_match.group(1)
                 content = progress_match.group(2).strip()
+                tag = f"[@{panel_name}]"
+            elif normal_match:
+                panel_name = normal_match.group(1)
+                content = normal_match.group(2).strip()
+                tag = f"[#{panel_name}]"
+            
+            # 处理消息截断
+            if len(content) > self.max_msg_length - len(tag):
+                # 查找所有需要截断的路径
+                matches = list(self.path_regex.finditer(content))
+                if not matches:
+                    # 如果没有找到文件名或路径，直接截断
+                    content = f"{content[:self.max_msg_length-len(tag)-3]}..."
+                else:
+                    truncated_content = content
+                    offset = 0
+                    
+                    # 处理所有匹配项
+                    for match in matches:
+                        start = match.start() - offset
+                        end = match.end() - offset
+                        original = match.group()
+                        
+                        # 计算当前位置的可用长度
+                        remaining_length = self.max_msg_length - len(tag) - (len(truncated_content) - (end - start))
+                        if remaining_length < 10:  # 如果剩余空间太小
+                            truncated_content = truncated_content[:start] + "..."
+                            break
+                            
+                        truncated = self._truncate_path(original, min(remaining_length, self.max_filename_length))
+                        
+                        if truncated != original:
+                            truncated_content = truncated_content[:start] + truncated + truncated_content[end:]
+                            offset += len(original) - len(truncated)
+                    
+                    content = truncated_content
+                    
+                    # 确保总长度不超过限制
+                    if len(content) > self.max_msg_length - len(tag):
+                        content = f"{content[:self.max_msg_length-len(tag)-3]}..."
+            
+            # 重新组合消息
+            final_msg = f"{tag}{content}" if tag else content
+            
+            # 根据消息类型更新面板
+            if progress_match and is_real_progress:
+                # 真正的进度条
                 self.app.update_panel(panel_name, content)
             elif progress_match and not is_real_progress:
                 # 错误使用@的面板，转为普通面板处理
-                panel_name = progress_match.group(1)
-                content = progress_match.group(2).strip()
                 if record.levelno >= logging.ERROR:
                     content = f"❌ {content}"
                 elif record.levelno >= logging.WARNING:
                     content = f"⚠️ {content}"
                 self.app.update_panel(panel_name, content)
             elif normal_match:
-                panel_name = normal_match.group(1)
-                content = normal_match.group(2).strip()
                 if record.levelno >= logging.ERROR:
                     content = f"❌ {content}"
                 elif record.levelno >= logging.WARNING:
@@ -246,13 +293,13 @@ class TextualLogHandler(logging.Handler):
                 self.app.update_panel(panel_name, content)
             else:
                 if record.levelno >= logging.ERROR:
-                    self.app.update_panel("update", f"❌ {msg}")
+                    self.app.update_panel("update", f"❌ {final_msg}")
                 elif record.levelno >= logging.WARNING:
-                    self.app.update_panel("update", f"⚠️ {msg}")
+                    self.app.update_panel("update", f"⚠️ {final_msg}")
                 else:
-                    self.app.update_panel("update", msg)
+                    self.app.update_panel("update", final_msg)
                 
-        except Exception:
+        except Exception as e:
             self.handleError(record)
 
     def _handle_progress_message(self, panel_name: str, content: str):
