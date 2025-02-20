@@ -19,10 +19,13 @@ import tempfile
 from prompt_toolkit import prompt
 from prompt_toolkit.shortcuts import checkboxlist_dialog
 from prompt_toolkit.styles import Style
-
-# 添加父目录到Python路径
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from nodes.tui.textual_logger import TextualLoggerManager
+from nodes.record.logger_config import setup_logger
+config = {
+    'script_name': 'comic_auto_repack',
+    'console_enabled': False
+}
+logger, config_info = setup_logger(config)
 
 # 配置常量
 SEVEN_ZIP_PATH = "C:\\Program Files\\7-Zip\\7z.exe"
@@ -111,7 +114,7 @@ class ZipCompressor:
     """压缩处理类，封装所有压缩相关的操作"""
     seven_zip_path: str = SEVEN_ZIP_PATH
     compression_level: int = COMPRESSION_LEVEL
-    handler: RichProgressHandler = None
+    
     
     def create_temp_workspace(self) -> Tuple[Path, Path]:
         """创建临时工作目录"""
@@ -225,7 +228,7 @@ class ZipCompressor:
                     # 内容相同，替换原文件
                     target_zip_path.unlink()
                     shutil.move(str(temp_zip_path), str(target_zip_path))
-                    self.handler.add_log(f"📦 压缩包内容相同，已覆盖原文件: {target_zip_path}")
+                    self.logger.info(f"📦 压缩包内容相同，已覆盖原文件: {target_zip_path}")
                     return target_zip_path
                 else:
                     # 内容不同，使用新名称
@@ -241,7 +244,7 @@ class ZipCompressor:
                 shutil.move(str(temp_zip_path), str(target_zip_path))
                 return target_zip_path
         except Exception as e:
-            self.handler.add_error_log(f"❌ 处理压缩包时发生错误: {e}")
+            self.logger.info(f"❌ 处理压缩包时发生错误: {e}")
             return None
     
     def _cleanup_empty_folder(self, folder_path: Path) -> None:
@@ -249,9 +252,9 @@ class ZipCompressor:
         if not any(folder_path.iterdir()):
             try:
                 folder_path.rmdir()
-                self.handler.add_log(f"🗑️ 已删除空文件夹: {folder_path}")
+                self.logger.info(f"🗑️ 已删除空文件夹: {folder_path}")
             except Exception as e:
-                self.handler.add_warning_log(f"❌ 删除空文件夹失败: {folder_path}, 错误: {e}")
+                self.logger.info(f"❌ 删除空文件夹失败: {folder_path}, 错误: {e}")
     
     def _delete_source_files(self, files: List[Path]) -> None:
         """删除源文件"""
@@ -260,27 +263,27 @@ class ZipCompressor:
             if file.exists():
                 if not safe_remove_file(file, self.handler):
                     delete_failures.append(str(file))
-                    self.handler.add_warning_log(f"⚠️ 无法删除原始文件: {file}")
+                    self.logger.info(f"⚠️ 无法删除原始文件: {file}")
         
         if delete_failures:
             try:
                 files_list = '" "'.join(delete_failures)
                 if not cmd_delete(f'"{files_list}"', handler=self.handler):
-                    self.handler.add_error_log(f"❌ 批量删除失败: {files_list}")
+                    self.logger.info(f"❌ 批量删除失败: {files_list}")
             except Exception as e:
-                self.handler.add_error_log(f"❌ 批量删除命令执行失败: {e}")
+                self.logger.info(f"❌ 批量删除命令执行失败: {e}")
 
 def get_folder_size(folder_path: Path) -> int:
     return sum(f.stat().st_size for f in folder_path.rglob('*') if f.is_file())
 
-def find_min_folder_with_images(base_path: Path, exclude_keywords: List[str], handler: RichProgressHandler) -> Optional[Tuple[Path, bool, int]]:
+def find_min_folder_with_images(base_path: Path, exclude_keywords: List[str]) -> Optional[Tuple[Path, bool, int]]:
     """
     查找需要打包的文件夹
     返回: (文件夹路径, 是否需要特殊处理, 图片数量)
     """
     # 检查路径是否包含黑名单关键词
     if any(keyword in str(base_path) for keyword in BLACKLIST_KEYWORDS):
-        handler.add_log(f"跳过黑名单路径: {base_path}")
+        logger.info(f"跳过黑名单路径: {base_path}")
         return None
         
     # 如果路径不存在或不是目录，返回 None
@@ -336,7 +339,7 @@ def find_min_folder_with_images(base_path: Path, exclude_keywords: List[str], ha
     
     # 如果是散图文件夹，返回 None，让散图处理功能去处理它
     if is_scattered:
-        handler.add_log(f"跳过散图文件夹: {base_path}")
+        logger.info(f"跳过散图文件夹: {base_path}")
         return None
     
     # 如果包含其他有效文件（非图片、非压缩包、非不需要的文件），则作为普通文件夹打包
@@ -345,7 +348,7 @@ def find_min_folder_with_images(base_path: Path, exclude_keywords: List[str], ha
     
     return None
 
-def compare_zip_contents(zip1_path: Path, zip2_path: Path, handler: RichProgressHandler) -> bool:
+def compare_zip_contents(zip1_path: Path, zip2_path: Path) -> bool:
     """
     比较两个压缩包的内容是否相同
     返回: 如果两个压缩包的文件数量和大小都相同，返回True
@@ -386,7 +389,7 @@ def compare_zip_contents(zip1_path: Path, zip2_path: Path, handler: RichProgress
         # 比较每个文件的大小
         return all(files1.get(name) == files2.get(name) for name in files1)
     except Exception as e:
-        handler.add_error_log(f"❌ 比较压缩包时发生错误: {e}")
+        logger.info(f"❌ 比较压缩包时发生错误: {e}")
         return False
 
 def get_long_path_name(path_str: str) -> str:
@@ -406,9 +409,9 @@ def create_temp_dir(parent_dir: Path) -> Path:
     temp_dir.mkdir(exist_ok=True)
     return temp_dir
 
-def safe_copy_file(src: Path, dst: Path, handler: RichProgressHandler) -> bool:
+def safe_copy_file(src: Path, dst: Path) -> bool:
     """安全地复制文件，处理各种错误情况"""
-    handler.add_log(f"🔄 开始复制文件: {src} -> {dst}")
+    logger.info(f"🔄 开始复制文件: {src} -> {dst}")
     try:
         # 使用长路径
         src_long = safe_path(src)
@@ -419,20 +422,20 @@ def safe_copy_file(src: Path, dst: Path, handler: RichProgressHandler) -> bool:
         
         # 尝试直接复制
         try:
-            handler.add_log("🔄 尝试直接复制文件...")
+            logger.info("🔄 尝试直接复制文件...")
             with open(src_long, 'rb') as fsrc:
                 with open(dst_long, 'wb') as fdst:
                     shutil.copyfileobj(fsrc, fdst)
-            handler.add_log("✅ 文件复制成功")
+            logger.info("✅ 文件复制成功")
             return True
         except Exception as e:
-            handler.add_error_log(f"❌ 复制文件失败: {e}")
+            logger.info(f"❌ 复制文件失败: {e}")
             return False
     except Exception as e:
-        handler.add_error_log(f"❌ 复制文件失败: {src} -> {dst}, 错误: {str(e)}")
+        logger.info(f"❌ 复制文件失败: {src} -> {dst}, 错误: {str(e)}")
         return False
 
-def safe_remove_file(file_path: Path, handler: RichProgressHandler) -> bool:
+def safe_remove_file(file_path: Path) -> bool:
     """安全地删除文件，处理各种错误情况"""
     try:
         # 使用长路径
@@ -444,7 +447,7 @@ def safe_remove_file(file_path: Path, handler: RichProgressHandler) -> bool:
                 current_mode = file_path.stat().st_mode
                 file_path.chmod(current_mode | stat.S_IWRITE)
         except Exception as e:
-            handler.add_warning_log(f"⚠️ 清除只读属性失败: {file_path}, 错误: {e}")
+            logger.info(f"⚠️ 清除只读属性失败: {file_path}, 错误: {e}")
         
         # 尝试使用不同的方法删除文件
         try:
@@ -452,7 +455,7 @@ def safe_remove_file(file_path: Path, handler: RichProgressHandler) -> bool:
             os.remove(long_path)
             return True
         except Exception as e1:
-            handler.add_warning_log(f"❌ 直接删除失败，尝试其他方法: {e1}")
+            logger.info(f"❌ 直接删除失败，尝试其他方法: {e1}")
             try:
                 # 方法2：使用Windows API删除
                 if os.path.exists(long_path):
@@ -463,9 +466,9 @@ def safe_remove_file(file_path: Path, handler: RichProgressHandler) -> bool:
                     error = ctypes.get_last_error()
                     if error == 0:  # ERROR_SUCCESS
                         return True
-                    handler.add_warning_log(f"⚠️ Windows API删除失败，错误码: {error}")
+                    logger.info(f"⚠️ Windows API删除失败，错误码: {error}")
             except Exception as e2:
-                handler.add_warning_log(f"❌ Windows API删除失败: {e2}")
+                logger.info(f"❌ Windows API删除失败: {e2}")
                 try:
                     # 方法3：使用shell删除
                     import subprocess
@@ -475,14 +478,14 @@ def safe_remove_file(file_path: Path, handler: RichProgressHandler) -> bool:
                     if not os.path.exists(long_path):
                         return True
                 except Exception as e3:
-                    handler.add_warning_log(f"❌ Shell删除失败: {e3}")
+                    logger.info(f"❌ Shell删除失败: {e3}")
         
         return False
     except Exception as e:
-        handler.add_error_log(f"❌ 删除文件失败: {file_path}, 错误: {str(e)}")
+        logger.info(f"❌ 删除文件失败: {file_path}, 错误: {str(e)}")
         return False
 
-def zip_folder_with_7zip(folder_path: Path, handler: RichProgressHandler, only_images: bool = False, image_count: int = 0) -> CompressionResult:
+def zip_folder_with_7zip(folder_path: Path, only_images: bool = False, image_count: int = 0) -> CompressionResult:
     """
     压缩文件夹，可以选择是否只压缩图片文件
     """
@@ -523,7 +526,7 @@ def zip_folder_with_7zip(folder_path: Path, handler: RichProgressHandler, only_i
                     # 创建简化的文件名
                     temp_filename = f"img_{idx:03d}{file.suffix}"
                     temp_file = temp_work_dir / temp_filename
-                    if not safe_copy_file(file, temp_file, handler):
+                    if not safe_copy_file(file, temp_file):
                         copy_success = False
                         break
                     original_to_temp_map[file] = temp_file
@@ -539,12 +542,12 @@ def zip_folder_with_7zip(folder_path: Path, handler: RichProgressHandler, only_i
                 if result.returncode == 0:
                     delete_success = True
                     for file in files_to_zip:
-                        if not safe_remove_file(file, handler):
+                        if not safe_remove_file(file):
                             delete_success = False
-                            handler.add_warning_log(f"⚠️ 无法删除原始文件: {file}")
+                            logger.info(f"⚠️ 无法删除原始文件: {file}")
                     
                     if not delete_success:
-                        handler.add_warning_log("部分原始文件删除失败，但压缩包已创建成功")
+                        logger.info("部分原始文件删除失败，但压缩包已创建成功")
             else:
                 # 压缩整个文件夹内容到父目录
                 cmd = f'"{SEVEN_ZIP_PATH}" a -r -aoa -tzip -mx={COMPRESSION_LEVEL} "{safe_path(temp_zip_path)}" "{safe_path(folder_path)}\\*" -sdel'
@@ -555,11 +558,11 @@ def zip_folder_with_7zip(folder_path: Path, handler: RichProgressHandler, only_i
                     try:
                         # 如果目标文件已存在，先检查内容
                         if zip_path.exists():
-                            if compare_zip_contents(temp_zip_path, zip_path, handler):
+                            if compare_zip_contents(temp_zip_path, zip_path):
                                 # 内容相同，替换原文件
                                 zip_path.unlink()
                                 shutil.move(str(temp_zip_path), str(zip_path))
-                                handler.add_log(f"📦 压缩包内容相同，已覆盖原文件: {zip_path}")
+                                logger.info(f"📦 压缩包内容相同，已覆盖原文件: {zip_path}")
                             else:
                                 # 内容不同，使用新名称
                                 counter = 1
@@ -577,16 +580,16 @@ def zip_folder_with_7zip(folder_path: Path, handler: RichProgressHandler, only_i
                         compressed_size = zip_path.stat().st_size
                         compression_ratio = (compressed_size / original_size) * 100 if original_size > 0 else 0
                         
-                        handler.add_log(f"Compressed '{folder_path}' - Original: {original_size/1024/1024:.2f}MB, "
+                        logger.info(f"Compressed '{folder_path}' - Original: {original_size/1024/1024:.2f}MB, "
                                    f"Compressed: {compressed_size/1024/1024:.2f}MB, Ratio: {compression_ratio:.1f}%")
                         
                         # 如果文件夹为空，删除它
                         if not any(folder_path.iterdir()):
                             try:
                                 folder_path.rmdir()
-                                handler.add_log(f"🗑️ 已删除空文件夹: {folder_path}")
+                                logger.info(f"🗑️ 已删除空文件夹: {folder_path}")
                             except Exception as e:
-                                handler.add_warning_log(f"❌ 删除空文件夹失败: {folder_path}, 错误: {e}")
+                                logger.info(f"❌ 删除空文件夹失败: {folder_path}, 错误: {e}")
                         
                         return CompressionResult(True, original_size, compressed_size)
                     except Exception as e:
@@ -596,18 +599,18 @@ def zip_folder_with_7zip(folder_path: Path, handler: RichProgressHandler, only_i
     except Exception as e:
         return CompressionResult(False, error_message=f"Error: {str(e)}")
 
-def process_folders(base_path: str, exclude_keywords: List[str], handler: RichProgressHandler) -> List[Path]:
+def process_folders(base_path: str, exclude_keywords: List[str]) -> List[Path]:
     base_path = Path(base_path)
     if not base_path.exists():
-        handler.add_error_log(f"基础路径不存在: {base_path}")
+        logger.info(f"基础路径不存在: {base_path}")
         return []
     
     stats = CompressionStats()
     zip_paths: List[Path] = []
-    compressor = ZipCompressor(handler=handler)
+    compressor = ZipCompressor()
     
     # 查找需要打包的文件夹
-    handler.add_success_log("🔍 开始查找需要打包的文件夹...")
+    logger.info("🔍 开始查找需要打包的文件夹...")
     folders_to_process = []
     
     # 遍历所有文件夹
@@ -616,7 +619,7 @@ def process_folders(base_path: str, exclude_keywords: List[str], handler: RichPr
         
         # 检查是否包含黑名单关键词
         if any(keyword in str(root_path) for keyword in BLACKLIST_KEYWORDS):
-            handler.add_log(f"跳过黑名单路径: {root_path}")
+            logger.info(f"跳过黑名单路径: {root_path}")
             dirs.clear()  # 跳过子目录
             continue
         
@@ -630,16 +633,16 @@ def process_folders(base_path: str, exclude_keywords: List[str], handler: RichPr
             continue
         
         # 检查当前文件夹
-        result = find_min_folder_with_images(root_path, exclude_keywords, handler)
+        result = find_min_folder_with_images(root_path, exclude_keywords)
         if result:
             folders_to_process.append(result[0])  # 只保存文件夹路径
-            handler.add_success_log(f"📁 找到需要打包的文件夹: {result[0]}")
+            logger.info(f"📁 找到需要打包的文件夹: {result[0]}")
     
     if folders_to_process:
-        handler.add_success_log(f"📊 共找到 {len(folders_to_process)} 个文件夹需要打包")
+        logger.info(f"📊 共找到 {len(folders_to_process)} 个文件夹需要打包")
         
         # 创建进度任务
-        process_task = handler.create_progress_task(total=len(folders_to_process), description="处理文件夹")
+        process_task = logger.info(total=len(folders_to_process), description="处理文件夹")
         
         # 使用线程池处理普通文件夹
         with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -656,22 +659,22 @@ def process_folders(base_path: str, exclude_keywords: List[str], handler: RichPr
                         stats.total_original_size += result.original_size
                         stats.total_compressed_size += result.compressed_size
                         zip_paths.append(folder.parent / f"{folder.name}.zip")
-                        handler.add_success_log(f"✅ 成功处理: {folder.name}")
+                        logger.info(f"✅ 成功处理: {folder.name}")
                     else:
                         stats.failed_compressions += 1
-                        handler.add_error_log(f"处理失败 {folder}: {result.error_message}")
+                        logger.info(f"处理失败 {folder}: {result.error_message}")
                 except Exception as e:
                     stats.failed_compressions += 1
-                    handler.add_error_log(f"处理异常 {folder}: {str(e)}")
+                    logger.info(f"处理异常 {folder}: {str(e)}")
                 finally:
-                    handler.progress.update(process_task, advance=1)
+                    logger.info(process_task, advance=1)
     else:
-        handler.add_warning_log("⚠️ 未找到需要打包的文件夹")
+        logger.info("⚠️ 未找到需要打包的文件夹")
     
-    handler.add_success_log(stats.get_summary())
+    logger.info(stats.get_summary())
     return zip_paths
 
-def process_scattered_images_in_directory(directory: Path, handler: RichProgressHandler) -> int:
+def process_scattered_images_in_directory(directory: Path) -> int:
     """处理目录中的散图
     返回：处理的散图文件夹数量
     """
@@ -681,27 +684,27 @@ def process_scattered_images_in_directory(directory: Path, handler: RichProgress
         
         # 检查是否包含黑名单关键词
         if any(keyword in str(root_path) for keyword in BLACKLIST_KEYWORDS):
-            handler.add_log(f"跳过黑名单路径: {root_path}")
+            logger.info(f"跳过黑名单路径: {root_path}")
             continue
         
         if any(media_type in str(root_path) for media_type in MEDIA_TYPES):
-            handler.add_log(f"跳过媒体文件夹: {root_path}")
+            logger.info(f"跳过媒体文件夹: {root_path}")
             continue
         
         has_scattered, image_files = find_scattered_images(root_path)
         if has_scattered:
-            handler.add_log(f"发现散图文件夹: {root_path}")
-            result = zip_scattered_images(root_path, image_files, handler)
+            logger.info(f"发现散图文件夹: {root_path}")
+            result = zip_scattered_images(root_path, image_files)
             if result.success:
                 processed_scattered += 1
-                handler.add_success_log(f"成功处理散图 - 原始大小: {result.original_size/1024/1024:.2f}MB, "
+                logger.info(f"成功处理散图 - 原始大小: {result.original_size/1024/1024:.2f}MB, "
                            f"压缩后: {result.compressed_size/1024/1024:.2f}MB")
             else:
-                handler.add_error_log(f"处理散图失败: {result.error_message}")
+                logger.info(f"处理散图失败: {result.error_message}")
     
     return processed_scattered
 
-def move_unwanted_files(source_folder: Path, target_base: Path, handler: RichProgressHandler) -> Tuple[int, int]:
+def move_unwanted_files(source_folder: Path, target_base: Path) -> Tuple[int, int]:
     """
     移动不需要的文件到指定目录，保持原有的目录结构
     返回: (移动的文件数量, 移动的文件总大小)
@@ -736,17 +739,17 @@ def move_unwanted_files(source_folder: Path, target_base: Path, handler: RichPro
                     if final_target_path.exists() and not file_path.exists():
                         moved_count += 1
                         moved_size += final_target_path.stat().st_size
-                        handler.add_log(f"📦 已移动文件: {file_path.name} -> {final_target_path}")
+                        logger.info(f"📦 已移动文件: {file_path.name} -> {final_target_path}")
                     else:
-                        handler.add_error_log(f"❌ 移动文件可能未成功完成 {file_path} -> {final_target_path}")
+                        logger.info(f"❌ 移动文件可能未成功完成 {file_path} -> {final_target_path}")
                 except (shutil.Error, OSError) as e:
-                    handler.add_error_log(f"❌ 移动文件失败 {file_path}: {str(e)}")
+                    logger.info(f"❌ 移动文件失败 {file_path}: {str(e)}")
             except Exception as e:
-                handler.add_error_log(f"❌ 移动文件时发生未知错误 {file_path}: {str(e)}")
+                logger.info(f"❌ 移动文件时发生未知错误 {file_path}: {str(e)}")
     
     return moved_count, moved_size
 
-def organize_media_files(source_path: Path, target_base_path: Path, handler: RichProgressHandler) -> Tuple[int, int]:
+def organize_media_files(source_path: Path, target_base_path: Path) -> Tuple[int, int]:
     """
     整理媒体文件，保持原有文件夹结构，同时处理关联文件
     返回: (移动的文件数量, 移动的文件总大小)
@@ -756,7 +759,7 @@ def organize_media_files(source_path: Path, target_base_path: Path, handler: Ric
     
     # 检查源路径是否在媒体类型文件夹内（包括父路径）
     if any(media_type in str(source_path) for media_type in MEDIA_TYPES):
-        handler.add_log(f"跳过已整理的媒体文件夹路径: {source_path}")
+        logger.info(f"跳过已整理的媒体文件夹路径: {source_path}")
         return moved_count, moved_size
     
     # 遍历源路径
@@ -765,7 +768,7 @@ def organize_media_files(source_path: Path, target_base_path: Path, handler: Ric
         
         # 检查当前路径是否在媒体类型文件夹内（包括父路径）
         if any(media_type in str(root_path) for media_type in MEDIA_TYPES):
-            handler.add_log(f"跳过已整理的媒体文件夹路径: {root_path}")
+            logger.info(f"跳过已整理的媒体文件夹路径: {root_path}")
             continue
             
         # 检查当前文件夹是否包含需要处理的媒体文件
@@ -802,7 +805,7 @@ def organize_media_files(source_path: Path, target_base_path: Path, handler: Ric
             try:
                 relative_path = root_path.relative_to(source_path)
             except ValueError:
-                handler.add_error_log(f"无法计算相对路径: {root_path} 相对于 {source_path}")
+                logger.info(f"无法计算相对路径: {root_path} 相对于 {source_path}")
                 continue
                 
             for media_type, file_lists in media_files.items():
@@ -812,7 +815,7 @@ def organize_media_files(source_path: Path, target_base_path: Path, handler: Ric
                 try:
                     target_dir.mkdir(parents=True, exist_ok=True)
                 except Exception as e:
-                    handler.add_error_log(f"❌ 创建目标文件夹失败 {target_dir}: {e}")
+                    logger.info(f"❌ 创建目标文件夹失败 {target_dir}: {e}")
                     continue
                 
                 # 移动主文件和关联文件
@@ -837,15 +840,15 @@ def organize_media_files(source_path: Path, target_base_path: Path, handler: Ric
                             shutil.move(str(file_path), str(final_target))
                             moved_count += 1
                             moved_size += file_size
-                            handler.add_log(f"📦 已移动{'关联' if file_path in file_lists['associated'] else '主要'}媒体文件: {file_path.name} -> {final_target}")
+                            logger.info(f"📦 已移动{'关联' if file_path in file_lists['associated'] else '主要'}媒体文件: {file_path.name} -> {final_target}")
                         except FileNotFoundError:
                             continue
                         except Exception as e:
-                            handler.add_error_log(f"❌ 移动媒体文件失败 {file_path}: {e}")
+                            logger.info(f"❌ 移动媒体文件失败 {file_path}: {e}")
     
     return moved_count, moved_size
 
-def cmd_delete(path: str, is_directory: bool = False, handler: RichProgressHandler = None) -> bool:
+def cmd_delete(path: str, is_directory: bool = False,) -> bool:
     """
     使用 CMD 命令删除文件或文件夹
     """
@@ -860,23 +863,22 @@ def cmd_delete(path: str, is_directory: bool = False, handler: RichProgressHandl
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
         return result.returncode == 0
     except Exception as e:
-        if handler:
-            handler.add_error_log(f"❌ CMD删除失败 {path}: {e}")
+        logger.info(f"❌ CMD删除失败 {path}: {e}")
         return False
 
-def delete_empty_folders(directory: Path, handler: RichProgressHandler):
+def delete_empty_folders(directory: Path):
     """删除空文件夹"""
     for root, dirs, files in os.walk(directory, topdown=False):
         for dir_name in dirs:
             dir_path = Path(root) / dir_name
             try:
                 if not any(dir_path.iterdir()):
-                    if not cmd_delete(str(dir_path), is_directory=True, handler=handler):
-                        handler.add_error_log(f"❌ 删除空文件夹失败 {dir_path}")
+                    if not cmd_delete(str(dir_path), is_directory=True):
+                        logger.info(f"❌ 删除空文件夹失败 {dir_path}")
                     else:
-                        handler.add_log(f"🗑️ 已删除空文件夹: {dir_path}")
+                        logger.info(f"🗑️ 已删除空文件夹: {dir_path}")
             except Exception as e:
-                handler.add_error_log(f"❌ 检查空文件夹失败 {dir_path}: {e}")
+                logger.info(f"❌ 检查空文件夹失败 {dir_path}: {e}")
 
 def find_scattered_images(folder_path: Path) -> Tuple[bool, List[Path]]:
     """
@@ -931,7 +933,7 @@ def find_scattered_images(folder_path: Path) -> Tuple[bool, List[Path]]:
                 
     return False, []
 
-def zip_scattered_images(folder_path: Path, image_files: List[Path], handler: RichProgressHandler) -> CompressionResult:
+def zip_scattered_images(folder_path: Path, image_files: List[Path]) -> CompressionResult:
     """
     专门处理散落图片的压缩
     """
@@ -943,7 +945,7 @@ def zip_scattered_images(folder_path: Path, image_files: List[Path], handler: Ri
         # 如果临时文件夹已存在，先尝试删除
         if temp_folder.exists():
             if not cmd_delete(str(temp_folder), is_directory=True):
-                handler.add_error_log(f"❌ 删除已存在的临时文件夹失败: {temp_folder}")
+                logger.info(f"❌ 删除已存在的临时文件夹失败: {temp_folder}")
                 # 使用不同的临时文件夹名称
                 temp_folder = folder_path / f"{folder_path.name}_temp_{int(time())}"
         
@@ -955,7 +957,7 @@ def zip_scattered_images(folder_path: Path, image_files: List[Path], handler: Ri
             try:
                 shutil.copy2(file, temp_folder / file.name)
             except Exception as e:
-                handler.add_error_log(f"❌ 复制文件失败 {file}: {e}")
+                logger.info(f"❌ 复制文件失败 {file}: {e}")
                 # 清理并返回错误
                 cmd_delete(str(temp_folder), is_directory=True)
                 return CompressionResult(False, error_message=f"复制文件失败: {str(e)}")
@@ -969,7 +971,7 @@ def zip_scattered_images(folder_path: Path, image_files: List[Path], handler: Ri
         
         # 删除临时文件夹
         if not cmd_delete(str(temp_folder), is_directory=True):
-            handler.add_error_log(f"❌ 无法删除临时文件夹 {temp_folder}")
+            logger.info(f"❌ 无法删除临时文件夹 {temp_folder}")
         
         # 如果压缩成功，删除原始图片文件
         if result.returncode == 0:
@@ -978,16 +980,16 @@ def zip_scattered_images(folder_path: Path, image_files: List[Path], handler: Ri
                 if file.exists():
                     if not cmd_delete(str(file)):
                         delete_failures.append(str(file))
-                        handler.add_error_log(f"❌ 删除原始文件失败 {file}")
+                        logger.info(f"❌ 删除原始文件失败 {file}")
             
             if delete_failures:
                 # 如果有删除失败的文件，尝试批量删除
                 try:
                     files_list = '" "'.join(delete_failures)
                     if not cmd_delete(f'"{files_list}"'):
-                        handler.add_error_log(f"❌ 批量删除失败: {files_list}")
+                        logger.info(f"❌ 批量删除失败: {files_list}")
                 except Exception as e:
-                    handler.add_error_log(f"❌ 批量删除命令执行失败: {e}")
+                    logger.info(f"❌ 批量删除命令执行失败: {e}")
             
             if zip_path.exists():
                 compressed_size = zip_path.stat().st_size
@@ -1000,101 +1002,101 @@ def zip_scattered_images(folder_path: Path, image_files: List[Path], handler: Ri
             cmd_delete(str(temp_folder), is_directory=True)
         return CompressionResult(False, error_message=f"Error: {str(e)}")
 
-def ensure_file_access(file_path: Path, handler: RichProgressHandler) -> bool:
+def ensure_file_access(file_path: Path) -> bool:
     """
     确保文件可访问，通过修改文件权限和清除只读属性
     """
-    handler.add_log(f"🔍 开始处理文件权限: {file_path}")
+    logger.info(f"🔍 开始处理文件权限: {file_path}")
     try:
         if not file_path.exists():
-            handler.add_error_log(f"❌ 文件不存在: {file_path}")
+            logger.info(f"❌ 文件不存在: {file_path}")
             return False
             
         # 检查文件当前权限
         try:
             current_mode = file_path.stat().st_mode
-            handler.add_log(f"📝 当前文件权限: {current_mode:o}")
+            logger.info(f"📝 当前文件权限: {current_mode:o}")
             
             # 检查是否为只读
             is_readonly = not bool(current_mode & stat.S_IWRITE)
-            handler.add_log(f"🔒 文件是否只读: {is_readonly}")
+            logger.info(f"🔒 文件是否只读: {is_readonly}")
             
             if is_readonly:
                 file_path.chmod(current_mode | stat.S_IWRITE)
-                handler.add_log("✅ 已清除只读属性")
+                logger.info("✅ 已清除只读属性")
         except Exception as e:
-            handler.add_warning_log(f"⚠️ 检查/修改文件属性失败: {file_path}, 错误: {str(e)}")
+            logger.info(f"⚠️ 检查/修改文件属性失败: {file_path}, 错误: {str(e)}")
         
         try:
             # 获取当前进程的句柄
-            handler.add_log("🔄 尝试获取进程句柄...")
+            logger.info("🔄 尝试获取进程句柄...")
             ph = win32api.GetCurrentProcess()
-            handler.add_log(f"✅ 成功获取进程句柄: {ph}")
+            logger.info(f"✅ 成功获取进程句柄: {ph}")
             
             # 打开进程令牌
-            handler.add_log("🔄 尝试打开进程令牌...")
+            logger.info("🔄 尝试打开进程令牌...")
             th = win32security.OpenProcessToken(ph, win32con.TOKEN_QUERY)
-            handler.add_log("✅ 成功打开进程令牌")
+            logger.info("✅ 成功打开进程令牌")
             
             # 获取用户SID
-            handler.add_log("🔄 尝试获取用户SID...")
+            logger.info("🔄 尝试获取用户SID...")
             user = win32security.GetTokenInformation(th, win32security.TokenUser)
             user_sid = user[0]
-            handler.add_log(f"✅ 成功获取用户SID: {user_sid}")
+            logger.info(f"✅ 成功获取用户SID: {user_sid}")
             
             # 获取文件的安全描述符
-            handler.add_log("🔄 尝试获取文件安全描述符...")
+            logger.info("🔄 尝试获取文件安全描述符...")
             sd = win32security.GetFileSecurity(
                 str(file_path), 
                 win32security.DACL_SECURITY_INFORMATION
             )
-            handler.add_log("✅ 成功获取文件安全描述符")
+            logger.info("✅ 成功获取文件安全描述符")
             
             # 获取DACL
-            handler.add_log("🔄 尝试获取DACL...")
+            logger.info("🔄 尝试获取DACL...")
             dacl = sd.GetSecurityDescriptorDacl()
             if dacl is None:
-                handler.add_log("📝 DACL不存在，创建新的DACL")
+                logger.info("📝 DACL不存在，创建新的DACL")
                 dacl = win32security.ACL()
             else:
-                handler.add_log("✅ 成功获取现有DACL")
+                logger.info("✅ 成功获取现有DACL")
             
             # 添加完全控制权限
-            handler.add_log("🔄 尝试添加完全控制权限...")
+            logger.info("🔄 尝试添加完全控制权限...")
             dacl.AddAccessAllowedAce(
                 win32security.ACL_REVISION,
                 con.FILE_ALL_ACCESS | con.FILE_GENERIC_READ | con.FILE_GENERIC_WRITE,
                 user_sid
             )
-            handler.add_log("✅ 成功添加完全控制权限")
+            logger.info("✅ 成功添加完全控制权限")
             
             # 设置新的DACL
-            handler.add_log("🔄 尝试设置新的DACL...")
+            logger.info("🔄 尝试设置新的DACL...")
             sd.SetSecurityDescriptorDacl(1, dacl, 0)
             win32security.SetFileSecurity(
                 str(file_path),
                 win32security.DACL_SECURITY_INFORMATION,
                 sd
             )
-            handler.add_log("✅ 成功设置新的DACL")
+            logger.info("✅ 成功设置新的DACL")
             
             # 验证权限
             try:
                 # 尝试打开文件进行读写测试
                 with open(file_path, 'ab') as f:
                     pass
-                handler.add_log("✅ 权限验证成功：文件可以打开进行写入")
+                logger.info("✅ 权限验证成功：文件可以打开进行写入")
             except Exception as e:
-                handler.add_warning_log(f"⚠️ 权限验证失败：无法打开文件进行写入: {e}")
+                logger.info(f"⚠️ 权限验证失败：无法打开文件进行写入: {e}")
                 
         except Exception as e:
-            handler.add_warning_log(f"⚠️ 修改文件安全描述符失败: {file_path}, 错误: {str(e)}")
+            logger.info(f"⚠️ 修改文件安全描述符失败: {file_path}, 错误: {str(e)}")
             # 即使修改安全描述符失败，也继续尝试
             pass
             
         return True
     except Exception as e:
-        handler.add_error_log(f"❌ 修改文件权限失败: {file_path}, 错误: {str(e)}")
+        logger.info(f"❌ 修改文件权限失败: {file_path}, 错误: {str(e)}")
         return False
 
 def process_with_prompt(directories: List[Path]) -> None:
@@ -1132,41 +1134,40 @@ def process_with_prompt(directories: List[Path]) -> None:
     }
     
     # 在完成选择后，启动日志界面并处理文件
-    with RichProgressHandler() as handler:
-        for directory in directories:
-            handler.add_success_log(f"\n📂 开始处理目录: {directory}")
-            
-            if selected_options['move_unwanted']:
-                unwanted_target_path = directory / "[00不需要]"
-                unwanted_target_path.mkdir(exist_ok=True)
-                handler.add_success_log(f"📁 创建不需要文件存放目录: {unwanted_target_path}")
-                
-                handler.add_success_log("🔄 开始处理不需要的文件...")
-                moved_count, moved_size = move_unwanted_files(directory, unwanted_target_path, handler)
-                handler.add_success_log(f"✅ 已移动 {moved_count} 个文件，总大小: {moved_size/1024/1024:.2f}MB")
-            
-            if selected_options['organize_media']:
-                handler.add_success_log("🔄 开始整理媒体文件...")
-                media_count, media_size = organize_media_files(directory, directory, handler)
-                handler.add_success_log(f"✅ 已整理 {media_count} 个媒体文件，总大小: {media_size/1024/1024:.2f}MB")
-            
-            handler.add_success_log("🧹 清理空文件夹...")
-            delete_empty_folders(directory, handler)
-            
-            if selected_options['compress']:
-                exclude_keywords = [
-                    *BLACKLIST_KEYWORDS,  # 包含所有黑名单关键词
-                    *[k for k in MEDIA_TYPES.keys()]  # 包含所有媒体类型文件夹
-                ]
-                zip_paths = process_folders(str(directory), exclude_keywords, handler)
-                handler.add_success_log(f"✅ 已完成文件夹压缩，共处理 {len(zip_paths)} 个文件夹")
-
-            if selected_options['process_scattered']:
-                handler.add_success_log("\n🔍 开始查找和处理散图...")
-                processed_count = process_scattered_images_in_directory(directory, handler)
-                handler.add_success_log(f"✅ 散图处理完成，共处理 {processed_count} 个散图文件夹")
+    for directory in directories:
+        logger.info(f"\n📂 开始处理目录: {directory}")
         
-        handler.add_success_log("\n✨ 所有操作已完成")
+        if selected_options['move_unwanted']:
+            unwanted_target_path = directory / "[00不需要]"
+            unwanted_target_path.mkdir(exist_ok=True)
+            logger.info(f"📁 创建不需要文件存放目录: {unwanted_target_path}")
+            
+            logger.info("🔄 开始处理不需要的文件...")
+            moved_count, moved_size = move_unwanted_files(directory, unwanted_target_path)
+            logger.info(f"✅ 已移动 {moved_count} 个文件，总大小: {moved_size/1024/1024:.2f}MB")
+        
+        if selected_options['organize_media']:
+            logger.info("🔄 开始整理媒体文件...")
+            media_count, media_size = organize_media_files(directory, directory)
+            logger.info(f"✅ 已整理 {media_count} 个媒体文件，总大小: {media_size/1024/1024:.2f}MB")
+        
+        logger.info("🧹 清理空文件夹...")
+        delete_empty_folders(directory)
+        
+        if selected_options['compress']:
+            exclude_keywords = [
+                *BLACKLIST_KEYWORDS,  # 包含所有黑名单关键词
+                *[k for k in MEDIA_TYPES.keys()]  # 包含所有媒体类型文件夹
+            ]
+            zip_paths = process_folders(str(directory), exclude_keywords)
+            logger.info(f"✅ 已完成文件夹压缩，共处理 {len(zip_paths)} 个文件夹")
+
+        if selected_options['process_scattered']:
+            logger.info("\n🔍 开始查找和处理散图...")
+            processed_count = process_scattered_images_in_directory(directory)
+            logger.info(f"✅ 散图处理完成，共处理 {processed_count} 个散图文件夹")
+    
+    logger.info("\n✨ 所有操作已完成")
 
 def main():
     """主函数"""
