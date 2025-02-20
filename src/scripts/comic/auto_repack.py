@@ -271,7 +271,7 @@ def get_folder_size(folder_path: Path) -> int:
 
 def find_min_folder_with_images(base_path: Path, exclude_keywords: List[str]) -> Optional[Tuple[Path, bool, int]]:
     """
-    查找需要打包的文件夹
+    查找需要打包的文件夹（最小的只包含图片和忽略文件的子文件夹）
     返回: (文件夹路径, 是否需要特殊处理, 图片数量)
     """
     # 检查路径是否包含黑名单关键词
@@ -301,41 +301,46 @@ def find_min_folder_with_images(base_path: Path, exclude_keywords: List[str]) ->
     except Exception:
         return None
     
-    # 检查是否有子文件夹
-    if any(item.is_dir() for item in contents):
-        return None
-    
-    # 获取所有文件
+    # 获取所有文件和文件夹
     files = [f for f in contents if f.is_file()]
-    if not files:  # 空文件夹
+    subdirs = [d for d in contents if d.is_dir()]
+    
+    if not files and not subdirs:  # 空文件夹
         return None
     
     # 检查文件类型
     image_files = [f for f in files if f.suffix.lower() in IMAGE_EXTENSIONS]
-    zip_files = [f for f in files if f.suffix.lower() == '.zip']
-    media_files = []
-    for media_type in MEDIA_TYPES.values():
-        media_files.extend([f for f in files if any(f.suffix.lower() == ext for ext in media_type['extensions'])])
     unwanted_files = [f for f in files if f.suffix.lower() in UNWANTED_EXTENSIONS]
+    other_files = [f for f in files if f not in image_files and f not in unwanted_files]
     
-    # 计算有效文件（排除不需要的文件）
-    valid_files = [f for f in files if f.suffix.lower() not in UNWANTED_EXTENSIONS]
-    if not valid_files:  # 只包含不需要的文件
-        return None
-    
-    # 先检查是否是散图情况
-    is_scattered = False
-    if zip_files and len(image_files) >= 3:
-        is_scattered = True
-    
-    # 如果是散图文件夹，返回 None，让散图处理功能去处理它
-    if is_scattered:
-        logger.info(f"跳过散图文件夹: {base_path}")
-        return None
-    
-    # 如果包含其他有效文件（非图片、非压缩包、非不需要的文件），则作为普通文件夹打包
-    if valid_files:
+    # 如果当前文件夹只包含图片和忽略文件，且没有其他文件
+    if image_files and not other_files:
+        # 如果有子文件夹，递归检查子文件夹
+        if subdirs:
+            min_folders = []
+            for subdir in subdirs:
+                result = find_min_folder_with_images(subdir, exclude_keywords)
+                if result:
+                    min_folders.append(result)
+            
+            # 如果找到了符合条件的子文件夹，返回其中图片数量最多的
+            if min_folders:
+                return max(min_folders, key=lambda x: x[2])
+            
+        # 如果没有子文件夹或子文件夹都不符合条件，返回当前文件夹
         return base_path, False, len(image_files)
+    
+    # 如果当前文件夹包含其他文件，递归检查子文件夹
+    if subdirs:
+        min_folders = []
+        for subdir in subdirs:
+            result = find_min_folder_with_images(subdir, exclude_keywords)
+            if result:
+                min_folders.append(result)
+        
+        # 如果找到了符合条件的子文件夹，返回其中图片数量最多的
+        if min_folders:
+            return max(min_folders, key=lambda x: x[2])
     
     return None
 
