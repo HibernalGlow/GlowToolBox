@@ -213,24 +213,37 @@ class TextualLogHandler(logging.Handler):
                 msg
             )
             
+            # 检查是否是真正的进度条（同时包含@和%）
+            is_real_progress = '@' in msg and ('%' in msg 
+                                            #    or '/100' in msg
+                                               )
+            
             # 修正分组索引错误
             progress_match = re.match(r'^\[@(\w+)\](.*)$', msg)  # 简化正则
             normal_match = re.match(r'^\[#(\w+)\](.*)$', msg)    # 简化正则
             
-            if progress_match:
+            if progress_match and is_real_progress:
+                # 真正的进度条
                 panel_name = progress_match.group(1)
-                content = progress_match.group(2).strip()  # 直接取第二个分组
+                content = progress_match.group(2).strip()
                 self.app.update_panel(panel_name, content)
-                
-            elif normal_match:
-                panel_name = normal_match.group(1)
-                content = normal_match.group(2).strip()  # 直接取第二个分组
+            elif progress_match and not is_real_progress:
+                # 错误使用@的面板，转为普通面板处理
+                panel_name = progress_match.group(1)
+                content = progress_match.group(2).strip()
                 if record.levelno >= logging.ERROR:
                     content = f"❌ {content}"
                 elif record.levelno >= logging.WARNING:
                     content = f"⚠️ {content}"
                 self.app.update_panel(panel_name, content)
-                
+            elif normal_match:
+                panel_name = normal_match.group(1)
+                content = normal_match.group(2).strip()
+                if record.levelno >= logging.ERROR:
+                    content = f"❌ {content}"
+                elif record.levelno >= logging.WARNING:
+                    content = f"⚠️ {content}"
+                self.app.update_panel(panel_name, content)
             else:
                 if record.levelno >= logging.ERROR:
                     self.app.update_panel("update", f"❌ {msg}")
