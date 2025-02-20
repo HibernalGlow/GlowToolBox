@@ -1115,111 +1115,146 @@ class ArchiveProcessor:
     def process_single_archive(self, archive_path: str, timestamp: str) -> bool:
         """处理单个压缩文件"""
         try:
-            # 检查是否存在YAML文件并转换为JSON
-            json_data = ArchiveHandler.convert_yaml_archive_to_json(archive_path)
-            if json_data:
-                logger.info(f"[#process]检测到YAML文件: {os.path.basename(archive_path)}")
-                logger.info(f"[#process]YAML转换完成: {os.path.basename(archive_path)}")
-                return True  # 如果是YAML转换流程,完成后直接返回
-            
             # 获取文件信息
             artist_name = PathHandler.get_artist_name(self.target_directory, archive_path, args.mode if hasattr(args, 'mode') else 'multi')
             archive_name = os.path.basename(archive_path)
             relative_path = PathHandler.get_relative_path(self.target_directory, archive_path)
             
-            # 检查是否已存在UUID JSON文件
-            json_uuid = ArchiveHandler.load_json_uuid_from_archive(archive_path)
-            if json_uuid:
-                # 验证JSON文件内容
+            # 检查压缩包中的所有JSON文件
+            valid_json_files = []
+            try:
+                with zipfile.ZipFile(archive_path, 'r') as zf:
+                    for name in zf.namelist():
+                        if name.endswith('.json'):
+                            try:
+                                with zf.open(name) as f:
+                                    json_content = orjson.loads(f.read())
+                                    # 检查是否是我们的UUID记录文件
+                                    if "uuid" in json_content and "timestamps" in json_content:
+                                        valid_json_files.append((name, json_content))
+                            except Exception:
+                                continue
+            except zipfile.BadZipFile:
+                # 如果不是zip文件，使用7z
                 try:
-                    with zipfile.ZipFile(archive_path, 'r') as zf:
-                        with zf.open(f"{json_uuid}.json") as f:
-                            json_content = orjson.loads(f.read())
-                            # 检查是否是我们的UUID记录文件
-                            if "uuid" in json_content:
-                                # 检查是否需要更新
-                                if JsonHandler.check_and_update_record(json_content, archive_name, artist_name, relative_path, timestamp):
-                                    logger.info(f"[#process]检测到记录需要更新: {os.path.basename(archive_path)}")
-                                    # 更新记录
-                                    json_content = JsonHandler.update_record(json_content, archive_name, artist_name, relative_path, timestamp)
-                                    # 创建临时文件并更新压缩包
-                                    temp_dir = os.path.join(os.path.dirname(archive_path), '.temp_update')
-                                    os.makedirs(temp_dir, exist_ok=True)
-                                    try:
-                                        temp_json = os.path.join(temp_dir, f"{json_uuid}.json")
-                                        if JsonHandler.save(temp_json, json_content):
-                                            # 更新压缩包中的JSON
-                                            try:
-                                                with zipfile.ZipFile(archive_path, 'a') as zf:
-                                                    zf.write(temp_json, f"{json_uuid}.json")
-                                                logger.info(f"[#update]✅ 已更新压缩包中的JSON记录: {archive_name}")
-                                            except Exception:
-                                                subprocess.run(
-                                                    ['7z', 'u', archive_path, temp_json],
-                                                    stdout=subprocess.DEVNULL,
-                                                    stderr=subprocess.DEVNULL,
-                                                    check=True
-                                                )
-                                                logger.info(f"[#update]✅ 已更新压缩包中的JSON记录: {archive_name}")
-                                    finally:
-                                        shutil.rmtree(temp_dir, ignore_errors=True)
-                                else:
-                                    logger.info(f"[#process]记录无需更新: {os.path.basename(archive_path)}")
-                                return True
-                            else:
-                                logger.info(f"[#process]压缩包中的JSON不是UUID记录，将创建新记录: {os.path.basename(archive_path)}")
-                except Exception:
-                    logger.info(f"[#process]压缩包中的JSON无法读取或格式不正确，将创建新记录: {os.path.basename(archive_path)}")
+                    temp_dir = os.path.join(os.path.dirname(archive_path), '.temp_extract')
+                    os.makedirs(temp_dir, exist_ok=True)
+                    try:
+                        subprocess.run(
+                            ['7z', 'e', archive_path, '*.json', f"-o{temp_dir}"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            check=True
+                        )
+                        for file in os.listdir(temp_dir):
+                            if file.endswith('.json'):
+                                try:
+                                    with open(os.path.join(temp_dir, file), 'rb') as f:
+                                        json_content = orjson.loads(f.read())
+                                        if "uuid" in json_content and "timestamps" in json_content:
+                                            valid_json_files.append((file, json_content))
+                                except Exception:
+                                    continue
+                    finally:
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+                except subprocess.CalledProcessError:
+                    pass
             
-            # 获取或创建新的UUID
-            uuid_value = UuidHandler.generate_uuid(UuidHandler.load_existing_uuids())
-            json_filename = f"{uuid_value}.json"
-            
-            logger.info(f"[#current_stats]处理文件: {archive_name}")
-            logger.info(f"[#current_stats]艺术家: {artist_name}")
-            logger.info(f"[#current_stats]相对路径: {relative_path}")
-            
-            # 获取按年月日分层的目录路径
-            day_dir = PathHandler.get_uuid_path(self.uuid_directory, timestamp)
-            json_path = os.path.join(day_dir, json_filename)
-            
-            # 准备新的记录数据
-            new_record = {
-                "archive_name": archive_name,
-                "artist_name": artist_name,
-                "relative_path": relative_path
-            }
-            
-            # 创建新的JSON文件
-            json_data = {
-                "uuid": uuid_value,
-                "timestamps": {
-                    timestamp: new_record
-                }
-            }
-            
-            # 保存JSON文件
-            if JsonHandler.save(json_path, json_data):
-                logger.info(f"[#process]创建新JSON: {json_filename}")
-                logger.info(f"[#update]✅ 已更新JSON文件: {json_filename}")
-                
-                # 添加JSON到压缩包
+            # 检查是否有YAML文件
+            has_yaml = False
+            try:
+                with zipfile.ZipFile(archive_path, 'r') as zf:
+                    has_yaml = any(name.endswith('.yaml') for name in zf.namelist())
+            except zipfile.BadZipFile:
+                # 如果不是zip文件，使用7z
                 try:
-                    with zipfile.ZipFile(archive_path, 'a') as zf:
-                        zf.write(json_path, json_filename)
-                    logger.info(f"[#update]✅ 已添加JSON到压缩包: {archive_name}")
-                except Exception:
-                    # 如果不是zip文件，使用7z
-                    subprocess.run(
-                        ['7z', 'a', archive_path, json_path],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
+                    result = subprocess.run(
+                        ['7z', 'l', archive_path],
+                        capture_output=True,
+                        text=True,
+                        encoding='gbk',
+                        errors='ignore',
                         check=True
                     )
-                    logger.info(f"[#update]✅ 已添加JSON到压缩包: {archive_name}")
-            else:
-                logger.error(f"[#process]JSON文件保存失败: {archive_name}")
+                    has_yaml = any(line.endswith('.yaml') for line in result.stdout.splitlines())
+                except subprocess.CalledProcessError:
+                    pass
+            
+            # 处理逻辑
+            if len(valid_json_files) == 1 and not has_yaml:
+                # 只有一个符合数据结构的JSON文件
+                json_name, json_content = valid_json_files[0]
+                uuid_value = json_content["uuid"]
                 
+                # 检查是否需要更新
+                if JsonHandler.check_and_update_record(json_content, archive_name, artist_name, relative_path, timestamp):
+                    logger.info(f"[#process]检测到记录需要更新: {os.path.basename(archive_path)}")
+                    # 更新记录
+                    json_content = JsonHandler.update_record(json_content, archive_name, artist_name, relative_path, timestamp)
+                    # 创建临时文件并更新压缩包
+                    temp_dir = os.path.join(os.path.dirname(archive_path), '.temp_update')
+                    os.makedirs(temp_dir, exist_ok=True)
+                    try:
+                        temp_json = os.path.join(temp_dir, json_name)
+                        if JsonHandler.save(temp_json, json_content):
+                            # 更新压缩包中的JSON
+                            if ArchiveHandler.add_json_to_archive(archive_path, temp_json, json_name):
+                                logger.info(f"[#update]✅ 已更新压缩包中的JSON记录: {archive_name}")
+                    finally:
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+                else:
+                    logger.info(f"[#process]记录无需更新: {os.path.basename(archive_path)}")
+                return True
+            
+            else:
+                # 有YAML文件或多个JSON文件，删除所有相关文件并创建新记录
+                files_to_delete = []
+                if has_yaml:
+                    try:
+                        with zipfile.ZipFile(archive_path, 'r') as zf:
+                            files_to_delete.extend(name for name in zf.namelist() if name.endswith('.yaml'))
+                    except zipfile.BadZipFile:
+                        pass
+                
+                files_to_delete.extend(name for name, _ in valid_json_files)
+                
+                if files_to_delete:
+                    logger.info(f"[#process]删除现有文件: {os.path.basename(archive_path)}")
+                    ArchiveHandler.delete_files_from_archive(archive_path, files_to_delete)
+                
+                # 创建新的UUID记录
+                uuid_value = UuidHandler.generate_uuid(UuidHandler.load_existing_uuids())
+                json_filename = f"{uuid_value}.json"
+                
+                # 获取按年月日分层的目录路径
+                day_dir = PathHandler.get_uuid_path(self.uuid_directory, timestamp)
+                json_path = os.path.join(day_dir, json_filename)
+                
+                # 准备新的记录数据
+                new_record = {
+                    "archive_name": archive_name,
+                    "artist_name": artist_name,
+                    "relative_path": relative_path
+                }
+                
+                # 创建新的JSON文件
+                json_data = {
+                    "uuid": uuid_value,
+                    "timestamps": {
+                        timestamp: new_record
+                    }
+                }
+                
+                # 保存并添加新JSON文件
+                if JsonHandler.save(json_path, json_data):
+                    logger.info(f"[#process]创建新JSON: {json_filename}")
+                    if ArchiveHandler.add_json_to_archive(archive_path, json_path, json_filename):
+                        logger.info(f"[#update]✅ 已添加新JSON到压缩包: {archive_name}")
+                    else:
+                        logger.error(f"[#process]添加JSON到压缩包失败: {archive_name}")
+                else:
+                    logger.error(f"[#process]JSON文件保存失败: {archive_name}")
+            
             return True
 
         except subprocess.CalledProcessError:
