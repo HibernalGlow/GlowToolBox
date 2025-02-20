@@ -754,11 +754,23 @@ def process_single_archive(archive_path, target_directory, uuid_directory, times
             logger.info(f"[#process]YAML转换完成: {os.path.basename(archive_path)}")
             return True  # 如果是YAML转换流程,完成后直接返回
         
-        # 检查是否已存在JSON文件
+        # 检查是否已存在UUID JSON文件
         json_uuid = ArchiveHandler.load_json_uuid_from_archive(archive_path)
         if json_uuid:
-            logger.info(f"[#process]已存在JSON文件: {os.path.basename(archive_path)}")
-            return True
+            # 验证JSON文件内容
+            try:
+                with zipfile.ZipFile(archive_path, 'r') as zf:
+                    with zf.open(f"{json_uuid}.json") as f:
+                        json_content = orjson.loads(f.read())
+                        # 检查是否是我们的UUID记录文件
+                        if "uuid" in json_content and "timestamps" in json_content:
+                            logger.info(f"[#process]已存在UUID记录: {os.path.basename(archive_path)}")
+                            return True
+                        else:
+                            logger.info(f"[#process]压缩包中的JSON不是UUID记录，将创建新记录: {os.path.basename(archive_path)}")
+            except Exception:
+                # 如果读取失败，说明可能不是我们的JSON文件
+                logger.info(f"[#process]压缩包中的JSON无法读取或格式不正确，将创建新记录: {os.path.basename(archive_path)}")
         
         # 获取或创建新的UUID
         uuid_value = generate_uuid(load_existing_uuids())
