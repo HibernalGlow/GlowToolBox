@@ -1302,13 +1302,56 @@ class TaskExecutor:
         self.args = args
         self.target_directory = target_directory
         self.max_workers = min(32, (multiprocessing.cpu_count() * 4) + 1)
+        self.confirmed_artists = set()
+
+    def _confirm_artists(self):
+        """确认画师信息"""
+        print("\n正在扫描画师信息...")
+        artists = set()
+        
+        # 扫描所有压缩文件以获取画师信息
+        for root, _, files in os.walk(self.target_directory):
+            for file in files:
+                if file.endswith(('.zip', '.rar', '.7z')):
+                    archive_path = os.path.join(root, file)
+                    artist = get_artist_name(self.target_directory, archive_path, self.args.mode)
+                    if artist:
+                        artists.add(artist)
+        
+        # 显示画师信息并等待确认
+        if self.args.mode == 'single':
+            if len(artists) > 1:
+                print("\n⚠️ 警告：在单人模式下检测到多个画师名称：")
+                for i, artist in enumerate(sorted(artists), 1):
+                    print(f"{i}. {artist}")
+                print("\n请确认这是否符合预期？如果不符合，请检查目录结构。")
+            elif len(artists) == 1:
+                print(f"\n检测到画师: {next(iter(artists))}")
+            else:
+                print("\n⚠️ 警告：未检测到画师名称！")
+            
+            input("\n按回车键继续...")
+            
+        else:  # 多人模式
+            print(f"\n共检测到 {len(artists)} 个画师目录：")
+            for i, artist in enumerate(sorted(artists), 1):
+                print(f"{i}. {artist}")
+            
+            input("\n按回车键继续...")
+        
+        self.confirmed_artists = artists
 
     def execute_tasks(self):
         """执行所有任务"""
-        # 初始化日志系统
+        # 首先确认画师信息
+        self._confirm_artists()
+        
+        # 然后初始化日志系统
         init_TextualLogger()
         
         logger.info(f"[#current_stats]当前模式: {'多人模式' if self.args.mode == 'multi' else '单人模式'}")
+        if self.confirmed_artists:
+            logger.info(f"[#current_stats]已确认画师: {', '.join(sorted(self.confirmed_artists))}")
 
         if self.args.convert:
             self._execute_convert_task()
