@@ -117,16 +117,18 @@ class TextualLoggerManager:
             root_logger = logging.getLogger()
             root_logger.setLevel(logging.DEBUG)  # 改为使用调用方的日志级别
 
-            # 仅移除Textual自己的处理器（如果存在）
-            for handler in root_logger.handlers[:]:
-                if isinstance(handler, TextualLogHandler):
-                    root_logger.removeHandler(handler)
+            # 检查是否已存在 TextualLogHandler
+            has_textual_handler = any(
+                isinstance(handler, TextualLogHandler) 
+                for handler in root_logger.handlers
+            )
 
-            # 添加Textual处理器（保留调用方已有的处理器）
-            textual_handler = TextualLogHandler(cls._app)
-            textual_handler.setFormatter(logging.Formatter('%(message)s'))
-            textual_handler.setLevel(logging.INFO)  # 设置适当级别
-            root_logger.addHandler(textual_handler)
+            # 只在没有 TextualLogHandler 时添加新的处理器
+            if not has_textual_handler:
+                textual_handler = TextualLogHandler(cls._app)
+                textual_handler.setFormatter(logging.Formatter('%(message)s'))
+                textual_handler.setLevel(logging.INFO)
+                root_logger.addHandler(textual_handler)
             
             # 异步运行应用
             async def run_app():
@@ -905,4 +907,4 @@ if __name__ == "__main__":
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        pass 
+        pass
