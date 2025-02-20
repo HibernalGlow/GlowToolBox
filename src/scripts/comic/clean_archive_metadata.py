@@ -13,6 +13,17 @@ from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn
 from rich.prompt import Prompt
 from rich.console import Console
 from rich.logging import RichHandler
+import multiprocessing
+from datetime import datetime
+import py7zr
+import tempfile
+
+# 创建日志目录
+log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+os.makedirs(log_dir, exist_ok=True)
+
+# 生成日志文件名
+log_file = os.path.join(log_dir, f'clean_archive_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
 
 # 配置rich控制台
 console = Console()
@@ -20,10 +31,17 @@ console = Console()
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
-    format="%(message)s",
-    handlers=[RichHandler(console=console, rich_tracebacks=True)]
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        RichHandler(console=console, rich_tracebacks=True),
+        logging.FileHandler(log_file, encoding='utf-8')
+    ]
 )
 logger = logging.getLogger(__name__)
+
+# 记录启动信息
+logger.info("程序启动")
+logger.info(f"日志文件保存在: {log_file}")
 
 class ArchiveCleaner:
     """压缩包清理类"""
@@ -34,7 +52,8 @@ class ArchiveCleaner:
         try:
             with zipfile.ZipFile(archive_path, 'r') as zf:
                 return zf.namelist()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"使用zipfile读取失败: {e}，尝试使用7z")
             try:
                 result = subprocess.run(
                     ['7z', 'l', archive_path],
@@ -52,8 +71,8 @@ class ArchiveCleaner:
                             if len(parts) >= 5:
                                 files.append(parts[-1])
                     return files
-            except subprocess.CalledProcessError:
-                pass
+            except subprocess.CalledProcessError as e:
+                logger.error(f"使用7z读取失败: {e}")
         return []
 
     @staticmethod
@@ -71,136 +90,87 @@ class ArchiveCleaner:
 
     @staticmethod
     def delete_files_from_archive(archive_path: str, files_to_delete: List[str]) -> bool:
-        """从压缩包中删除指定文件，使用多种方法尝试删除"""
+        """使用BandZip命令行删除文件"""
         if not files_to_delete:
             return True
 
-        success = False
         archive_name = os.path.basename(archive_path)
-        temp_dir = os.path.join(os.path.dirname(archive_path), '.temp_clean')
-        temp_archive = os.path.join(temp_dir, f"temp_{archive_name}")
+        logger.info(f"开始处理压缩包: {archive_name}")
+        logger.info(f"需要删除的文件: {files_to_delete}")
 
         try:
-            # 方法1: 使用zipfile直接删除
-            try:
-                with zipfile.ZipFile(archive_path, 'a') as zf:
-                    for file in files_to_delete:
-                        try:
-                            zf.remove(file)
-                            logger.info(f"[删除-方法1] {archive_name} -> {file}")
-                        except KeyError:
-                            pass
-                success = True
-            except Exception as e:
-                logger.debug(f"方法1失败: {e}")
+            # 备份原文件
+            backup_path = archive_path + ".bak"
+            shutil.copy2(archive_path, backup_path)
+            logger.info(f"[备份] 创建原文件备份: {backup_path}")
 
-            if not success:
-                # 方法2: 使用7z删除，先尝试通配符
+            # 使用BandZip删除文件
+            deleted_count = 0
+            for file in files_to_delete:
                 try:
-                    # 创建临时目录
-                    os.makedirs(temp_dir, exist_ok=True)
-                    
-                    # 尝试使用通配符删除
-                    patterns = ['*.yaml', '*.json']
-                    for pattern in patterns:
-                        try:
-                            subprocess.run(
-                                ['7z', 'd', archive_path, pattern],
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                                check=True
-                            )
-                            logger.info(f"[删除-方法2] {archive_name} -> {pattern}")
-                        except subprocess.CalledProcessError:
-                            pass
-
-                    # 再逐个删除具体文件
-                    for file in files_to_delete:
-                        try:
-                            subprocess.run(
-                                ['7z', 'd', archive_path, file],
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                                check=True
-                            )
-                            logger.info(f"[删除-方法2] {archive_name} -> {file}")
-                        except subprocess.CalledProcessError:
-                            continue
-                    success = True
-                except Exception as e:
-                    logger.debug(f"方法2失败: {e}")
-
-            if not success:
-                # 方法3: 创建新的压缩包，排除要删除的文件
-                try:
-                    # 创建临时目录
-                    os.makedirs(temp_dir, exist_ok=True)
-                    
-                    # 提取所有文件
-                    subprocess.run(
-                        ['7z', 'x', archive_path, f"-o{temp_dir}"],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        check=True
+                    # 使用BandZip的bz命令删除文件
+                    result = subprocess.run(
+                        [
+                            'bz', 'd',          # 删除命令
+                            archive_path,        # 压缩包路径
+                            file,               # 要删除的文件
+                            '/q',               # 安静模式
+                            '/y',               # 自动确认
+                            '/utf8'             # 使用UTF-8编码
+                        ],
+                        capture_output=True,
+                        text=True,
+                        encoding='utf-8',
+                        errors='ignore'
                     )
-                    
-                    # 删除要删除的文件
-                    for file in files_to_delete:
-                        file_path = os.path.join(temp_dir, file)
-                        try:
-                            if os.path.exists(file_path):
-                                os.remove(file_path)
-                                logger.info(f"[删除-方法3] {archive_name} -> {file}")
-                        except Exception:
-                            pass
-                    
-                    # 创建新的压缩包
-                    subprocess.run(
-                        ['7z', 'a', temp_archive, f"{temp_dir}\\*"],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        check=True
-                    )
-                    
-                    # 替换原始文件
-                    shutil.move(temp_archive, archive_path)
-                    success = True
-                except Exception as e:
-                    logger.debug(f"方法3失败: {e}")
 
-            if not success:
-                # 方法4: 使用zip命令行工具
-                try:
-                    # 创建排除文件列表
-                    exclude_file = os.path.join(temp_dir, "exclude.txt")
-                    with open(exclude_file, 'w', encoding='utf-8') as f:
-                        for file in files_to_delete:
-                            f.write(f"{file}\n")
-                    
-                    # 使用zip命令删除文件
-                    subprocess.run(
-                        ['zip', '-d', archive_path, '@' + exclude_file],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        check=True
-                    )
-                    success = True
-                    logger.info(f"[删除-方法4] {archive_name} -> 批量删除完成")
-                except Exception as e:
-                    logger.debug(f"方法4失败: {e}")
+                    # 检查是否成功
+                    if result.returncode == 0:
+                        deleted_count += 1
+                        logger.info(f"[删除成功] {file}")
+                    else:
+                        logger.warning(f"删除失败: {file}")
+                        logger.debug(f"BandZip输出: {result.stdout}\n{result.stderr}")
 
-            return success
+                except Exception as e:
+                    logger.error(f"删除文件失败 {file}: {e}")
+
+            # 检查是否有文件被删除
+            if deleted_count == 0:
+                logger.warning("未成功删除任何文件")
+                # 恢复备份
+                if os.path.exists(backup_path):
+                    shutil.copy2(backup_path, archive_path)
+                    logger.info("[恢复] 从备份恢复原文件")
+                return False
+
+            logger.info(f"[完成] 成功删除了 {deleted_count} 个文件")
+            
+            # 删除备份
+            if os.path.exists(backup_path):
+                os.remove(backup_path)
+            
+            return True
 
         except Exception as e:
-            logger.error(f"所有删除方法都失败 {archive_name}: {e}")
-            return False
-        finally:
-            # 清理临时文件
-            if os.path.exists(temp_dir):
+            logger.error(f"处理过程中发生错误: {e}")
+            # 恢复备份
+            if os.path.exists(backup_path):
                 try:
-                    shutil.rmtree(temp_dir)
-                except Exception:
-                    pass
+                    shutil.copy2(backup_path, archive_path)
+                    logger.info("[恢复] 从备份恢复原文件")
+                except Exception as e:
+                    logger.error(f"恢复备份失败: {e}")
+            return False
+
+        finally:
+            # 确保删除备份文件
+            if os.path.exists(backup_path):
+                try:
+                    os.remove(backup_path)
+                    logger.debug("[清理] 删除备份文件")
+                except Exception as e:
+                    logger.error(f"删除备份文件失败: {e}")
 
     @staticmethod
     def process_archive(archive_path: str) -> None:
@@ -208,24 +178,37 @@ class ArchiveCleaner:
         try:
             yaml_files, json_files = ArchiveCleaner.analyze_archive(archive_path)
             
-            # 如果没有YAML文件，则跳过处理
-            if not yaml_files:
+            # 如果没有需要删除的文件，则跳过处理
+            if not yaml_files and not json_files:
+                logger.debug(f"跳过处理 {os.path.basename(archive_path)}: 未找到需要删除的文件")
                 return
             
-            # 删除所有YAML文件
-            yaml_file_names = [f for f, _ in yaml_files]
-            if ArchiveCleaner.delete_files_from_archive(archive_path, yaml_file_names):
-                for yaml_file in yaml_file_names:
-                    logger.info(f"[分析] {os.path.basename(archive_path)} - 删除YAML文件: {yaml_file}")
-                logger.info(f"[完成] {os.path.basename(archive_path)}")
+            # 合并所有需要删除的文件
+            files_to_delete = [f for f, _ in yaml_files]
+            files_to_delete.extend([f for f, _ in json_files if not f.endswith('meta.json')])
+            
+            if files_to_delete:
+                logger.info(f"找到需要删除的文件: YAML({len(yaml_files)}), JSON({len(json_files)})")
+                if ArchiveCleaner.delete_files_from_archive(archive_path, files_to_delete):
+                    logger.info(f"[完成] {os.path.basename(archive_path)}")
+                else:
+                    logger.error(f"[失败] {os.path.basename(archive_path)}")
             else:
-                logger.error(f"[失败] {os.path.basename(archive_path)}")
+                logger.debug(f"跳过处理 {os.path.basename(archive_path)}: 没有需要删除的文件")
             
         except Exception as e:
             logger.error(f"处理失败 {archive_path}: {e}")
 
-def process_directory(target_directory: str, max_workers: int = 4) -> None:
+def process_directory(target_directory: str, max_workers: int = None) -> None:
     """处理目录中的所有压缩包"""
+    # 如果没有指定线程数，则使用CPU核心数的2倍（因为是IO密集型任务）
+    if max_workers is None:
+        max_workers = multiprocessing.cpu_count() * 2
+    
+    # 记录处理信息
+    logger.info(f"开始处理目录: {target_directory}")
+    logger.info(f"使用线程数: {max_workers}")
+    
     # 收集所有压缩包
     console.print("[bold blue]正在扫描压缩包...[/]")
     archive_files = []
@@ -236,6 +219,10 @@ def process_directory(target_directory: str, max_workers: int = 4) -> None:
     
     total_files = len(archive_files)
     console.print(f"[bold green]找到 {total_files} 个压缩包[/]")
+    console.print(f"[bold blue]使用 {max_workers} 个线程进行处理[/]")
+    
+    # 记录扫描结果
+    logger.info(f"扫描完成，共找到 {total_files} 个压缩包")
     
     if total_files == 0:
         console.print("[bold red]没有找到需要处理的压缩包[/]")
@@ -298,7 +285,7 @@ def get_target_directory(args) -> str:
         while True:
             target_directory = Prompt.ask(
                 "[bold cyan]请输入要处理的目录路径[/]",
-                default=r"E:\2EHV"
+                default=r"E:\1EHV"
             )
             target_directory = target_directory.strip().strip('"')
             
@@ -308,16 +295,27 @@ def get_target_directory(args) -> str:
                 console.print("[bold red]输入的路径无效，请重新输入[/]")
 
 def main():
-    parser = argparse.ArgumentParser(description='清理压缩包中的元数据文件')
-    parser.add_argument('-c', '--clipboard', action='store_true', help='从剪贴板读取路径')
-    parser.add_argument('--path', help='要处理的路径')
-    args = parser.parse_args()
-    
-    # 获取目标目录
-    target_directory = get_target_directory(args)
-    
-    # 处理目录
-    process_directory(target_directory)
+    try:
+        parser = argparse.ArgumentParser(description='清理压缩包中的元数据文件')
+        parser.add_argument('-c', '--clipboard', action='store_true', help='从剪贴板读取路径')
+        parser.add_argument('--path', help='要处理的路径')
+        parser.add_argument('-w', '--workers', type=int, help='线程数量（默认为CPU核心数的2倍）')
+        args = parser.parse_args()
+        
+        # 获取目标目录
+        target_directory = get_target_directory(args)
+        
+        # 处理目录
+        process_directory(target_directory, args.workers)
+        
+        # 记录完成信息
+        logger.info("程序执行完成")
+        console.print(f"[bold green]日志已保存到: {log_file}[/]")
+        
+    except Exception as e:
+        logger.exception("程序执行过程中发生错误")
+        console.print("[bold red]程序执行出错，详细信息请查看日志文件[/]")
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()
