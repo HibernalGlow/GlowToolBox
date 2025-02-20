@@ -581,10 +581,24 @@ class PathHandler:
             # 单人模式：直接使用目标目录的最后一个文件夹名作为画师名
             return Path(target_directory).name
         else:
-            # 多人模式：使用相对路径的第一个文件夹名作为画师名
-            archive_path = Path(archive_path)
-            relative_path = archive_path.relative_to(target_directory).parts
-            return relative_path[0] if len(relative_path) > 0 else ""
+            # 多人模式：使用相对路径的第一级子文件夹名作为画师名
+            try:
+                # 将路径转换为相对路径
+                archive_path = Path(archive_path)
+                target_path = Path(target_directory)
+                relative_path = archive_path.relative_to(target_path)
+                
+                # 获取第一级子文件夹名
+                parts = relative_path.parts
+                if len(parts) > 0:
+                    return parts[0]
+                    
+                logger.warning(f"[#process]无法从路径提取画师名: {archive_path}")
+                return ""
+                
+            except Exception as e:
+                logger.error(f"[#process]提取画师名失败: {str(e)}")
+                return ""
     
     @staticmethod
     def get_relative_path(target_directory: str, archive_path: str) -> str:
