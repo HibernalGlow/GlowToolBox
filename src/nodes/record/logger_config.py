@@ -56,7 +56,7 @@ def setup_logger(config=None):
         config: 配置字典，会覆盖默认配置
     
     Returns:
-        logging.Logger: 配置好的日志记录器
+        tuple: (logging.Logger, str) - 配置好的日志记录器和日志文件路径
     """
     # 合并配置
     cfg = DEFAULT_CONFIG.copy()
@@ -110,7 +110,7 @@ def setup_logger(config=None):
     for logger_name, level in cfg['disabled_loggers'].items():
         logging.getLogger(logger_name).setLevel(level)
 
-    return logger
+    return logger, log_file
 
 def demo_logger():
     """日志配置演示函数
@@ -126,10 +126,10 @@ def demo_logger():
     }
     
     # 初始化日志
-    logger = setup_logger(test_config)
+    logger, log_file = setup_logger(test_config)
     
     # 生成测试日志（在DEBUG日志中显示实际路径）
-    logger.debug(f"当前日志存储路径：{os.path.abspath(logger.handlers[0].baseFilename)}")
+    logger.debug(f"当前日志存储路径：{os.path.abspath(log_file)}")
     logger.info("这是一条INFO级别日志")
     logger.warning("这是一条WARNING级别日志")
     logger.error("这是一条ERROR级别日志")

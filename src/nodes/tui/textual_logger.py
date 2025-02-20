@@ -105,18 +105,19 @@ class TextualLoggerManager:
     }
     
     @classmethod
-    def set_layout(cls, layout_config=None):
+    def set_layout(cls, layout_config=None, log_file=None):
         """设置日志布局并启动应用
         
         Args:
             layout_config: 布局配置字典，格式如下：
             {
                 "panel_name": {
-                    "size": int,  # 面板大小
+                    "ratio": int,  # 面板比例
                     "title": str,  # 面板标题
                     "style": str   # 面板样式
                 }
             }
+            log_file: str, 可选，日志文件路径，如果提供则从文件读取日志
         """
         # 使用默认布局或自定义布局
         final_layout = layout_config or cls._default_layout
@@ -135,17 +136,19 @@ class TextualLoggerManager:
                     root_logger.removeHandler(handler)
 
             # 添加Textual处理器（保留调用方已有的处理器）
-            textual_handler = TextualLogHandler(cls._app)
+            textual_handler = TextualLogHandler(cls._app, log_file)
             textual_handler.setFormatter(logging.Formatter('%(message)s'))
             textual_handler.setLevel(logging.INFO)  # 设置适当级别
             root_logger.addHandler(textual_handler)
+            
+            # 注册处理器
+            cls._app.register_handler(textual_handler)
             
             # 异步运行应用
             async def run_app():
                 await cls._app.run_async()
             
             # 在新线程中运行应用
-            import threading
             app_thread = threading.Thread(target=lambda: asyncio.run(run_app()))
             app_thread.daemon = True
             app_thread.start()
@@ -156,15 +159,45 @@ class TextualLoggerManager:
         return cls._app
 
 class TextualLogHandler(logging.Handler):
-    """Textual日志处理器，用于劫持日志输出"""
+    """Textual日志处理器，支持日志文件读取"""
     
-    def __init__(self, app):
+    def __init__(self, app, log_file=None):
         super().__init__()
         self.app = app
         self.path_regex = re.compile(r'([A-Za-z]:\\[^\s]+|/([^\s/]+/){2,}[^\s/]+|\S+\.[a-zA-Z0-9]+)')
-        self.max_msg_length = 80  # 调整为更合理的长度
-        self.max_filename_length = 40  # 文件名最大长度
-        self.enable_truncate = False  # 默认不启用截断
+        self.max_msg_length = 80
+        self.max_filename_length = 40
+        self.enable_truncate = False
+        self.log_file = log_file
+        self.last_position = 0
+        self._file_check_timer = None
+
+    def _setup_file_watching(self):
+        """设置日志文件监控"""
+        if self.log_file and not self._file_check_timer:
+            self._file_check_timer = self.app.set_interval(0.1, self._check_log_file)
+
+    def _check_log_file(self):
+        """检查日志文件更新"""
+        if not self.log_file or not os.path.exists(self.log_file):
+            return
+
+        try:
+            with open(self.log_file, 'r', encoding='utf-8') as f:
+                f.seek(self.last_position)
+                new_lines = f.readlines()
+                if new_lines:
+                    for line in new_lines:
+                        line = line.strip()
+                        if line:
+                            self.emit(logging.makeLogRecord({
+                                'msg': line,
+                                'levelno': logging.INFO,
+                                'created': time.time()
+                            }))
+                self.last_position = f.tell()
+        except Exception as e:
+            print(f"Error reading log file: {e}")
 
     def set_truncate(self, enable: bool = False):
         """设置是否启用截断功能"""
@@ -772,12 +805,14 @@ class TextualLogger(App):
         self.layout_config = layout_config
         self.panels: Dict[str, LogPanel] = {}
         self._pending_updates = []
-        # 设置默认主题为tokyo-night
         self.theme = "tokyo-night"
-        # 获取调用脚本的名称
-        import sys
         self.script_name = os.path.basename(sys.argv[0])
         self.start_time = datetime.now()
+        self._handlers = []  # 存储处理器列表
+        
+    def register_handler(self, handler):
+        """注册日志处理器"""
+        self._handlers.append(handler)
         
     def compose(self) -> ComposeResult:
         """初始化界面布局"""
@@ -822,13 +857,18 @@ class TextualLogger(App):
     
     def on_mount(self) -> None:
         """初始化"""
-        self.title = self.script_name  # 设置初始标题为脚本名称
-        self.set_interval(1, self.update_timer)  # 添加定时器更新
+        self.title = self.script_name
+        self.set_interval(1, self.update_timer)
         
         # 处理待处理的更新
         for name, content in self._pending_updates:
             self._do_update(name, content)
         self._pending_updates.clear()
+        
+        # 初始化所有处理器的文件监控
+        for handler in self._handlers:
+            if isinstance(handler, TextualLogHandler):
+                handler._setup_file_watching()
         
         # 默认聚焦第一个面板
         first_panel = next(iter(self.panels.values()), None)
