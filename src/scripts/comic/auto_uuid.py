@@ -23,16 +23,45 @@ import win32con
 import numpy as np
 from nodes.record.logger_config import setup_logger
 from nodes.tui.textual_preset import create_config_app
+from nodes.tui.textual_logger import TextualLoggerManager
 import orjson  # 使用orjson进行更快的JSON处理
 import zipfile
 from typing import Dict, Any, Optional
 
-# 导入自定义日志模块
+# 定义日志布局配置
+TEXTUAL_LAYOUT = {
+    "current_stats": {
+        "ratio": 2,
+        "title": "📊 总体进度",
+        "style": "yellow"
+    },
+    "current_progress": {
+        "ratio": 2,
+        "title": "🔄 当前进度",
+        "style": "cyan"
+    },
+    "process": {
+        "ratio": 3,
+        "title": "📝 处理日志",
+        "style": "magenta"
+    },
+    "update": {
+        "ratio": 2,
+        "title": "ℹ️ 更新日志",
+        "style": "blue"
+    }
+}
+
+# 初始化日志配置
 config = {
     'script_name': 'comic_auto_uuid',
     'console_enabled': False
 }
 logger, config_info = setup_logger(config)
+
+def init_TextualLogger():
+    TextualLoggerManager.set_layout(TEXTUAL_LAYOUT, config_info['log_file'])
+
 # 初始化 colorama
 init()
 
@@ -353,8 +382,10 @@ def repair_uuid_records(uuid_record_path):
             with open(backup_path, 'r', encoding='utf-8') as file:
                 records = yaml.safe_load(file) or []
                 if isinstance(records, list):
+                    logger.info("[#process]从备份文件恢复记录成功")
                     return records
         except Exception:
+            logger.error("[#process]从备份文件恢复记录失败")
             pass
     
     # 尝试修复原文件
@@ -394,14 +425,15 @@ def repair_uuid_records(uuid_record_path):
                 if 'UUID' in record:
                     valid_records.append(record)
             
+            logger.info(f"[#process]成功修复记录文件，恢复了 {len(valid_records)} 条记录")
             return valid_records
     except Exception as e:
-        print(f"修复UUID记录文件失败: {e}")
+        logger.error(f"[#process]修复UUID记录文件失败: {e}")
         return []
 
 def load_existing_uuids():
     """从JSON记录中加载现有UUID"""
-    logging.info("🔍 开始加载现有UUID...")
+    logger.info("[#current_stats]🔍 开始加载现有UUID...")
     start_time = time.time()
     
     json_record_path = r'E:\1BACKUP\ehv\uuid\uuid_records.json'
@@ -414,11 +446,11 @@ def load_existing_uuids():
         uuids = set(records.keys())
         
         elapsed = time.time() - start_time
-        logging.info(f"✅ 加载完成！共加载 {len(uuids)} 个UUID，耗时 {elapsed:.2f} 秒")
+        logger.info(f"[#current_stats]✅ 加载完成！共加载 {len(uuids)} 个UUID，耗时 {elapsed:.2f} 秒")
         return uuids
         
     except Exception as e:
-        logging.error(f"加载UUID记录失败: {e}")
+        logger.error(f"[#process]加载UUID记录失败: {e}")
         return set()
 
 def add_uuid_to_file(uuid, timestamp, archive_name, artist_name, relative_path=None):
@@ -625,7 +657,7 @@ def update_yaml(yaml_path, artist_name, archive_name, relative_path, timestamp):
     if not data:
         new_uuid = generate_uuid(load_existing_uuids())
         create_yaml(yaml_path, artist_name, archive_name, relative_path, timestamp, new_uuid)
-        logging.info(f"✨ 创建新的YAML记录 [UUID: {new_uuid}]")
+        logger.info(f"✨ 创建新的YAML记录 [UUID: {new_uuid}]")
         return False
 
     if not isinstance(data, list) or not all(isinstance(record, dict) for record in data):
@@ -665,13 +697,13 @@ def update_yaml(yaml_path, artist_name, archive_name, relative_path, timestamp):
         changes_data['RelativePath'] = relative_path
     
     if changes:
-        logging.info(f"📝 {os.path.basename(archive_name)}\n    " + "\n    ".join(changes))
+        logger.info(f"📝 {os.path.basename(archive_name)}\n    " + "\n    ".join(changes))
 
     if not changes_data:
-        logging.info("✓ 未检测到变化")
+        logger.info("✓ 未检测到变化")
         return False
 
-    logging.info(f"🔄 检测到变化，添加新记录...")
+    logger.info(f"🔄 检测到变化，添加新记录...")
     new_record = {
         'Timestamp': timestamp,
         **changes_data
@@ -679,7 +711,7 @@ def update_yaml(yaml_path, artist_name, archive_name, relative_path, timestamp):
 
     data.append(new_record)
     write_yaml(yaml_path, data)
-    logging.info("✅ 成功更新YAML文件")
+    logger.info("✅ 成功更新YAML文件")
     return True
 
 def add_yaml_to_zip(yaml_path, archive_path):
@@ -699,10 +731,12 @@ def process_single_archive(archive_path, target_directory, uuid_directory, times
         # 检查是否存在YAML文件并转换为JSON
         yaml_uuid = ArchiveHandler.load_yaml_uuid_from_archive(archive_path)
         if yaml_uuid:
+            logger.info(f"[#process]检测到YAML文件: {os.path.basename(archive_path)}")
             json_data = ArchiveHandler.convert_yaml_archive_to_json(archive_path)
             if not json_data:
-                logger.error(f"转换YAML到JSON失败: {archive_path}")
+                logger.error(f"[#process]转换YAML到JSON失败: {archive_path}")
                 return True
+            logger.info(f"[#process]YAML转换完成: {os.path.basename(archive_path)}")
         
         # 获取或创建UUID
         uuid_value = yaml_uuid or generate_uuid(load_existing_uuids())
@@ -712,6 +746,10 @@ def process_single_archive(archive_path, target_directory, uuid_directory, times
         artist_name = get_artist_name(target_directory, archive_path)
         archive_name = os.path.basename(archive_path)
         relative_path = get_relative_path(target_directory, archive_path)
+        
+        logger.info(f"[#current_stats]处理文件: {archive_name}")
+        logger.info(f"[#current_stats]艺术家: {artist_name}")
+        logger.info(f"[#current_stats]相对路径: {relative_path}")
         
         # 获取按年月日分层的目录路径
         day_dir = get_uuid_path(uuid_directory, timestamp)
@@ -729,15 +767,17 @@ def process_single_archive(archive_path, target_directory, uuid_directory, times
             json_data = JsonHandler.load(json_path)
             if not json_data:
                 json_data = {"uuid": uuid_value, "timestamps": {}}
+            logger.info(f"[#process]更新现有JSON: {json_filename}")
         else:
             json_data = {"uuid": uuid_value, "timestamps": {}}
+            logger.info(f"[#process]创建新JSON: {json_filename}")
         
         # 添加新的时间戳记录
         json_data["timestamps"][timestamp] = new_record
         
         # 保存JSON文件
         if JsonHandler.save(json_path, json_data):
-            logger.info(f"✅ 已更新JSON文件: {json_filename}")
+            logger.info(f"[#update]✅ 已更新JSON文件: {json_filename}")
             
             # 确保JSON文件存在后再添加到压缩包
             try:
@@ -749,7 +789,7 @@ def process_single_archive(archive_path, target_directory, uuid_directory, times
                         pass
                     # 添加新的JSON文件
                     zf.write(json_path, json_filename)
-                logger.info(f"✅ 已添加JSON到压缩包: {archive_name}")
+                logger.info(f"[#update]✅ 已添加JSON到压缩包: {archive_name}")
             except Exception:
                 # 如果不是zip文件，使用7z
                 subprocess.run(
@@ -764,33 +804,29 @@ def process_single_archive(archive_path, target_directory, uuid_directory, times
                     stderr=subprocess.DEVNULL,
                     check=True
                 )
-                logger.info(f"✅ 已添加JSON到压缩包: {archive_name}")
+                logger.info(f"[#update]✅ 已添加JSON到压缩包: {archive_name}")
         else:
-            logger.error(f"JSON文件保存失败: {archive_name}")
+            logger.error(f"[#process]JSON文件保存失败: {archive_name}")
             
         return True
 
     except subprocess.CalledProcessError:
-        logger.error(f"发现损坏的压缩包: {archive_path}")
+        logger.error(f"[#process]发现损坏的压缩包: {archive_path}")
         return True
     except Exception as e:
-        logger.error(f"处理压缩包时出错 {archive_path}: {str(e)}")
+        logger.error(f"[#process]处理压缩包时出错 {archive_path}: {str(e)}")
         return True
 
 def warm_up_cache(target_directory, max_workers=32, handler=None):
     """并行预热系统缓存"""
-    return _warm_up_cache_internal(target_directory, max_workers)
-
-def _warm_up_cache_internal(target_directory, max_workers):
-    """预热缓存的内部实现"""
-    logging.info("🔄 开始预热系统缓存")
+    logger.info("[#current_stats]🔄 开始预热系统缓存")
     
     # 首先计算总文件数
     total_files = 0
     for root, _, files in os.walk(target_directory):
         total_files += sum(1 for file in files if file.endswith(('.zip', '.rar', '.7z')))
     
-    scan_task = logging.info("扫描文件")
+    logger.info("[#current_progress]扫描文件中...")
     archive_files = []
     current_count = 0
     for root, _, files in os.walk(target_directory):
@@ -798,40 +834,37 @@ def _warm_up_cache_internal(target_directory, max_workers):
             if file.endswith(('.zip', '.rar', '.7z')):
                 archive_files.append(os.path.join(root, file))
                 current_count += 1
-                logging.info("已扫描 %d 个文件", current_count)
+                logger.info(f"[@current_progress]已扫描 {current_count}/{total_files} 个文件 ({(current_count/total_files*100):.1f}%)")
     
-    logging.info(f"📊 找到 {total_files} 个文件待预热")
-    
-    warm_task = logging.info("预热缓存")
+    logger.info(f"[#current_stats]📊 找到 {total_files} 个文件待预热")
     
     def read_file_header_with_progress(file_path):
         try:
-            # 使用Windows API直接打开文件
             handle = win32file.CreateFile(
                 file_path,
                 win32con.GENERIC_READ,
                 win32con.FILE_SHARE_READ | win32con.FILE_SHARE_WRITE,
                 None,
                 win32con.OPEN_EXISTING,
-                win32con.FILE_FLAG_SEQUENTIAL_SCAN,  # 提示系统这是顺序读取
+                win32con.FILE_FLAG_SEQUENTIAL_SCAN,
                 None
             )
             try:
-                # 读取文件头部
                 win32file.ReadFile(handle, 32)
             finally:
                 handle.Close()
-            logging.info(f"✅ 已预热: {os.path.basename(file_path)}")
+            logger.info(f"[#process]✅ 已预热: {os.path.basename(file_path)}")
         except Exception as e:
-            logging.info(f"预热失败: {os.path.basename(file_path)} - {str(e)}")
-        finally:
-            logging.info( advance=1)
+            logger.error(f"[#process]预热失败: {os.path.basename(file_path)} - {str(e)}")
 
-    # 使用更多线程
     with ThreadPoolExecutor(max_workers=128) as executor:
-        executor.map(read_file_header_with_progress, archive_files)
-        
-    logging.info("✨ 缓存预热完成")
+        futures = [executor.submit(read_file_header_with_progress, file) for file in archive_files]
+        completed = 0
+        for future in as_completed(futures):
+            completed += 1
+            logger.info(f"[@current_progress]预热进度 {completed}/{total_files} ({(completed/total_files*100):.1f}%)")
+    
+    logger.info("[#current_stats]✨ 缓存预热完成")
 
 def process_archives(target_directory, max_workers=5, handler=None):
     """遍历目录中的压缩文件，生成或更新JSON文件。"""
@@ -846,9 +879,9 @@ def _process_archives_internal(target_directory, max_workers):
     uuid_directory = r'E:\1BACKUP\ehv\uuid'
     os.makedirs(uuid_directory, exist_ok=True)
 
-    logging.info("🔍 开始扫描压缩文件")
+    logger.info("[#current_stats]🔍 开始扫描压缩文件")
     
-    scan_task = logging.info("扫描文件")
+    scan_task = logger.info("[#current_progress]扫描文件")
     
     archive_files = []
     file_count = 0
@@ -858,20 +891,20 @@ def _process_archives_internal(target_directory, max_workers):
                 full_path = os.path.join(root, file)
                 archive_files.append((full_path, os.path.getmtime(full_path)))
                 file_count += 1
-                logging.info(f"已扫描 {file_count} 个文件")
+                logger.info(f"[@current_progress]扫描进度 ({file_count}) {(file_count/len(files)*100):.1f}%")
     
     # 按修改时间排序
     archive_files.sort(key=lambda x: x[1], reverse=True)
     archive_files = [file_path for file_path, _ in archive_files]
     
-    logging.info(f"📊 共发现 {file_count} 个压缩文件")
+    logger.info(f"[#current_stats]📊 共发现 {file_count} 个压缩文件")
     
     # 加载现有UUID
-    logging.info("💾 正在加载现有UUID...")
+    logger.info("[#current_stats]💾 正在加载现有UUID...")
     existing_uuids = load_existing_uuids()
-    logging.info(f"📝 已加载 {len(existing_uuids)} 个现有UUID")
+    logger.info(f"[#current_stats]📝 已加载 {len(existing_uuids)} 个现有UUID")
     
-    process_task = logging.info("处理压缩文件")
+    process_task = logger.info("[#current_progress]处理压缩文件")
     
     # 添加跳过计数器
     skip_count = 0
@@ -885,11 +918,11 @@ def _process_archives_internal(target_directory, max_workers):
             # 记录处理时长
             duration = time.time() - start_time
             if duration > 30:
-                logging.warning(f"⏱️ 处理时间过长: {os.path.basename(archive_path)} 耗时{duration:.1f}秒")
+                logger.warning(f"[#process]⏱️ 处理时间过长: {os.path.basename(archive_path)} 耗时{duration:.1f}秒")
             
             return result
         except Exception as e:
-            logging.error(f"🔥 严重错误: {str(e)}")
+            logger.error(f"[#process]🔥 严重错误: {str(e)}")
             raise
     
     # 修改任务分发方式
@@ -905,28 +938,31 @@ def _process_archives_internal(target_directory, max_workers):
             # 实时显示提交进度
             submitted = min(i + batch_size, len(archive_files))
             total_files = len(archive_files)
-            logging.info(f"🗂️ 已提交 {submitted}/{total_files} 个文件到处理队列")
+            logger.info(f"[@current_progress]提交进度 ({submitted}/{total_files}) {(submitted/total_files*100):.1f}%")
 
         # 添加超时机制
+        completed = 0
         for future in as_completed(futures, timeout=300):
             try:
                 result = future.result(timeout=60)  # 每个任务最多60秒
+                completed += 1
+                logger.info(f"[@current_progress]处理进度 ({completed}/{total_files}) {(completed/total_files*100):.1f}%")
                 if result == "SKIP_LIMIT_REACHED":
-                    logging.info("⏩ 达到跳过限制，取消剩余任务...")
+                    logger.info("[#process]⏩ 达到跳过限制，取消剩余任务...")
                     for f in futures:
                         f.cancel()
                     break
             except TimeoutError:
-                logging.warning("⌛ 任务超时，已跳过")
+                logger.warning("[#process]⌛ 任务超时，已跳过")
                 skip_count += 1
             except Exception as e:
-                logging.error(f"任务失败: {str(e)}")
+                logger.error(f"[#process]任务失败: {str(e)}")
                 skip_count = 0
 
     if skip_count >= 100:
-        logging.info("🔄 由于连续跳过次数达到100，提前结束当前阶段")
+        logger.info("[#current_stats]🔄 由于连续跳过次数达到100，提前结束当前阶段")
     else:
-        logging.info("✨ 所有文件处理完成")
+        logger.info("[#current_stats]✨ 所有文件处理完成")
     
     return skip_count >= 100
 
@@ -952,7 +988,7 @@ def load_json_uuid_from_archive(archive_path):
         )
         
         if result.returncode != 0:
-            logging.error(f"列出压缩包内容失败: {archive_path}")
+            logger.error(f"列出压缩包内容失败: {archive_path}")
             return None
             
         if result.stdout:
@@ -969,7 +1005,7 @@ def load_json_uuid_from_archive(archive_path):
                         return json_uuid
 
     except Exception as e:
-        logging.error(f"无法加载压缩包中的JSON文件 ({archive_path}): {e}")
+        logger.error(f"无法加载压缩包中的JSON文件 ({archive_path}): {e}")
         
     return None
 
@@ -1052,19 +1088,21 @@ def main():
 
 def reorganize_uuid_files(uuid_directory=r'E:\1BACKUP\ehv\uuid'):
     """根据最后修改时间重新组织UUID文件的目录结构"""
-    logging.info("🔄 开始重新组织UUID文件...")
+    logger.info("[#current_stats]🔄 开始重新组织UUID文件...")
     
     json_record_path = os.path.join(uuid_directory, 'uuid_records.json')
     if not os.path.exists(json_record_path):
-        logging.error("❌ UUID记录文件不存在")
+        logger.error("[#process]❌ UUID记录文件不存在")
         return
         
     try:
         with open(json_record_path, 'r', encoding='utf-8') as f:
             records = json.load(f)
             
+        total_records = len(records)
+        processed = 0
+        
         for uuid, data in records.items():
-            # 获取最新的时间戳
             if not data.get("timestamps"):
                 continue
                 
@@ -1076,13 +1114,11 @@ def reorganize_uuid_files(uuid_directory=r'E:\1BACKUP\ehv\uuid'):
                 month = f"{date.month:02d}"
                 day = f"{date.day:02d}"
                 
-                # 创建年月日层级目录
                 year_dir = os.path.join(uuid_directory, year)
                 month_dir = os.path.join(year_dir, month)
                 day_dir = os.path.join(month_dir, day)
                 target_path = os.path.join(day_dir, f"{uuid}.json")
                 
-                # 查找当前JSON文件
                 current_json_path = None
                 for root, _, files in os.walk(uuid_directory):
                     if f"{uuid}.json" in files:
@@ -1092,24 +1128,33 @@ def reorganize_uuid_files(uuid_directory=r'E:\1BACKUP\ehv\uuid'):
                 if current_json_path and current_json_path != target_path:
                     os.makedirs(day_dir, exist_ok=True)
                     shutil.move(current_json_path, target_path)
-                    logging.info(f"✅ 已移动: {uuid}.json")
+                    logger.info(f"[#process]✅ 已移动: {uuid}.json")
+                
+                processed += 1
+                logger.info(f"[@current_progress]重组进度 {processed}/{total_records} ({(processed/total_records*100):.1f}%)")
                     
             except ValueError as e:
-                logging.error(f"❌ UUID {uuid} 的时间戳格式无效: {latest_timestamp}")
+                logger.error(f"[#process]❌ UUID {uuid} 的时间戳格式无效: {latest_timestamp}")
                 
     except Exception as e:
-        logging.error(f"重组UUID文件失败: {e}")
+        logger.error(f"[#process]重组UUID文件失败: {e}")
     
-    logging.info("✨ UUID文件重组完成")
+    logger.info("[#current_stats]✨ UUID文件重组完成")
 
 def update_json_records(uuid_directory=r'E:\1BACKUP\ehv\uuid'):
     """更新JSON记录文件，确保所有记录都被保存"""
-    logging.info("🔄 开始更新JSON记录...")
+    logger.info("[#current_stats]🔄 开始更新JSON记录...")
     
     json_record_path = os.path.join(uuid_directory, 'uuid_records.json')
     
-    # 加载现有记录
     existing_records = JsonHandler.load(json_record_path)
+    
+    total_files = 0
+    processed = 0
+    
+    # 首先计算总文件数
+    for root, _, files in os.walk(uuid_directory):
+        total_files += sum(1 for file in files if file.endswith('.json') and file != 'uuid_records.json')
     
     # 遍历目录结构查找所有JSON文件
     for root, _, files in os.walk(uuid_directory):
@@ -1121,22 +1166,25 @@ def update_json_records(uuid_directory=r'E:\1BACKUP\ehv\uuid'):
                     file_data = JsonHandler.load(json_path)
                     if uuid not in existing_records:
                         existing_records[uuid] = file_data
+                        logger.info(f"[#process]✅ 添加新记录: {uuid}")
                     else:
-                        # 合并时间戳记录
                         existing_records[uuid]["timestamps"].update(file_data.get("timestamps", {}))
+                        logger.info(f"[#process]✅ 更新记录: {uuid}")
                         
                 except Exception as e:
-                    logging.error(f"处理JSON文件失败 {json_path}: {e}")
+                    logger.error(f"[#process]处理JSON文件失败 {json_path}: {e}")
+                
+                processed += 1
+                logger.info(f"[@current_progress]更新进度 {processed}/{total_files} ({(processed/total_files*100):.1f}%)")
     
-    # 保存更新后的记录
     if JsonHandler.save(json_record_path, existing_records):
-        logging.info("✅ JSON记录更新完成")
+        logger.info("[#current_stats]✅ JSON记录更新完成")
     else:
-        logging.error("❌ JSON记录更新失败")
+        logger.error("[#process]❌ JSON记录更新失败")
 
 def convert_yaml_to_json_structure():
     """将现有的YAML文件结构转换为JSON结构"""
-    logging.info("🔄 开始转换YAML到JSON结构...")
+    logger.info("[#current_stats]🔄 开始转换YAML到JSON结构...")
     
     uuid_directory = r'E:\1BACKUP\ehv\uuid'
     yaml_record_path = os.path.join(uuid_directory, 'uuid_records.yaml')
@@ -1148,6 +1196,9 @@ def convert_yaml_to_json_structure():
             with open(yaml_record_path, 'r', encoding='utf-8') as f:
                 yaml_data = yaml.safe_load(f)
                 
+            total_records = len(yaml_data)
+            processed = 0
+            
             json_records = {}
             for record in yaml_data:
                 uuid = record.get('UUID')
@@ -1164,161 +1215,227 @@ def convert_yaml_to_json_structure():
                         "artist_name": record.get('ArtistName', ''),
                         "relative_path": record.get('LastPath', '')
                     }
+                
+                processed += 1
+                logger.info(f"[@current_progress]转换进度 {processed}/{total_records} ({(processed/total_records*100):.1f}%)")
             
             JsonHandler.save(json_record_path, json_records)
-            logging.info("✅ 主记录文件转换完成")
+            logger.info("[#current_stats]✅ 主记录文件转换完成")
             
         except Exception as e:
-            logging.error(f"转换主记录文件失败: {e}")
+            logger.error(f"[#process]转换主记录文件失败: {e}")
     
     # 转换目录中的YAML文件
+    yaml_files = []
     for root, _, files in os.walk(uuid_directory):
-        for file in files:
-            if file.endswith('.yaml') and file != 'uuid_records.yaml':
-                yaml_path = os.path.join(root, file)
-                json_path = os.path.join(root, f"{os.path.splitext(file)[0]}.json")
-                
-                try:
-                    with open(yaml_path, 'r', encoding='utf-8') as f:
-                        yaml_data = yaml.safe_load(f)
-                        
-                    json_data = JsonHandler.convert_yaml_to_json(yaml_data)
-                    json_data["uuid"] = os.path.splitext(file)[0]
-                    
-                    if JsonHandler.save(json_path, json_data):
-                        os.remove(yaml_path)
-                        logging.info(f"✅ 转换完成: {file}")
-                    
-                except Exception as e:
-                    logging.error(f"转换文件失败 {file}: {e}")
+        yaml_files.extend([os.path.join(root, f) for f in files if f.endswith('.yaml') and f != 'uuid_records.yaml'])
     
-    logging.info("✨ YAML到JSON转换完成")
+    total_files = len(yaml_files)
+    processed = 0
+    
+    for yaml_path in yaml_files:
+        try:
+            with open(yaml_path, 'r', encoding='utf-8') as f:
+                yaml_data = yaml.safe_load(f)
+                
+            json_path = os.path.join(os.path.dirname(yaml_path), f"{os.path.splitext(os.path.basename(yaml_path))[0]}.json")
+            
+            json_data = JsonHandler.convert_yaml_to_json(yaml_data)
+            json_data["uuid"] = os.path.splitext(os.path.basename(yaml_path))[0]
+            
+            if JsonHandler.save(json_path, json_data):
+                os.remove(yaml_path)
+                logger.info(f"[#process]✅ 转换完成: {os.path.basename(yaml_path)}")
+            
+            processed += 1
+            logger.info(f"[@current_progress]文件转换进度 {processed}/{total_files} ({(processed/total_files*100):.1f}%)")
+            
+        except Exception as e:
+            logger.error(f"[#process]转换文件失败 {os.path.basename(yaml_path)}: {e}")
+    
+    logger.info("[#current_stats]✨ YAML到JSON转换完成")
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='处理文件UUID和JSON生成')
-    parser.add_argument('-c', '--clipboard', action='store_true', help='从剪贴板读取路径')
-    parser.add_argument('-m', '--mode', choices=['multi', 'single'], help='处理模式：multi(多人模式)或single(单人模式)')
-    parser.add_argument('--no-artist', action='store_true', help='无画师模式 - 不添加画师名')
-    parser.add_argument('--keep-timestamp', action='store_true', help='保持文件的修改时间')
-    parser.add_argument('--path', help='要处理的路径')
-    parser.add_argument('-a', '--auto-sequence', action='store_true', help='自动执行完整序列：UUID-JSON -> 自动文件名 -> UUID-JSON')
-    parser.add_argument('-r', '--reorganize', action='store_true', help='重新组织 UUID 文件结构')
-    parser.add_argument('-u', '--update-records', action='store_true', help='更新 UUID 记录文件')
-    parser.add_argument('--convert', action='store_true', help='转换YAML到JSON结构')
-    args = parser.parse_args()
+class CommandManager:
+    """命令行参数管理器"""
+    
+    @staticmethod
+    def init_parser():
+        parser = argparse.ArgumentParser(description='处理文件UUID和JSON生成')
+        parser.add_argument('-c', '--clipboard', action='store_true', help='从剪贴板读取路径')
+        parser.add_argument('-m', '--mode', choices=['multi', 'single'], help='处理模式：multi(多人模式)或single(单人模式)')
+        parser.add_argument('--no-artist', action='store_true', help='无画师模式 - 不添加画师名')
+        parser.add_argument('--keep-timestamp', action='store_true', help='保持文件的修改时间')
+        parser.add_argument('--path', help='要处理的路径')
+        parser.add_argument('-a', '--auto-sequence', action='store_true', help='自动执行完整序列：UUID-JSON -> 自动文件名 -> UUID-JSON')
+        parser.add_argument('-r', '--reorganize', action='store_true', help='重新组织 UUID 文件结构')
+        parser.add_argument('-u', '--update-records', action='store_true', help='更新 UUID 记录文件')
+        parser.add_argument('--convert', action='store_true', help='转换YAML到JSON结构')
+        return parser
 
-    if len(sys.argv) == 1:  # 如果没有命令行参数，启动TUI界面
-        main()
-        sys.exit(0)
+    @staticmethod
+    def get_target_directory(args):
+        if args.clipboard:
+            try:
+                target_directory = pyperclip.paste().strip().strip('"')
+                if not os.path.exists(target_directory):
+                    logger.error(f"[#process]剪贴板中的路径无效: {target_directory}")
+                    sys.exit(1)
+                logger.info(f"[#current_stats]已从剪贴板读取路径: {target_directory}")
+            except Exception as e:
+                logger.error(f"[#process]从剪贴板读取路径失败: {e}")
+                sys.exit(1)
+        else:
+            target_directory = args.path or r"E:\1EHV"
+            logger.info(f"[#current_stats]使用路径: {target_directory}")
+        return target_directory
 
-    # 如果指定了转换参数，执行转换
-    if args.convert:
+class TaskExecutor:
+    """任务执行器"""
+    
+    def __init__(self, args, target_directory):
+        self.args = args
+        self.target_directory = target_directory
+        self.max_workers = min(32, (multiprocessing.cpu_count() * 4) + 1)
+
+    def execute_tasks(self):
+        """执行所有任务"""
+        # 初始化日志系统
+        init_TextualLogger()
+        
+        logger.info(f"[#current_stats]当前模式: {'多人模式' if self.args.mode == 'multi' else '单人模式'}")
+
+        if self.args.convert:
+            self._execute_convert_task()
+            return
+
+        if self.args.reorganize:
+            self._execute_reorganize_task()
+
+        if self.args.update_records:
+            self._execute_update_records_task()
+
+        if self.args.auto_sequence:
+            self._execute_auto_sequence()
+        elif not self.args.reorganize and not self.args.update_records:
+            self._execute_normal_process()
+
+        self._validate_json_records()
+
+    def _execute_convert_task(self):
+        """执行YAML转JSON任务"""
         convert_yaml_to_json_structure()
         sys.exit(0)
 
-    # 处理路径参数
-    if args.clipboard:
-        try:
-            target_directory = pyperclip.paste().strip().strip('"')
-            if not os.path.exists(target_directory):
-                print(f"{Fore.RED}剪贴板中的路径无效: {target_directory}{Style.RESET_ALL}")
-                exit(1)
-            print(f"{Fore.GREEN}已从剪贴板读取路径: {target_directory}{Style.RESET_ALL}")
-        except Exception as e:
-            print(f"{Fore.RED}从剪贴板读取路径失败: {e}{Style.RESET_ALL}")
-            exit(1)
-    else:
-        target_directory = args.path or r"E:\1EHV"
-        print(f"{Fore.GREEN}使用路径: {target_directory}{Style.RESET_ALL}")
-
-    print(f"\n{Fore.CYAN}当前模式: {'多人模式' if args.mode == 'multi' else '单人模式'}{Style.RESET_ALL}")
-
-    # 根据系统资源自动设置线程数
-    max_workers = min(32, (multiprocessing.cpu_count() * 4) + 1)
-    
-    if args.reorganize:
-        logging.info("\n📝 开始重新组织 UUID 文件...")
+    def _execute_reorganize_task(self):
+        """执行重组任务"""
+        logger.info("[#current_stats]📝 开始重新组织 UUID 文件...")
         reorganize_uuid_files(r'E:\1BACKUP\ehv\uuid')
-        
-    if args.update_records:
-        logging.info("\n📝 开始更新 UUID 记录...")
+
+    def _execute_update_records_task(self):
+        """执行更新记录任务"""
+        logger.info("[#current_stats]📝 开始更新 UUID 记录...")
         update_json_records(r'E:\1BACKUP\ehv\uuid')
-    
-    if args.auto_sequence:
-        logging.info("🔄 开始执行完整序列...")
+
+    def _execute_auto_sequence(self):
+        """执行自动序列任务"""
+        logger.info("[#current_stats]🔄 开始执行完整序列...")
         
-        logging.info("\n📝 第1步：执行UUID-JSON处理...")
-        if args.mode == 'multi':
-            warm_up_cache(target_directory, max_workers)
-        elif args.mode == 'single':
-            logging.info("🔄 开始执行单人模式...")
-            skip_limit_reached = process_archives(target_directory, max_workers)
-        else:
-            logging.info("🔄 开始执行无人模式...")
-            skip_limit_reached = process_archives(target_directory, max_workers)
+        # 第1步：UUID-JSON处理
+        logger.info("[#current_stats]📝 第1步：执行UUID-JSON处理...")
+        self._process_uuid_json()
+        
+        # 第2步：自动文件名处理
+        logger.info("[#current_stats]📝 第2步：执行自动文件名处理...")
+        self._run_auto_filename_script()
+        
+        # 第3步：再次UUID-JSON处理
+        logger.info("[#current_stats]📝 第3步：再次执行UUID-JSON处理...")
+        self._process_uuid_json()
+        
+        logger.info("[#current_stats]✨ 完整序列执行完成！")
+
+    def _execute_normal_process(self):
+        """执行普通处理流程"""
+        if self.args.mode == 'multi':
+            warm_up_cache(self.target_directory, self.max_workers)
+        process_archives(self.target_directory, self.max_workers)
+
+    def _process_uuid_json(self):
+        """处理UUID-JSON相关任务"""
+        if self.args.mode == 'multi':
+            warm_up_cache(self.target_directory, self.max_workers)
+        skip_limit_reached = process_archives(self.target_directory, self.max_workers)
         
         if skip_limit_reached:
-            logging.info("\n⏩ 由于连续跳过次数达到限制，提前进入下一阶段")
-        
-        logging.info("\n📝 第2步：执行自动文件名处理...")
-        auto_filename_script = os.path.join(os.path.dirname(__file__), '011-自动唯一文件名.py')
-        if os.path.exists(auto_filename_script):
-            try:
-                cmd = [sys.executable, auto_filename_script]
-                if args.clipboard:
-                    cmd.extend(['-c'])
-                if args.mode:
-                    cmd.extend(['-m', args.mode])
-                
-                startupinfo = None
-                if os.name == 'nt':
-                    startupinfo = subprocess.STARTUPINFO()
-                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            logger.info("[#current_stats]⏩ 由于连续跳过次数达到限制，提前进入下一阶段")
 
-                result = subprocess.run(
-                    cmd, 
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    encoding='gbk',
-                    errors='ignore',
-                    startupinfo=startupinfo
-                )
-                
-                for line in result.stdout.splitlines():
-                    if line.strip():
-                        logging.info(line)
-                
-                logging.info("✅ 自动文件名处理完成")
-            except subprocess.CalledProcessError as e:
-                logging.error(f"自动文件名处理失败: {str(e)}")
-                if e.output:
-                    logging.error(f"错误输出: {e.output}")
-        else:
-            logging.error(f"找不到自动文件名脚本: {auto_filename_script}")
-            
-        logging.info("\n📝 第3步：再次执行UUID-JSON处理...")
-        if args.mode == 'multi':
-            warm_up_cache(target_directory, max_workers)
-        process_archives(target_directory, max_workers)
-        
-        logging.info("\n✨ 完整序列执行完成！")
-    
-    elif not args.reorganize and not args.update_records:
-        if args.mode == 'multi':
-            warm_up_cache(target_directory, max_workers)
-        process_archives(target_directory, max_workers)
-    
-    # 验证JSON记录文件
-    json_record_path = r'E:\1BACKUP\ehv\uuid\uuid_records.json'
-    if os.path.exists(json_record_path):
+    def _run_auto_filename_script(self):
+        """运行自动文件名脚本"""
+        auto_filename_script = os.path.join(os.path.dirname(__file__), '011-自动唯一文件名.py')
+        if not os.path.exists(auto_filename_script):
+            logger.error(f"[#process]找不到自动文件名脚本: {auto_filename_script}")
+            return
+
         try:
-            with open(json_record_path, 'r', encoding='utf-8') as f:
-                json.load(f)
-            logging.info("✅ JSON记录文件验证通过")
-        except json.JSONDecodeError as e:
-            logging.error(f"❌ JSON记录文件验证失败: {e}")
-            sys.exit(1)
-    else:
-        logging.warning("⚠️ JSON记录文件不存在")
+            cmd = [sys.executable, auto_filename_script]
+            if self.args.clipboard:
+                cmd.extend(['-c'])
+            if self.args.mode:
+                cmd.extend(['-m', self.args.mode])
+
+            startupinfo = None
+            if os.name == 'nt':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+            result = subprocess.run(
+                cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding='gbk',
+                errors='ignore',
+                startupinfo=startupinfo
+            )
+
+            for line in result.stdout.splitlines():
+                if line.strip():
+                    logger.info(line)
+
+            logger.info("[#current_stats]✅ 自动文件名处理完成")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"[#process]自动文件名处理失败: {str(e)}")
+            if e.output:
+                logger.error(f"[#process]错误输出: {e.output}")
+
+    def _validate_json_records(self):
+        """验证JSON记录文件"""
+        json_record_path = r'E:\1BACKUP\ehv\uuid\uuid_records.json'
+        if os.path.exists(json_record_path):
+            try:
+                with open(json_record_path, 'r', encoding='utf-8') as f:
+                    json.load(f)
+                logger.info("[#current_stats]✅ JSON记录文件验证通过")
+            except json.JSONDecodeError as e:
+                logger.error(f"[#process]❌ JSON记录文件验证失败: {e}")
+                sys.exit(1)
+        else:
+            logger.warning("[#process]⚠️ JSON记录文件不存在")
+
+if __name__ == '__main__':
+    # 初始化命令行解析器
+    parser = CommandManager.init_parser()
+    args = parser.parse_args()
+
+    # 如果没有命令行参数，启动TUI界面
+    if len(sys.argv) == 1:
+        main()
+        sys.exit(0)
+
+    # 获取目标目录
+    target_directory = CommandManager.get_target_directory(args)
+
+    # 执行任务
+    executor = TaskExecutor(args, target_directory)
+    executor.execute_tasks()
     
