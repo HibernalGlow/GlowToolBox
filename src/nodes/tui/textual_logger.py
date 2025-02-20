@@ -536,9 +536,10 @@ class LogPanel(Static):
     def update_render(self, content: str) -> None:
         """普通文本渲染"""
         self.styles.border = ("heavy", self.base_style)
+        self.styles.color = self.base_style  # 设置面板文本颜色
         self.border_title = f"{self.title}"
         self.border_subtitle = f"{self.panel_name}"
-        super().update(content)  # 移除样式标记
+        super().update(content)
 
     def on_mount(self) -> None:
         """当组件被挂载时调用"""
@@ -801,7 +802,7 @@ if __name__ == "__main__":
         
         # 预定义一些演示消息
         system_msgs = [
-            "CPU使用率: {}%",
+            # "CPU使用率: {}%",
             "内存使用: {}MB",
             "磁盘空间: {}GB可用"
         ]
@@ -875,7 +876,7 @@ if __name__ == "__main__":
             logger.info(f"[#info]{msg.format(value)}")
             
             # 为每个面板更新进度条
-            for panel in ["system", "error", "info"]:
+            for panel in [ "error"]:
                 # 随机启动新进度条
                 if len(active_progress[panel]) < 2 and random.random() < 0.1:  # 10%概率启动新进度条
                     available_tasks = [t for t, _ in progress_tasks[panel] if t not in active_progress[panel]]
