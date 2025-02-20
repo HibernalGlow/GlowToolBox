@@ -20,7 +20,34 @@ from prompt_toolkit import prompt
 from prompt_toolkit.shortcuts import checkboxlist_dialog
 from prompt_toolkit.styles import Style
 from nodes.tui.textual_logger import TextualLoggerManager
+from nodes.tui.textual_preset import create_config_app
 from nodes.record.logger_config import setup_logger
+import sys
+
+# 配置日志面板布局
+TEXTUAL_LAYOUT = {
+    "cur_stats": {
+        "ratio": 2,
+        "title": "📊 总体进度",
+        "style": "yellow"
+    },
+    "cur_progress": {
+        "ratio": 2,
+        "title": "🔄 当前进度",
+        "style": "cyan"
+    },
+    "file_ops": {
+        "ratio": 3,
+        "title": "📂 文件操作",
+        "style": "magenta"
+    },
+    "process": {
+        "ratio": 3,
+        "title": "📝 处理日志",
+        "style": "blue"
+    }
+}
+
 config = {
     'script_name': 'comic_auto_repack',
     'console_enabled': False
@@ -334,8 +361,6 @@ def find_min_folder_with_images(base_path: Path, exclude_keywords: List[str]) ->
     is_scattered = False
     if zip_files and len(image_files) >= 3:
         is_scattered = True
-    elif len(image_files) >= 3 and len(valid_files) == len(image_files):
-        is_scattered = True
     
     # 如果是散图文件夹，返回 None，让散图处理功能去处理它
     if is_scattered:
@@ -602,7 +627,7 @@ def zip_folder_with_7zip(folder_path: Path, only_images: bool = False, image_cou
 def process_folders(base_path: str, exclude_keywords: List[str]) -> List[Path]:
     base_path = Path(base_path)
     if not base_path.exists():
-        logger.info(f"基础路径不存在: {base_path}")
+        logger.info(f"[#process]❌ 基础路径不存在: {base_path}")
         return []
     
     stats = CompressionStats()
@@ -610,7 +635,7 @@ def process_folders(base_path: str, exclude_keywords: List[str]) -> List[Path]:
     compressor = ZipCompressor()
     
     # 查找需要打包的文件夹
-    logger.info("🔍 开始查找需要打包的文件夹...")
+    logger.info("[#process]🔍 开始查找需要打包的文件夹...")
     folders_to_process = []
     
     # 遍历所有文件夹
@@ -619,7 +644,7 @@ def process_folders(base_path: str, exclude_keywords: List[str]) -> List[Path]:
         
         # 检查是否包含黑名单关键词
         if any(keyword in str(root_path) for keyword in BLACKLIST_KEYWORDS):
-            logger.info(f"跳过黑名单路径: {root_path}")
+            logger.info(f"[#process]⏭️ 跳过黑名单路径: {root_path}")
             dirs.clear()  # 跳过子目录
             continue
         
@@ -636,13 +661,14 @@ def process_folders(base_path: str, exclude_keywords: List[str]) -> List[Path]:
         result = find_min_folder_with_images(root_path, exclude_keywords)
         if result:
             folders_to_process.append(result[0])  # 只保存文件夹路径
-            logger.info(f"📁 找到需要打包的文件夹: {result[0]}")
+            logger.info(f"[#process]📁 找到需要打包的文件夹: {result[0]}")
     
     if folders_to_process:
-        logger.info(f"📊 共找到 {len(folders_to_process)} 个文件夹需要打包")
+        logger.info(f"[#cur_stats]📊 共找到 {len(folders_to_process)} 个文件夹需要打包")
         
         # 创建进度任务
-        process_task = logger.info(total=len(folders_to_process), description="处理文件夹")
+        total_folders = len(folders_to_process)
+        processed_folders = 0
         
         # 使用线程池处理普通文件夹
         with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -659,19 +685,23 @@ def process_folders(base_path: str, exclude_keywords: List[str]) -> List[Path]:
                         stats.total_original_size += result.original_size
                         stats.total_compressed_size += result.compressed_size
                         zip_paths.append(folder.parent / f"{folder.name}.zip")
-                        logger.info(f"✅ 成功处理: {folder.name}")
+                        logger.info(f"[#file_ops]✅ 成功处理: {folder.name}")
                     else:
                         stats.failed_compressions += 1
-                        logger.info(f"处理失败 {folder}: {result.error_message}")
+                        logger.info(f"[#file_ops]❌ 处理失败 {folder}: {result.error_message}")
                 except Exception as e:
                     stats.failed_compressions += 1
-                    logger.info(f"处理异常 {folder}: {str(e)}")
+                    logger.info(f"[#file_ops]❌ 处理异常 {folder}: {str(e)}")
                 finally:
-                    logger.info(process_task, advance=1)
+                    processed_folders += 1
+                    percentage = (processed_folders / total_folders) * 100
+                    logger.info(f"[@cur_progress]处理进度 ({processed_folders}/{total_folders}) {percentage:.1f}%")
     else:
-        logger.info("⚠️ 未找到需要打包的文件夹")
+        logger.info("[#process]⚠️ 未找到需要打包的文件夹")
     
-    logger.info(stats.get_summary())
+    # 输出统计信息
+    summary = stats.get_summary()
+    logger.info(f"[#cur_stats]{summary}")
     return zip_paths
 
 def process_scattered_images_in_directory(directory: Path) -> int:
@@ -684,23 +714,23 @@ def process_scattered_images_in_directory(directory: Path) -> int:
         
         # 检查是否包含黑名单关键词
         if any(keyword in str(root_path) for keyword in BLACKLIST_KEYWORDS):
-            logger.info(f"跳过黑名单路径: {root_path}")
+            logger.info(f"[#process]⏭️ 跳过黑名单路径: {root_path}")
             continue
         
         if any(media_type in str(root_path) for media_type in MEDIA_TYPES):
-            logger.info(f"跳过媒体文件夹: {root_path}")
+            logger.info(f"[#process]⏭️ 跳过媒体文件夹: {root_path}")
             continue
         
         has_scattered, image_files = find_scattered_images(root_path)
         if has_scattered:
-            logger.info(f"发现散图文件夹: {root_path}")
+            logger.info(f"[#process]🔍 发现散图文件夹: {root_path}")
             result = zip_scattered_images(root_path, image_files)
             if result.success:
                 processed_scattered += 1
-                logger.info(f"成功处理散图 - 原始大小: {result.original_size/1024/1024:.2f}MB, "
+                logger.info(f"[#file_ops]✅ 成功处理散图 - 原始大小: {result.original_size/1024/1024:.2f}MB, "
                            f"压缩后: {result.compressed_size/1024/1024:.2f}MB")
             else:
-                logger.info(f"处理散图失败: {result.error_message}")
+                logger.info(f"[#file_ops]❌ 处理散图失败: {result.error_message}")
     
     return processed_scattered
 
@@ -739,13 +769,13 @@ def move_unwanted_files(source_folder: Path, target_base: Path) -> Tuple[int, in
                     if final_target_path.exists() and not file_path.exists():
                         moved_count += 1
                         moved_size += final_target_path.stat().st_size
-                        logger.info(f"📦 已移动文件: {file_path.name} -> {final_target_path}")
+                        logger.info(f"[#file_ops]📦 已移动文件: {file_path.name} -> {final_target_path}")
                     else:
-                        logger.info(f"❌ 移动文件可能未成功完成 {file_path} -> {final_target_path}")
+                        logger.info(f"[#file_ops]⚠️ 移动文件可能未成功完成 {file_path} -> {final_target_path}")
                 except (shutil.Error, OSError) as e:
-                    logger.info(f"❌ 移动文件失败 {file_path}: {str(e)}")
+                    logger.info(f"[#file_ops]❌ 移动文件失败 {file_path}: {str(e)}")
             except Exception as e:
-                logger.info(f"❌ 移动文件时发生未知错误 {file_path}: {str(e)}")
+                logger.info(f"[#file_ops]❌ 移动文件时发生未知错误 {file_path}: {str(e)}")
     
     return moved_count, moved_size
 
@@ -759,7 +789,7 @@ def organize_media_files(source_path: Path, target_base_path: Path) -> Tuple[int
     
     # 检查源路径是否在媒体类型文件夹内（包括父路径）
     if any(media_type in str(source_path) for media_type in MEDIA_TYPES):
-        logger.info(f"跳过已整理的媒体文件夹路径: {source_path}")
+        logger.info(f"[#process]⏭️ 跳过已整理的媒体文件夹路径: {source_path}")
         return moved_count, moved_size
     
     # 遍历源路径
@@ -768,7 +798,7 @@ def organize_media_files(source_path: Path, target_base_path: Path) -> Tuple[int
         
         # 检查当前路径是否在媒体类型文件夹内（包括父路径）
         if any(media_type in str(root_path) for media_type in MEDIA_TYPES):
-            logger.info(f"跳过已整理的媒体文件夹路径: {root_path}")
+            logger.info(f"[#process]⏭️ 跳过已整理的媒体文件夹路径: {root_path}")
             continue
             
         # 检查当前文件夹是否包含需要处理的媒体文件
@@ -805,7 +835,7 @@ def organize_media_files(source_path: Path, target_base_path: Path) -> Tuple[int
             try:
                 relative_path = root_path.relative_to(source_path)
             except ValueError:
-                logger.info(f"无法计算相对路径: {root_path} 相对于 {source_path}")
+                logger.info(f"[#file_ops]❌ 无法计算相对路径: {root_path} 相对于 {source_path}")
                 continue
                 
             for media_type, file_lists in media_files.items():
@@ -815,7 +845,7 @@ def organize_media_files(source_path: Path, target_base_path: Path) -> Tuple[int
                 try:
                     target_dir.mkdir(parents=True, exist_ok=True)
                 except Exception as e:
-                    logger.info(f"❌ 创建目标文件夹失败 {target_dir}: {e}")
+                    logger.info(f"[#file_ops]❌ 创建目标文件夹失败 {target_dir}: {e}")
                     continue
                 
                 # 移动主文件和关联文件
@@ -840,11 +870,11 @@ def organize_media_files(source_path: Path, target_base_path: Path) -> Tuple[int
                             shutil.move(str(file_path), str(final_target))
                             moved_count += 1
                             moved_size += file_size
-                            logger.info(f"📦 已移动{'关联' if file_path in file_lists['associated'] else '主要'}媒体文件: {file_path.name} -> {final_target}")
+                            logger.info(f"[#file_ops]📦 已移动{'关联' if file_path in file_lists['associated'] else '主要'}媒体文件: {file_path.name} -> {final_target}")
                         except FileNotFoundError:
                             continue
                         except Exception as e:
-                            logger.info(f"❌ 移动媒体文件失败 {file_path}: {e}")
+                            logger.info(f"[#file_ops]❌ 移动媒体文件失败 {file_path}: {e}")
     
     return moved_count, moved_size
 
@@ -874,11 +904,11 @@ def delete_empty_folders(directory: Path):
             try:
                 if not any(dir_path.iterdir()):
                     if not cmd_delete(str(dir_path), is_directory=True):
-                        logger.info(f"❌ 删除空文件夹失败 {dir_path}")
+                        logger.info(f"[#file_ops]❌ 删除空文件夹失败 {dir_path}")
                     else:
-                        logger.info(f"🗑️ 已删除空文件夹: {dir_path}")
+                        logger.info(f"[#file_ops]🗑️ 已删除空文件夹: {dir_path}")
             except Exception as e:
-                logger.info(f"❌ 检查空文件夹失败 {dir_path}: {e}")
+                logger.info(f"[#file_ops]❌ 检查空文件夹失败 {dir_path}: {e}")
 
 def find_scattered_images(folder_path: Path) -> Tuple[bool, List[Path]]:
     """
@@ -1099,112 +1129,171 @@ def ensure_file_access(file_path: Path) -> bool:
         logger.info(f"❌ 修改文件权限失败: {file_path}, 错误: {str(e)}")
         return False
 
-def process_with_prompt(directories: List[Path]) -> None:
-    """使用prompt_toolkit处理目录"""
-    # 定义选项
-    values = [
-        ("organize_media", "整理媒体文件"),
-        ("move_unwanted", "移动不需要的文件"),
-        ("compress", "压缩文件夹"),
-        ("process_scattered", "处理散图"),
-        ("select_all", "【全选】")
-    ]
+def process_with_prompt(directories: List[Path], options: Dict[str, bool]) -> None:
+    """根据命令行参数处理目录"""
+    # 初始化日志面板
+    TextualLoggerManager.set_layout(TEXTUAL_LAYOUT, config_info['log_file'])
     
-    # 第一次显示对话框
-    options = checkboxlist_dialog(
-        title="选择操作",
-        text="请选择要执行的操作：\n" + "\n".join(f"- {d}" for d in directories),
-        values=values,
-        default_values=["compress"]  # 默认选中压缩选项
-    ).run()
-    
-    # 如果用户取消了选择，直接返回
-    if not options:
-        return
-    
-    # 处理全选
-    if "select_all" in options:
-        options = [value[0] for value in values if value[0] != "select_all"]
-    
-    selected_options = {
-        'organize_media': 'organize_media' in options,
-        'move_unwanted': 'move_unwanted' in options,
-        'compress': 'compress' in options,
-        'process_scattered': 'process_scattered' in options
-    }
-    
-    # 在完成选择后，启动日志界面并处理文件
+    # 处理每个目录
     for directory in directories:
-        logger.info(f"\n📂 开始处理目录: {directory}")
+        logger.info(f"\n[#process]📂 开始处理目录: {directory}")
         
-        if selected_options['move_unwanted']:
+        if options.get('move_unwanted'):
             unwanted_target_path = directory / "[00不需要]"
             unwanted_target_path.mkdir(exist_ok=True)
-            logger.info(f"📁 创建不需要文件存放目录: {unwanted_target_path}")
+            logger.info(f"[#file_ops]📁 创建不需要文件存放目录: {unwanted_target_path}")
             
-            logger.info("🔄 开始处理不需要的文件...")
+            logger.info("[#process]🔄 开始处理不需要的文件...")
             moved_count, moved_size = move_unwanted_files(directory, unwanted_target_path)
-            logger.info(f"✅ 已移动 {moved_count} 个文件，总大小: {moved_size/1024/1024:.2f}MB")
+            logger.info(f"[#file_ops]✅ 已移动 {moved_count} 个文件，总大小: {moved_size/1024/1024:.2f}MB")
         
-        if selected_options['organize_media']:
-            logger.info("🔄 开始整理媒体文件...")
+        if options.get('organize_media'):
+            logger.info("[#process]🔄 开始整理媒体文件...")
             media_count, media_size = organize_media_files(directory, directory)
-            logger.info(f"✅ 已整理 {media_count} 个媒体文件，总大小: {media_size/1024/1024:.2f}MB")
+            logger.info(f"[#file_ops]✅ 已整理 {media_count} 个媒体文件，总大小: {media_size/1024/1024:.2f}MB")
         
-        logger.info("🧹 清理空文件夹...")
+        logger.info("[#process]🧹 清理空文件夹...")
         delete_empty_folders(directory)
         
-        if selected_options['compress']:
+        if options.get('compress'):
             exclude_keywords = [
                 *BLACKLIST_KEYWORDS,  # 包含所有黑名单关键词
                 *[k for k in MEDIA_TYPES.keys()]  # 包含所有媒体类型文件夹
             ]
             zip_paths = process_folders(str(directory), exclude_keywords)
-            logger.info(f"✅ 已完成文件夹压缩，共处理 {len(zip_paths)} 个文件夹")
+            logger.info(f"[#process]✅ 已完成文件夹压缩，共处理 {len(zip_paths)} 个文件夹")
 
-        if selected_options['process_scattered']:
-            logger.info("\n🔍 开始查找和处理散图...")
+        if options.get('process_scattered'):
+            logger.info("\n[#process]🔍 开始查找和处理散图...")
             processed_count = process_scattered_images_in_directory(directory)
-            logger.info(f"✅ 散图处理完成，共处理 {processed_count} 个散图文件夹")
+            logger.info(f"[#process]✅ 散图处理完成，共处理 {processed_count} 个散图文件夹")
     
-    logger.info("\n✨ 所有操作已完成")
+    logger.info("\n[#process]✨ 所有操作已完成")
+
+def run_with_args(args):
+    """供TUI界面调用的函数"""
+    # 初始化日志面板
+    TextualLoggerManager.set_layout(TEXTUAL_LAYOUT, config_info['log_file'])
+
+    # 获取输入路径
+    directories = []
+    if args.clipboard:
+        input_text = pyperclip.paste()
+        logger.info("[#process]从剪贴板读取的路径:")
+        logger.info(input_text)
+        for path in input_text.strip().split('\n'):
+            try:
+                clean_path = path.strip().strip('"').strip("'").strip()
+                # 使用 Path 对象的绝对路径来处理特殊字符
+                path_obj = Path(clean_path).resolve()
+                if path_obj.exists():
+                    directories.append(path_obj)
+                    logger.info(f"[#process]✅ 已添加路径: {path_obj}")
+                else:
+                    logger.info(f"[#process]⚠️ 路径不存在: {clean_path}")
+            except Exception as e:
+                logger.info(f"[#process]❌ 处理路径时出错: {clean_path} - {str(e)}")
+    else:
+        if args.path:
+            try:
+                path_obj = Path(args.path).resolve()
+                if path_obj.exists():
+                    directories.append(path_obj)
+                    logger.info(f"[#process]✅ 使用指定路径: {path_obj}")
+                else:
+                    logger.info(f"[#process]❌ 路径不存在: {args.path}")
+                    return
+            except Exception as e:
+                logger.info(f"[#process]❌ 处理路径时出错: {args.path} - {str(e)}")
+                return
+
+    if not directories:
+        logger.info("[#process]❌ 未输入有效路径，程序退出")
+        return
+
+    # 创建选项字典
+    options = {
+        "organize_media": args.all or args.organize_media,
+        "move_unwanted": args.all or args.move_unwanted,
+        "compress": args.all or args.compress,
+        "process_scattered": args.all or args.process_scattered
+    }
+
+    # 如果没有指定任何选项，默认执行所有操作
+    if not any(options.values()):
+        options = {k: True for k in options}
+
+    # 处理目录
+    process_with_prompt(directories, options)
 
 def main():
     """主函数"""
-    parser = argparse.ArgumentParser(description='文件处理和压缩工具')
-    parser.add_argument('--clipboard', action='store_true', help='从剪贴板读取路径')
-    args = parser.parse_args()
-    
-    # 获取输入路径
-    if args.clipboard:
-        input_text = pyperclip.paste()
-        print("从剪贴板读取的路径:")
-        print(input_text)
+    # 检查是否有命令行参数
+    if len(sys.argv) > 1:
+        parser = argparse.ArgumentParser(description='文件处理和压缩工具')
+        parser.add_argument('--clipboard', action='store_true', help='从剪贴板读取路径')
+        parser.add_argument('--organize-media', action='store_true', help='整理媒体文件')
+        parser.add_argument('--move-unwanted', action='store_true', help='移动不需要的文件')
+        parser.add_argument('--compress', action='store_true', help='压缩文件夹')
+        parser.add_argument('--process-scattered', action='store_true', help='处理散图')
+        parser.add_argument('--all', action='store_true', help='执行所有操作')
+        parser.add_argument('--path', type=str, help='指定处理路径')
+        
+        try:
+            args = parser.parse_args()
+            run_with_args(args)
+        except Exception as e:
+            logger.info(f"[#process]❌ 处理命令行参数时出错: {str(e)}")
+            return
     else:
-        print("请输入目录路径（每行一个，最后输入空行结束）:")
-        input_lines = []
-        while True:
-            line = input().strip()
-            if not line:
-                break
-            input_lines.append(line)
-        input_text = '\n'.join(input_lines)
+        # 没有命令行参数时启动TUI界面
+        # 定义复选框选项
+        checkbox_options = [
+            ("从剪贴板读取路径", "clipboard", "--clipboard", True),
+            ("整理媒体文件", "organize_media", "--organize-media", True),
+            ("移动不需要文件", "move_unwanted", "--move-unwanted", True),
+            ("压缩文件夹", "compress", "--compress", True),
+            ("处理散图", "process_scattered", "--process-scattered", True),
+            ("执行所有操作", "all", "--all", False),
+        ]
 
-    # 验证路径
-    directories = []
-    for path in input_text.strip().split('\n'):
-        clean_path = path.strip().strip('"').strip("'").strip()
-        if os.path.exists(clean_path):
-            directories.append(Path(clean_path))
-        else:
-            print(f"⚠️ 警告：路径不存在: {clean_path}")
-    
-    if not directories:
-        print("❌ 错误：未输入有效路径，程序退出")
-        return
+        # 定义输入框选项
+        input_options = [
+            ("待处理路径", "path", "--path", "", "输入待处理文件夹路径"),
+        ]
 
-    # 使用prompt_toolkit界面处理目录
-    process_with_prompt(directories)
+        # 预设配置
+        preset_configs = {
+            "全部处理": {
+                "description": "执行所有操作",
+                "checkbox_options": ["clipboard", "organize_media", "move_unwanted", "compress", "process_scattered"],
+                "input_values": {}
+            },
+            "仅整理": {
+                "description": "只整理媒体文件和不需要的文件",
+                "checkbox_options": ["clipboard", "organize_media", "move_unwanted"],
+                "input_values": {}
+            },
+            "仅压缩": {
+                "description": "只压缩文件夹和处理散图",
+                "checkbox_options": ["clipboard", "compress", "process_scattered"],
+                "input_values": {}
+            }
+        }
+
+        try:
+            # 创建配置界面
+            app = create_config_app(
+                program=__file__,
+                checkbox_options=checkbox_options,
+                input_options=input_options,
+                title="文件整理压缩配置",
+                preset_configs=preset_configs
+            )
+            
+            app.run()
+        except Exception as e:
+            logger.info(f"[#process]❌ 运行TUI界面时出错: {str(e)}")
 
 if __name__ == '__main__':
     main()
