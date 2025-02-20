@@ -3,7 +3,7 @@ import logging
 import random
 from concurrent.futures import ThreadPoolExecutor
 from nodes.tui.textual_logger import TextualLoggerManager
-from nodes.logs.logger_config import setup_logger
+from nodes.record.logger_config import setup_logger
 
 # 初始化日志
 config = {

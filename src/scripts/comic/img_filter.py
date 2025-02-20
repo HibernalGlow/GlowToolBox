@@ -1,7 +1,7 @@
 from nodes.config.import_bundles import *
 
 # 导入日志配置
-from nodes.logs.logger_config import setup_logger
+from nodes.record.logger_config import setup_logger
 
 config = {
     'script_name': 'comic_img_filter',

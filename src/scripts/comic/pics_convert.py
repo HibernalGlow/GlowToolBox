@@ -27,7 +27,7 @@ if hasattr(os, 'add_dll_directory'):
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 # 在全局配置部分添加以下内容
 # ================= 日志配置 =================
-from nodes.logs.logger_config import setup_logger
+from nodes.record.logger_config import setup_logger
 
 config = {
     'script_name': 'pics_convert',

@@ -13,7 +13,7 @@ from datetime import datetime
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from nodes.tui.textual_logger import TextualLoggerManager
 from nodes.pics.hash_process_config import get_latest_hash_file_path, process_artist_folder, process_duplicates
-from nodes.logs.logger_config import setup_logger
+from nodes.record.logger_config import setup_logger
 
 # 在全局配置部分添加以下内容
 # ================= 日志配置 =================

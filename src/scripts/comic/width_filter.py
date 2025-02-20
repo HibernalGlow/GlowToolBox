@@ -21,7 +21,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 # 加载环境变量并初始化日志记录器
 load_dotenv()
-from nodes.logs.logger_config import setup_logger
+from nodes.record.logger_config import setup_logger
 
 # 创建全局日志记录器
 logger = setup_logger({

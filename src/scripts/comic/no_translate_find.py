@@ -27,7 +27,7 @@ from colorama import init, Fore, Style
 from typing import List, Dict, Set, Tuple, Optional
 from opencc import OpenCC  # 用于繁简转换
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from nodes.logs.logger_config import setup_logger
+from nodes.record.logger_config import setup_logger
 from nodes.pics.calculate_hash_custom import ImageClarityEvaluator
 from nodes.tui.textual_logger import TextualLoggerManager
 from nodes.utils.number_shortener import shorten_number_cn
