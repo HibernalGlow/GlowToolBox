@@ -111,42 +111,29 @@ class ArchiveCleaner:
         try:
             yaml_files, json_files = ArchiveCleaner.analyze_archive(archive_path)
             
-            # 创建文件名到文件的映射
-            yaml_map = {name: full_path for full_path, name in yaml_files}
-            json_map = {name: full_path for full_path, name in json_files}
-            
-            files_to_delete = []
-            
-            # 处理同名文件
-            for name in set(yaml_map.keys()) & set(json_map.keys()):
-                # 如果存在同名文件，删除YAML文件
-                files_to_delete.append(yaml_map[name])
-                logger.info(f"[分析] {os.path.basename(archive_path)} - 发现同名文件，保留JSON: {json_map[name]}")
-            
-            # 处理剩余文件
-            remaining_yaml = [f for f, n in yaml_files if n not in json_map]
-            remaining_json = [f for f, n in json_files if n not in yaml_map]
-            
-            # 如果剩余文件总数小于等于1，跳过
-            if len(remaining_yaml) + len(remaining_json) <= 1:
+            # 如果没有YAML文件，或者没有JSON文件，则跳过处理
+            if not yaml_files or not json_files:
                 return
             
-            # 如果还有YAML文件，删除所有剩余JSON文件
-            if remaining_yaml:
-                files_to_delete.extend(remaining_json)
-                # 如果有多个YAML，只保留第一个
-                if len(remaining_yaml) > 1:
-                    files_to_delete.extend(remaining_yaml[1:])
-                logger.info(f"[分析] {os.path.basename(archive_path)} - 保留YAML: {remaining_yaml[0]}")
+            # 删除所有YAML文件，保留JSON文件
+            yaml_file_names = [f for f, _ in yaml_files]
+            if ArchiveCleaner.delete_files_from_archive(archive_path, yaml_file_names):
+                for yaml_file in yaml_file_names:
+                    logger.info(f"[分析] {os.path.basename(archive_path)} - 删除YAML文件: {yaml_file}")
+                logger.info(f"[完成] {os.path.basename(archive_path)}")
+            else:
+                logger.error(f"[失败] {os.path.basename(archive_path)}")
             
-            # 如果只有多个JSON文件，保留第一个
-            elif len(remaining_json) > 1:
-                files_to_delete.extend(remaining_json[1:])
-                logger.info(f"[分析] {os.path.basename(archive_path)} - 保留JSON: {remaining_json[0]}")
-            
-            # 执行删除
-            if files_to_delete:
-                if ArchiveCleaner.delete_files_from_archive(archive_path, files_to_delete):
+        except Exception as e:
+            # 只处理当压缩包中恰好有一个YAML和一个JSON文件的情况
+            if len(yaml_files) == 1 and len(json_files) == 1:
+                yaml_file = yaml_files[0][0]  # 获取YAML文件名
+                json_file = json_files[0][0]  # 获取JSON文件名
+                
+                # 删除YAML文件，保留JSON文件
+                if ArchiveCleaner.delete_files_from_archive(archive_path, [yaml_file]):
+                    logger.info(f"[分析] {os.path.basename(archive_path)} - 删除YAML文件: {yaml_file}")
+                    logger.info(f"[分析] {os.path.basename(archive_path)} - 保留JSON文件: {json_file}")
                     logger.info(f"[完成] {os.path.basename(archive_path)}")
                 else:
                     logger.error(f"[失败] {os.path.basename(archive_path)}")

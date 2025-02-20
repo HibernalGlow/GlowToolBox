@@ -367,14 +367,20 @@ class ArchiveHandler:
         try:
             # 尝试使用zipfile
             with zipfile.ZipFile(archive_path, 'a') as zf:
+                # 如果存在同名文件，先删除
+                try:
+                    zf.remove(json_name)
+                except KeyError:
+                    pass
                 zf.write(json_path, json_name)
                 logger.info(f"[#process]添加JSON文件: {json_name}")
                 return True
         except Exception:
             # 如果zipfile失败，使用7z
             try:
+                # 使用7z u命令更新文件
                 subprocess.run(
-                    ['7z', 'a', archive_path, json_path],
+                    ['7z', 'u', archive_path, json_path, f"-w{os.path.dirname(json_path)}"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     check=True
@@ -793,8 +799,12 @@ class PathHandler:
             if not relative_path.parent.parts:
                 return "."
                 
-            # 返回父目录的相对路径（不包含文件名）
-            return str(relative_path.parent)
+            # 返回父目录的相对路径（不包含文件名），保持原始路径分隔符
+            relative_str = str(relative_path.parent)
+            # 如果路径中包含反斜杠，保持原样
+            if '\\' in archive_path.as_posix():
+                relative_str = relative_str.replace('/', '\\')
+            return relative_str
             
         except Exception as e:
             # 如果出错，记录错误但返回一个安全的默认值
