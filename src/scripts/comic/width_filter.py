@@ -13,6 +13,8 @@ import sys
 import warnings
 import subprocess
 from dotenv import load_dotenv
+import argparse
+import pyperclip
 
 # 基础设置
 warnings.filterwarnings('ignore', category=Image.DecompressionBombWarning)
@@ -327,9 +329,14 @@ class ImageProcessor:
         self.logger.info(f"处理完成: 成功{operation} {moved_count} 个文件")
 
 def main():
+    # 创建命令行参数解析器
+    parser = argparse.ArgumentParser(description='图片宽度过滤工具')
+    parser.add_argument('-c', '--clipboard', action='store_true', help='从剪贴板读取源目录路径')
+    args = parser.parse_args()
+
     # 配置参数
     config = {
-        "source_dir": r"E:\999EHV",
+        "source_dir": pyperclip.paste().strip() if args.clipboard else r"E:\999EHV",
         "target_dir": r"E:\7EHV",
         "min_width": 1800,
         "cut_mode": False,
@@ -337,6 +344,11 @@ def main():
         "compare_larger": False,
         "threshold_count": 3
     }
+
+    # 验证源目录路径
+    if not os.path.exists(config["source_dir"]):
+        logger.error(f"源目录不存在: {config['source_dir']}")
+        return
 
     try:
         processor = ImageProcessor(**config)
