@@ -275,6 +275,10 @@ class TextualLogHandler(logging.Handler):
         try:
             msg = self.format(record)
             
+            # 检查是否包含面板标识符
+            if not (msg.startswith('[#') or msg.startswith('[@')):
+                return  # 如果没有面板标识符，直接返回不处理
+            
             # 检查是否是真正的进度条（同时包含@和%）
             is_real_progress = '@' in msg and '%' in msg
             
@@ -295,6 +299,8 @@ class TextualLogHandler(logging.Handler):
                 panel_name = normal_match.group(1)
                 content = normal_match.group(2).strip()
                 tag = f"[#{panel_name}]"
+            else:
+                return  # 如果无法匹配面板标识符，直接返回不处理
             
             # 只在启用截断时进行处理
             if self.enable_truncate:
