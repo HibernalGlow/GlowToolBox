@@ -71,39 +71,136 @@ class ArchiveCleaner:
 
     @staticmethod
     def delete_files_from_archive(archive_path: str, files_to_delete: List[str]) -> bool:
-        """从压缩包中删除指定文件"""
+        """从压缩包中删除指定文件，使用多种方法尝试删除"""
         if not files_to_delete:
             return True
 
+        success = False
+        archive_name = os.path.basename(archive_path)
+        temp_dir = os.path.join(os.path.dirname(archive_path), '.temp_clean')
+        temp_archive = os.path.join(temp_dir, f"temp_{archive_name}")
+
         try:
-            # 尝试使用zipfile
+            # 方法1: 使用zipfile直接删除
             try:
                 with zipfile.ZipFile(archive_path, 'a') as zf:
                     for file in files_to_delete:
                         try:
                             zf.remove(file)
-                            logger.info(f"[删除] {os.path.basename(archive_path)} -> {file}")
+                            logger.info(f"[删除-方法1] {archive_name} -> {file}")
                         except KeyError:
                             pass
-                return True
-            except Exception:
-                # 如果zipfile失败，使用7z
-                for file in files_to_delete:
-                    try:
-                        subprocess.run(
-                            ['7z', 'd', archive_path, file],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            check=True
-                        )
-                        logger.info(f"[删除] {os.path.basename(archive_path)} -> {file}")
-                    except subprocess.CalledProcessError:
-                        logger.error(f"删除文件失败: {file}")
-                        return False
-                return True
+                success = True
+            except Exception as e:
+                logger.debug(f"方法1失败: {e}")
+
+            if not success:
+                # 方法2: 使用7z删除，先尝试通配符
+                try:
+                    # 创建临时目录
+                    os.makedirs(temp_dir, exist_ok=True)
+                    
+                    # 尝试使用通配符删除
+                    patterns = ['*.yaml', '*.json']
+                    for pattern in patterns:
+                        try:
+                            subprocess.run(
+                                ['7z', 'd', archive_path, pattern],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                check=True
+                            )
+                            logger.info(f"[删除-方法2] {archive_name} -> {pattern}")
+                        except subprocess.CalledProcessError:
+                            pass
+
+                    # 再逐个删除具体文件
+                    for file in files_to_delete:
+                        try:
+                            subprocess.run(
+                                ['7z', 'd', archive_path, file],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                check=True
+                            )
+                            logger.info(f"[删除-方法2] {archive_name} -> {file}")
+                        except subprocess.CalledProcessError:
+                            continue
+                    success = True
+                except Exception as e:
+                    logger.debug(f"方法2失败: {e}")
+
+            if not success:
+                # 方法3: 创建新的压缩包，排除要删除的文件
+                try:
+                    # 创建临时目录
+                    os.makedirs(temp_dir, exist_ok=True)
+                    
+                    # 提取所有文件
+                    subprocess.run(
+                        ['7z', 'x', archive_path, f"-o{temp_dir}"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=True
+                    )
+                    
+                    # 删除要删除的文件
+                    for file in files_to_delete:
+                        file_path = os.path.join(temp_dir, file)
+                        try:
+                            if os.path.exists(file_path):
+                                os.remove(file_path)
+                                logger.info(f"[删除-方法3] {archive_name} -> {file}")
+                        except Exception:
+                            pass
+                    
+                    # 创建新的压缩包
+                    subprocess.run(
+                        ['7z', 'a', temp_archive, f"{temp_dir}\\*"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=True
+                    )
+                    
+                    # 替换原始文件
+                    shutil.move(temp_archive, archive_path)
+                    success = True
+                except Exception as e:
+                    logger.debug(f"方法3失败: {e}")
+
+            if not success:
+                # 方法4: 使用zip命令行工具
+                try:
+                    # 创建排除文件列表
+                    exclude_file = os.path.join(temp_dir, "exclude.txt")
+                    with open(exclude_file, 'w', encoding='utf-8') as f:
+                        for file in files_to_delete:
+                            f.write(f"{file}\n")
+                    
+                    # 使用zip命令删除文件
+                    subprocess.run(
+                        ['zip', '-d', archive_path, '@' + exclude_file],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=True
+                    )
+                    success = True
+                    logger.info(f"[删除-方法4] {archive_name} -> 批量删除完成")
+                except Exception as e:
+                    logger.debug(f"方法4失败: {e}")
+
+            return success
+
         except Exception as e:
-            logger.error(f"处理压缩包失败 {archive_path}: {e}")
+            logger.error(f"所有删除方法都失败 {archive_name}: {e}")
             return False
+        finally:
+            # 清理临时文件
+            if os.path.exists(temp_dir):
+                try:
+                    shutil.rmtree(temp_dir)
+                except Exception:
+                    pass
 
     @staticmethod
     def process_archive(archive_path: str) -> None:
@@ -111,11 +208,11 @@ class ArchiveCleaner:
         try:
             yaml_files, json_files = ArchiveCleaner.analyze_archive(archive_path)
             
-            # 如果没有YAML文件，或者没有JSON文件，则跳过处理
-            if not yaml_files or not json_files:
+            # 如果没有YAML文件，则跳过处理
+            if not yaml_files:
                 return
             
-            # 删除所有YAML文件，保留JSON文件
+            # 删除所有YAML文件
             yaml_file_names = [f for f, _ in yaml_files]
             if ArchiveCleaner.delete_files_from_archive(archive_path, yaml_file_names):
                 for yaml_file in yaml_file_names:
@@ -123,20 +220,6 @@ class ArchiveCleaner:
                 logger.info(f"[完成] {os.path.basename(archive_path)}")
             else:
                 logger.error(f"[失败] {os.path.basename(archive_path)}")
-            
-        except Exception as e:
-            # 只处理当压缩包中恰好有一个YAML和一个JSON文件的情况
-            if len(yaml_files) == 1 and len(json_files) == 1:
-                yaml_file = yaml_files[0][0]  # 获取YAML文件名
-                json_file = json_files[0][0]  # 获取JSON文件名
-                
-                # 删除YAML文件，保留JSON文件
-                if ArchiveCleaner.delete_files_from_archive(archive_path, [yaml_file]):
-                    logger.info(f"[分析] {os.path.basename(archive_path)} - 删除YAML文件: {yaml_file}")
-                    logger.info(f"[分析] {os.path.basename(archive_path)} - 保留JSON文件: {json_file}")
-                    logger.info(f"[完成] {os.path.basename(archive_path)}")
-                else:
-                    logger.error(f"[失败] {os.path.basename(archive_path)}")
             
         except Exception as e:
             logger.error(f"处理失败 {archive_path}: {e}")
