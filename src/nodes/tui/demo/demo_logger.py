@@ -1,4 +1,4 @@
-from nodes.tui.textual_logger import TextualLoggerManager
+from nodes.tui.textual_logger_test import TextualLoggerManager
 import logging
 import time
 import random

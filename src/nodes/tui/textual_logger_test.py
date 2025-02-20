@@ -35,12 +35,24 @@
    - update_log: 更新状态日志
 
 4. 样式颜色选项:
-   - yellow: 黄色，通常用于统计信息
-   - cyan: 青色，通常用于进度信息
-   - magenta: 品红色，通常用于处理日志
-   - blue: 蓝色，通常用于更新日志
-   - green: 绿色，通常用于成功信息
-   - red: 红色，通常用于错误信息
+   - 基础色系:
+     * yellow: 黄色
+     * cyan: 青色
+     * magenta: 品红
+     * blue: 蓝色
+     * green: 绿色
+     * red: 红色
+   - 浅色系扩展:
+     * lightblue: 浅蓝
+     * lightgreen: 浅绿
+     * lightcyan: 浅青
+     * lightmagenta: 浅品红
+     * lightyellow: 浅黄
+   - 灰色系:
+     * white: 白
+     * light_gray: 浅灰
+     * dark_gray: 深灰
+   - 自定义颜色: 可以直接使用CSS颜色名称或十六进制值，如 "#a8c8ff"
 """
 
 from textual.app import App, ComposeResult
@@ -85,11 +97,11 @@ class TextualLoggerManager:
     _instance = None
     _app = None
     _default_layout = {
-        "current_stats": {"size": 2, "title": "📊 总体进度", "style": "yellow"},
-        "current_progress": {"size": 2, "title": "🔄 当前进度", "style": "cyan"},
-        "performance": {"size": 2, "title": "⚡ 性能配置", "style": "green"},
-        "process": {"size": 3, "title": "📝 处理日志", "style": "magenta"},
-        "update": {"size": 2, "title": "ℹ️ 更新日志", "style": "blue"}
+        "current_stats": {"ratio": 2, "title": "📊 总体进度", "style": "yellow"},
+        "current_progress": {"ratio": 2, "title": "🔄 当前进度", "style": "cyan"},
+        "performance": {"ratio": 2, "title": "⚡ 性能配置", "style": "green"},
+        "process": {"ratio": 3, "title": "📝 处理日志", "style": "magenta"},
+        "update": {"ratio": 2, "title": "ℹ️ 更新日志", "style": "blue"}
     }
     
     @classmethod
@@ -117,18 +129,16 @@ class TextualLoggerManager:
             root_logger = logging.getLogger()
             root_logger.setLevel(logging.DEBUG)  # 改为使用调用方的日志级别
 
-            # 检查是否已存在 TextualLogHandler
-            has_textual_handler = any(
-                isinstance(handler, TextualLogHandler) 
-                for handler in root_logger.handlers
-            )
+            # 仅移除Textual自己的处理器（如果存在）
+            for handler in root_logger.handlers[:]:
+                if isinstance(handler, TextualLogHandler):
+                    root_logger.removeHandler(handler)
 
-            # 只在没有 TextualLogHandler 时添加新的处理器
-            if not has_textual_handler:
-                textual_handler = TextualLogHandler(cls._app)
-                textual_handler.setFormatter(logging.Formatter('%(message)s'))
-                textual_handler.setLevel(logging.INFO)
-                root_logger.addHandler(textual_handler)
+            # 添加Textual处理器（保留调用方已有的处理器）
+            textual_handler = TextualLogHandler(cls._app)
+            textual_handler.setFormatter(logging.Formatter('%(message)s'))
+            textual_handler.setLevel(logging.INFO)  # 设置适当级别
+            root_logger.addHandler(textual_handler)
             
             # 异步运行应用
             async def run_app():
@@ -154,29 +164,43 @@ class TextualLogHandler(logging.Handler):
         self.path_regex = re.compile(r'([A-Za-z]:\\[^\s]+|/([^\s/]+/){2,}[^\s/]+)')  # 匹配Windows和Unix路径
         
     def _truncate_path(self, path: str, max_length: int = 35) -> str:
-        """路径截断处理"""
+        """路径截断处理（保证最后一个层级完整）"""
         if len(path) <= max_length:
             return path
             
         # 分解路径为组成部分
-        parts = []
-        if '/' in path:  # Unix路径
-            sep = '/'
-        else:  # Windows路径
-            sep = '\\'
-            
-        drive = ''
-        if sep == '\\' and len(path) > 1 and path[1] == ':':
-            drive = path[:2]
-            path = path[2:]
-            
+        sep = '/' if '/' in path else '\\'
         parts = path.split(sep)
+        drive = parts[0] + sep if sep == '\\' and ':' in parts[0] else ''  # 保留Windows驱动器
         
-        # 保留关键部分：驱动+文件名+最近两级目录
-        if len(parts) >= 4:
-            return f"{drive}{sep}{parts[0]}/.../{sep.join(parts[-2:])}"
-        else:
-            return f"{drive}{sep}...{sep}{sep.join(parts[-2:])}"
+        # 分离最后一个层级（文件/文件夹）
+        if len(parts) < 2:
+            return path[:max_length]  # 无法分割时直接截断
+            
+        last_part = parts[-1]
+        remaining_length = max_length - len(last_part) - 4  # 保留空间给...和分隔符
+        
+        if remaining_length <= 0:
+            # 空间不足时强制显示最后部分
+            return f"...{sep}{last_part}"[-max_length:]
+            
+        # 构建前缀部分
+        prefix = sep.join(parts[:-1])
+        if len(prefix) > remaining_length:
+            # 需要截断前缀部分
+            prefix_parts = []
+            current_len = 0
+            for part in parts[:-1]:
+                if current_len + len(part) + 1 <= remaining_length:
+                    prefix_parts.append(part)
+                    current_len += len(part) + 1
+                else:
+                    break
+            if prefix_parts:
+                return f"{sep.join(prefix_parts)}...{sep}{last_part}"
+            return f"...{sep}{last_part}"
+            
+        return f"{prefix}{sep}{last_part}"
 
     def emit(self, record):
         """处理日志记录"""
@@ -184,31 +208,30 @@ class TextualLogHandler(logging.Handler):
             msg = self.format(record)
             
             # 路径截断处理
-            # msg = self.path_regex.sub(
-            #     lambda m: self._truncate_path(m.group()), 
-            #     msg
-            # )
+            msg = self.path_regex.sub(
+                lambda m: self._truncate_path(m.group()), 
+                msg
+            )
             
-            # 解析面板标识
-            panel_match = re.match(r'\[#(\w+)(=)?\](.*)', msg)
+            # 修正分组索引错误
+            progress_match = re.match(r'^\[@(\w+)\](.*)$', msg)  # 简化正则
+            normal_match = re.match(r'^\[#(\w+)\](.*)$', msg)    # 简化正则
             
-            if panel_match:
-                # 提取面板名和消息内容
-                panel_name = panel_match.group(1)
-                is_progress = panel_match.group(2) == '='
-                content = panel_match.group(3).strip()
-                
-                # 根据日志级别添加图标
-                if not is_progress:  # 只为非进度条消息添加图标
-                    if record.levelno >= logging.ERROR:
-                        content = f"❌ {content}"
-                    elif record.levelno >= logging.WARNING:
-                        content = f"🚨{content}"
-                
-                # 更新面板内容
+            if progress_match:
+                panel_name = progress_match.group(1)
+                content = progress_match.group(2).strip()  # 直接取第二个分组
                 self.app.update_panel(panel_name, content)
+                
+            elif normal_match:
+                panel_name = normal_match.group(1)
+                content = normal_match.group(2).strip()  # 直接取第二个分组
+                if record.levelno >= logging.ERROR:
+                    content = f"❌ {content}"
+                elif record.levelno >= logging.WARNING:
+                    content = f"⚠️ {content}"
+                self.app.update_panel(panel_name, content)
+                
             else:
-                # 没有指定面板的消息发送到update面板
                 if record.levelno >= logging.ERROR:
                     self.app.update_panel("update", f"❌ {msg}")
                 elif record.levelno >= logging.WARNING:
@@ -218,6 +241,27 @@ class TextualLogHandler(logging.Handler):
                 
         except Exception:
             self.handleError(record)
+
+    def _handle_progress_message(self, panel_name: str, content: str):
+        """专用进度条处理（无图标添加）"""
+        self.app.update_panel(panel_name, content)
+
+    def _handle_normal_message(self, panel_name: str, content: str, record: logging.LogRecord):
+        """普通消息处理（添加状态图标）"""
+        if record.levelno >= logging.ERROR:
+            content = f"❌ {content}"
+        elif record.levelno >= logging.WARNING:
+            content = f"⚠️ {content}"
+        self.app.update_panel(panel_name, content)
+
+    def _handle_default_message(self, msg: str, record: logging.LogRecord):
+        """处理未指定面板的消息"""
+        if record.levelno >= logging.ERROR:
+            self.app.update_panel("update", f"❌ {msg}")
+        elif record.levelno >= logging.WARNING:
+            self.app.update_panel("update", f"⚠️ {msg}")
+        else:
+            self.app.update_panel("update", msg)
 
 class LogPanel(Static):
     """自定义日志面板组件，支持固定行数显示和进度条"""
@@ -240,212 +284,231 @@ class LogPanel(Static):
         self.next_progress_position = 0  # 下一个进度条位置
 
     def _create_progress_bar(self, width: int, percentage: float, fraction: str = None, fraction_format: str = None) -> str:
-        """创建进度条动画
+        """创建带简单ASCII进度条的文本显示"""
+        bar_width = max(10, width - 20)
+        filled = int(round(bar_width * percentage / 100))
         
-        Args:
-            width: 进度条宽度
-            percentage: 进度百分比
-            fraction: 分数形式的进度（如 "2/6"）
-            fraction_format: 分数的显示格式（如 "(2/6)" 或 "[2/6]" 或 "2/6"）
-            
-        Returns:
-            带动画效果的进度条字符串
-        """
-        # 计算实际进度条宽度（考虑边框和百分比显示的空间）
-        extra_space = 20 if fraction_format else 15  # 为分数显示预留更多空间
-        bar_width = width - extra_space
-        if bar_width < 10:  # 如果空间太小，返回简单格式
-            if fraction_format:
-                return f"{fraction_format} {percentage:.2f}%"
-            return f"{percentage:.2f}%"
-            
-        # 计算已完成和未完成的部分
-        completed = int(bar_width * percentage / 100)
-        remaining = bar_width - completed
-        
-        # 使用不同的字符来表示进度
-        if percentage == 100:
-            # 完成时使用特殊字符
-            bar = "█" * completed
+        # 根据完成状态使用不同字符
+        if percentage >= 100:
+            progress_bar = "█" * bar_width + " ✅"  # 完成时显示对勾
         else:
-            # 进行中时使用动画效果
-            blocks = ["█", "▉", "▊", "▋", "▌", "▍", "▎", "▏"]
-            full_block = "█" * (completed - 1) if completed > 0 else ""
-            
-            # 计算动画帧
-            animation_frame = int(time.time() * 4) % len(blocks)  # 4是动画速度
-            animation_block = blocks[animation_frame] if completed < bar_width else ""
-            
-            bar = full_block + animation_block
-            
-        # 添加未完成部分
-        bar = f"{bar}{'░' * remaining}"
+            progress_bar = "█" * filled + "░" * (bar_width - filled)
         
-        # 添加百分比和分数显示
+        # 组合内容
         if fraction_format:
-            return f"{fraction_format} [{bar}] {percentage:.2f}%"
-        else:
-            return f"[{bar}] {percentage:.2f}%"
-        
+            return f"{progress_bar} {fraction_format} {percentage:.1f}%"
+        return f"{progress_bar} {percentage:.1f}%"
+
     def append(self, text: str) -> None:
         """追加内容并保持在最大行数限制内"""
+        # 检查是否是进度条更新
+        if self._is_progress_message(text):
+            self._handle_progress_message(text)
+        else:
+            self._handle_normal_message(text)
+            
+        # 更新显示
+        self._update_display()
+        
+        # 无论是否有进度条，都确保面板定期刷新
+        if not hasattr(self, '_refresh_timer'):
+            self._refresh_timer = self.set_interval(0.1, self._periodic_refresh)
+            
+        self.scroll_end()
+
+    def _periodic_refresh(self) -> None:
+        """定期刷新面板内容"""
+        self._update_display()
+        self.refresh()
+
+    def on_unmount(self) -> None:
+        """组件卸载时清理定时器"""
+        if hasattr(self, '_refresh_timer'):
+            self._refresh_timer.stop()
+
+    def _is_progress_message(self, text: str) -> bool:
+        """检查是否为进度条消息"""
         # 定义正则表达式组件
-        # 1. 消息前缀部分 (非贪婪匹配，允许空白)
         PREFIX_PATTERN = r'([^%]*?(?=\s*(?:\[|\(|\d+(?:\.\d+)?%|\s*$)))'
-        
-        # 2. 分数部分（可选）
-        # 2.1 带括号的分数
         BRACKETED_FRACTION = r'(?:(\(|\[)(\d+/\d+)[\)\]])'
-        # 2.2 不带括号的分数
         PLAIN_FRACTION = r'(\d+/\d+)'
-        # 2.3 组合分数模式
         FRACTION_PART = fr'\s*(?:{BRACKETED_FRACTION}|\s*{PLAIN_FRACTION})?'
-        
-        # 3. 百分比部分
-        # 3.1 直接百分比
         PERCENTAGE = r'(\d+(?:\.\d+)?)%'
-        # 3.2 分数形式的百分比
         FRACTION_PERCENTAGE = r'\((\d+)/(\d+)\)'
-        # 3.3 组合百分比模式
         PERCENTAGE_PART = fr'\s*(?:{PERCENTAGE}|{FRACTION_PERCENTAGE})$'
         
-        # 组合完整的正则表达式
+        PROGRESS_PATTERN = fr'{PREFIX_PATTERN}{FRACTION_PART}{PERCENTAGE_PART}'
+        return bool(re.match(PROGRESS_PATTERN, text))
+
+    def _handle_progress_message(self, text: str) -> None:
+        """处理进度条消息"""
+        progress_info = self._parse_progress_info(text)
+        if not progress_info:
+            return
+            
+        msg_prefix, percentage, fraction, fraction_format = progress_info
+        self._update_progress_bars(msg_prefix, percentage, fraction, fraction_format)
+
+    def _parse_progress_info(self, text: str) -> Optional[tuple]:
+        """解析进度条信息"""
+        # 使用与_is_progress_message相同的正则表达式
+        PREFIX_PATTERN = r'([^%]*?(?=\s*(?:\[|\(|\d+(?:\.\d+)?%|\s*$)))'
+        BRACKETED_FRACTION = r'(?:(\(|\[)(\d+/\d+)[\)\]])'
+        PLAIN_FRACTION = r'(\d+/\d+)'
+        FRACTION_PART = fr'\s*(?:{BRACKETED_FRACTION}|\s*{PLAIN_FRACTION})?'
+        PERCENTAGE = r'(\d+(?:\.\d+)?)%'
+        FRACTION_PERCENTAGE = r'\((\d+)/(\d+)\)'
+        PERCENTAGE_PART = fr'\s*(?:{PERCENTAGE}|{FRACTION_PERCENTAGE})$'
+        
         PROGRESS_PATTERN = fr'{PREFIX_PATTERN}{FRACTION_PART}{PERCENTAGE_PART}'
         
-        # 检查是否是进度条更新
-        progress_match = re.match(PROGRESS_PATTERN, text)
+        match = re.match(PROGRESS_PATTERN, text)
+        if not match:
+            return None
+            
+        msg_prefix = match.group(1).strip()
+        percentage = None
+        fraction = None
+        fraction_format = None
         
-        if progress_match:
-            # 提取消息前缀，移除末尾空格
-            msg_prefix = progress_match.group(1).strip()
-            percentage = None
-            fraction = None
-            fraction_format = None  # 存储分数的显示格式
+        if match.group(2):  # 有括号
+            bracket = match.group(2)
+            fraction_display = match.group(3)
+            fraction_format = f"{bracket}{fraction_display}{')'if bracket=='('else']'}"
+        elif match.group(4):  # 无括号的分数
+            fraction_display = match.group(4)
+            fraction_format = fraction_display
+        
+        if match.group(5):  # 百分比格式
+            percentage = float(match.group(5))
+        else:  # 分数格式
+            current = int(match.group(6))
+            total = int(match.group(7))
+            percentage = current * 100.0 / total
+            fraction = f"{current}/{total}"
             
-            # 提取分数显示格式
-            if progress_match.group(2):  # 有括号
-                bracket = progress_match.group(2)
-                fraction_display = progress_match.group(3)
-                fraction_format = f"{bracket}{fraction_display}{')'if bracket=='('else']'}"
-            elif progress_match.group(4):  # 无括号的分数
-                fraction_display = progress_match.group(4)
-                fraction_format = fraction_display
-            
-            if progress_match.group(5):  # 百分比格式
-                percentage = float(progress_match.group(5))
-            else:  # 分数格式
-                current = int(progress_match.group(6))
-                total = int(progress_match.group(7))
-                percentage = current * 100.0 / total
-                fraction = f"{current}/{total}"
-            
-            # 如果是已存在的进度条消息，更新它
-            if msg_prefix in self.progress_bars:
-                position = self.progress_bars[msg_prefix][1]
-                is_completed = percentage >= 100
-                self.progress_bars[msg_prefix] = (percentage, position, is_completed, fraction, fraction_format)
-            else:
-                # 检查是否有已完成的进度条可以替换
-                completed_position = None
-                for pos, msg in list(self.progress_positions.items()):
-                    if msg in self.progress_bars and self.progress_bars[msg][2]:  # 找到已完成的进度条
-                        completed_position = pos
-                        old_msg = msg
-                        # 移除旧的进度条
-                        del self.progress_bars[old_msg]
-                        del self.progress_positions[pos]
-                        break
-                
-                # 如果找到已完成的进度条位置，使用该位置
-                if completed_position is not None:
-                    position = completed_position
-                else:
-                    # 否则使用新位置
-                    position = self.next_progress_position
-                    self.next_progress_position += 1
-                
-                is_completed = percentage >= 100
-                self.progress_bars[msg_prefix] = (percentage, position, is_completed, fraction, fraction_format)
-                self.progress_positions[position] = msg_prefix
+        return msg_prefix, percentage, fraction, fraction_format
+
+    def _update_progress_bars(self, msg_prefix: str, percentage: float, 
+                            fraction: Optional[str], fraction_format: Optional[str]) -> None:
+        """更新进度条信息"""
+        if msg_prefix in self.progress_bars:
+            position = self.progress_bars[msg_prefix][1]
         else:
-            # 直接添加新行时进行合并检查
-            cleaned_msg = re.sub(r'^(\S+\s+)', '', text)  # 去除消息前缀图标
-            start_part = cleaned_msg[:4]  # 提取前4个字符作为合并依据
+            position = self._get_available_position()
+            
+        is_completed = percentage >= 100
+        self.progress_bars[msg_prefix] = (percentage, position, is_completed, fraction, fraction_format)
+        self.progress_positions[position] = msg_prefix
 
-            if self.content:
-                # 获取上条消息并清理前缀
-                last_msg = self.content[-1]
-                last_cleaned = re.sub(r'^(\S+\s+)', '', last_msg)
-                last_start = last_cleaned[:4]
+    def _get_available_position(self) -> int:
+        """获取可用的进度条位置"""
+        # 首先检查是否有已完成的进度条位置
+        for pos, msg in list(self.progress_positions.items()):
+            if msg in self.progress_bars and self.progress_bars[msg][2]:
+                del self.progress_bars[msg]
+                del self.progress_positions[pos]
+                return pos
+                
+        # 如果没有已完成的位置，检查是否需要替换最旧的位置
+        if self.progress_positions:
+            oldest_position = min(self.progress_positions.keys())
+            oldest_msg = self.progress_positions[oldest_position]
+            del self.progress_bars[oldest_msg]
+            del self.progress_positions[oldest_position]
+            return oldest_position
+            
+        # 如果没有任何位置，创建新位置
+        position = self.next_progress_position
+        self.next_progress_position += 1
+        return position
 
-                # 合并条件：前4字符相同且消息类型相同（普通消息）
-                if start_part == last_start and len(start_part) >= 4:
-                    self.content[-1] = text  # 替换最后一条
-                else:
-                    self.content.append(text)
+    def _handle_normal_message(self, text: str) -> None:
+        """处理普通消息"""
+        cleaned_msg = re.sub(r'^(\S+\s+)', '', text)
+        start_part = cleaned_msg[:4]
+
+        if self.content and len(start_part) >= 4:
+            last_msg = self.content[-1]
+            last_cleaned = re.sub(r'^(\S+\s+)', '', last_msg)
+            last_start = last_cleaned[:4]
+
+            if start_part == last_start:
+                self.content[-1] = text  # 合并相似消息
             else:
                 self.content.append(text)
-        
-        # 保持内容在最大缓存行数以内
+        else:
+            self.content.append(text)
+
+        # 保持内容在最大行数限制内
         if len(self.content) > self.max_lines:
             self.content = self.content[-self.max_lines:]
-        
-        # 仅在终端大小变化时重新计算面板高度
-        current_size = self.app.size if self.app else None
-        if current_size != self._cached_size:
-            self._cached_size = current_size
-            self._cached_panel_height = self._calculate_panel_height()
-            self._cached_visible_lines = self._cached_panel_height - 2 if self._cached_panel_height > 2 else 1
-            
-        # 使用缓存的可见行数
-        visible_lines = self._cached_visible_lines or 1
+
+    def _update_display(self) -> None:
+        """更新显示内容"""
+        # 更新面板尺寸缓存
+        self._update_size_cache()
         
         # 准备显示内容
         display_content = []
         
-        # 首先添加所有进度条，按位置排序
-        sorted_positions = sorted(self.progress_positions.keys())
-        for pos in sorted_positions:
+        # 添加进度条
+        display_content.extend(self._get_progress_bar_content())
+        
+        # 添加普通消息
+        display_content.extend(self._get_normal_message_content())
+        
+        # 更新渲染
+        self.update_render("\n".join(display_content))
+
+    def _update_size_cache(self) -> None:
+        """更新尺寸缓存"""
+        current_size = self.app.console.size if self.app else None
+        if current_size != self._cached_size:
+            self._cached_size = current_size
+            self._cached_panel_height = self._calculate_panel_height()
+            self._cached_visible_lines = self._cached_panel_height - 2 if self._cached_panel_height > 2 else 1
+
+    def _get_progress_bar_content(self) -> List[str]:
+        """获取进度条显示内容"""
+        content = []
+        console_width = self.app.console.width if self.app else 80
+        
+        for pos in sorted(self.progress_positions.keys()):
             msg_prefix = self.progress_positions[pos]
             if msg_prefix in self.progress_bars:
                 percentage, _, _, fraction, fraction_format = self.progress_bars[msg_prefix]
                 progress_bar = self._create_progress_bar(
-                    self.size.width - len(msg_prefix) - 4,
+                    console_width - len(msg_prefix) - 4,
                     percentage,
                     fraction,
                     fraction_format
                 )
-                display_content.append(f"{msg_prefix}{progress_bar}")
+                content.append(f"{msg_prefix}{progress_bar}")
+        return content
+
+    def _get_normal_message_content(self) -> List[str]:
+        """获取普通消息显示内容"""
+        content = []
+        remaining_lines = max(0, (self._cached_visible_lines or 1) - len(self.progress_positions))
         
-        # 计算剩余可用行数
-        remaining_lines = visible_lines - len(display_content)
-        
-        # 添加最新的普通消息
         if remaining_lines > 0:
-            for line in self.content[-remaining_lines:]:
-                if self.size.width > 4:  # 考虑边框占用的空间
-                    max_width = self.size.width - 4  # 减去边框和padding的宽度
-                    current_line = f"- {line}"
-                    if len(current_line) > max_width:
-                        current_line = current_line[:max_width-3] + "..."
-                    display_content.append(current_line)
+            messages = list(reversed(self.content[-remaining_lines:]))
+            for msg in messages:
+                if self.app and self.app.console.width > 4:
+                    content.append(f"- {msg}")
                 else:
-                    display_content.append(f"- {line}")
-            
-        # 更新显示
-        self.update_render("\n".join(display_content))
-        
-        # 如果有活动的进度条，设置定时刷新
-        if any(not info[2] for info in self.progress_bars.values()):  # 检查是否有未完成的进度条
-            self.set_interval(0.1, self.refresh)
+                    content.append(f"- {msg}")
+                    
+        return list(reversed(content))  # 恢复正确顺序
 
     def _calculate_panel_height(self) -> int:
         """计算面板应占用的高度"""
         if not self.app:
             return 3
             
-        # 获取终端高度和面板数量
-        terminal_height = self.app.size.height
+        # 获取终端高度和面板数量（使用console的尺寸）
+        terminal_height = self.app.console.size.height  # 修改为使用console的尺寸
         panels = list(self.app.query(LogPanel))
         
         # 计算可用高度（考虑标题栏和底部栏）
@@ -460,7 +523,9 @@ class LogPanel(Static):
         # 对于除最后一个面板外的所有面板，向下取整
         is_last_panel = panels[-1] == self
         if not is_last_panel:
-            panel_height = max(3, int(unit_height * self.ratio))
+            base_lines = 3 # 最小显示行数
+            panel_height = max(base_lines, int(unit_height * self.ratio))
+            self._cached_visible_lines = panel_height - 2  # 增加可见行数
         else:
             # 最后一个面板获取剩余所有空间
             used_height = sum(max(3, int(unit_height * p.ratio)) for p in panels[:-1])
@@ -469,55 +534,12 @@ class LogPanel(Static):
         return panel_height
         
     def update_render(self, content: str) -> None:
-        """渲染更新"""
+        """普通文本渲染"""
         self.styles.border = ("heavy", self.base_style)
-        self.border_title = f"[{self.base_style}]{self.title}[/]"
-        self.border_subtitle = f"[dim]{self.panel_name}[/]"
-        
-        # 处理内容换行
-        if self.size.width > 4:  # 考虑边框占用的空间
-            max_width = self.size.width - 4  # 减去边框和padding的宽度
-            formatted_lines = []
-            total_actual_lines = 0  # 记录实际总行数（包括折行）
-            
-            for line in content.split('\n'):
-                # 如果行长度超过最大宽度，进行折行处理
-                if len(line) > max_width:
-                    # 计算需要折多少行
-                    line_parts = []
-                    remaining = line
-                    while len(remaining) > max_width:
-                        # 在最大宽度处查找最后一个空格
-                        space_pos = remaining[:max_width].rfind(' ')
-                        if space_pos == -1:  # 如果找不到空格，就强制在最大宽度处截断
-                            line_parts.append(remaining[:max_width-1] + "↙")
-                            remaining = remaining[max_width-1:]
-                        else:  # 在空格处折行
-                            line_parts.append(remaining[:space_pos])
-                            remaining = remaining[space_pos+1:]
-                    line_parts.append(remaining)
-                    total_actual_lines += len(line_parts)  # 增加折行后的实际行数
-                    formatted_lines.extend(line_parts)
-                else:
-                    formatted_lines.append(line)
-                    total_actual_lines += 1  # 增加一行
-            
-            # 根据实际总行数（包括折行）来限制显示
-            if self._cached_visible_lines and total_actual_lines > self._cached_visible_lines:
-                # 从后往前计算需要保留多少行（考虑折行后的实际行数）
-                kept_lines = []
-                current_lines = 0
-                for line in reversed(formatted_lines):
-                    if current_lines + 1 <= self._cached_visible_lines:
-                        kept_lines.append(line)
-                        current_lines += 1
-                    else:
-                        break
-                formatted_lines = list(reversed(kept_lines))
-            
-            content = '\n'.join(formatted_lines)
-        
-        super().update(f"[{self.base_style}]{content}")
+        self.styles.color = self.base_style  # 设置面板文本颜色
+        self.border_title = f"{self.title}"
+        self.border_subtitle = f"{self.panel_name}"
+        super().update(content)
 
     def on_mount(self) -> None:
         """当组件被挂载时调用"""
@@ -763,9 +785,9 @@ class TextualLogger(App):
 if __name__ == "__main__":
     # 演示使用方法
     TextualLoggerManager.set_layout({
-        "system": {"title": "🖥️ 系统状态", "style": "green", "ratio": 2},
-        "error": {"title": "❌ 错误检查", "style": "red", "ratio": 2},
-        "info": {"title": "ℹ️ 信息日志", "style": "blue", "ratio": 3},
+        "system": {"title": "🖥️ 系统状态", "style": "lightgreen", "ratio": 2},
+        "error": {"title": "❌ 错误检查", "style": "lightpink", "ratio": 2},
+        "info": {"title": "ℹ️ 信息日志", "style": "lightblue", "ratio": 3},
     })
     
     # 使用标准logging发送日志
@@ -780,7 +802,7 @@ if __name__ == "__main__":
         
         # 预定义一些演示消息
         system_msgs = [
-            "CPU使用率: {}%",
+            # "CPU使用率: {}%",
             "内存使用: {}MB",
             "磁盘空间: {}GB可用"
         ]
@@ -816,6 +838,7 @@ if __name__ == "__main__":
                 ("配置更新", "带括号分数"),
                 ("缓存优化", "带方括号分数"),
                 ("", "带方括号分数")  # 测试空任务名
+                
             ]
         }
         
@@ -826,13 +849,16 @@ if __name__ == "__main__":
             "info": {}
         }
         
-        # 首先测试简单进度条
-        logger.info("[#system=]50%")
-        logger.info("[#error=](1/2) 50%")
-        logger.info("[#info=][1/2] 50%")
-        time.sleep(2)  # 暂停2秒查看效果
+        # # 首先测试简单进度条
+        # logger.info("[@system]50%")
+        # logger.info("[@error](1/2) 50%")
+        # logger.info("[@info][1/2] 50%")
+        # time.sleep(2)  # 暂停2秒查看效果
         
         while True:
+            long_path = "/this/is/a/very/long/path/to/some/file/in/the/system/directory/structure.zip" * 3
+            logger.info(f"[#system]访问路径：{long_path}")
+
             # 系统面板消息
             msg = random.choice(system_msgs)
             value = random.randint(1, 100)
@@ -850,7 +876,7 @@ if __name__ == "__main__":
             logger.info(f"[#info]{msg.format(value)}")
             
             # 为每个面板更新进度条
-            for panel in ["system", "error", "info"]:
+            for panel in [ "error"]:
                 # 随机启动新进度条
                 if len(active_progress[panel]) < 2 and random.random() < 0.1:  # 10%概率启动新进度条
                     available_tasks = [t for t, _ in progress_tasks[panel] if t not in active_progress[panel]]
@@ -862,11 +888,11 @@ if __name__ == "__main__":
                         
                         # 根据格式类型显示初始进度
                         if format_type == "普通百分比":
-                            logger.info(f"[#{panel}=]{task} 0%")
+                            logger.info(f"[@{panel}]{task} 0%")
                         elif format_type == "带括号分数":
-                            logger.info(f"[#{panel}=]{task} (0/100) 0%")
+                            logger.info(f"[@{panel}]{task} (0/100) 0%")
                         else:  # 带方括号分数
-                            logger.info(f"[#{panel}=]{task} [0/100] 0%")
+                            logger.info(f"[@{panel}]{task} [0/100] 0%")
                 
                 # 更新现有进度条
                 for task in list(active_progress[panel].keys()):
@@ -878,24 +904,24 @@ if __name__ == "__main__":
                     if progress >= 100:
                         # 完成的进度条保持显示
                         if format_type == "普通百分比":
-                            logger.info(f"[#{panel}=]{task} 100%")
+                            logger.info(f"[@{panel}]{task} 100%")
                         elif format_type == "带括号分数":
-                            logger.info(f"[#{panel}=]{task} (100/100) 100%")
+                            logger.info(f"[@{panel}]{task} (100/100) 100%")
                         else:  # 带方括号分数
-                            logger.info(f"[#{panel}=]{task} [100/100] 100%")
+                            logger.info(f"[@{panel}]{task} [100/100] 100%")
                         del active_progress[panel][task]
                     else:
                         # 更新进度
                         task_info["progress"] = progress
                         if format_type == "普通百分比":
-                            logger.info(f"[#{panel}=]{task} {progress}%")
+                            logger.info(f"[@{panel}]{task} {progress}%")
                         elif format_type == "带括号分数":
-                            logger.info(f"[#{panel}=]{task} ({progress}/100) {progress}%")
+                            logger.info(f"[@{panel}]{task} ({progress}/100) {progress}%")
                         else:  # 带方括号分数
-                            logger.info(f"[#{panel}=]{task} [{progress}/100] {progress}%")
+                            logger.info(f"[@{panel}]{task} [{progress}/100] {progress}%")
             
             # 控制发送频率
-            time.sleep(random.uniform(0.3, 1.0))  # 随机延迟0.3-1.0秒
+            time.sleep(random.uniform(0.01, 0.02))  # 随机延迟0.3-1.0秒
     
     # 在新线程中运行演示
     demo_thread = threading.Thread(target=demo_logs)
