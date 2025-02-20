@@ -1,71 +1,236 @@
 import os
 import uuid
+import json
 import yaml
 import time
 import subprocess
 import difflib
+import shutil
+import logging
+import sys
+import threading
+import argparse
+import multiprocessing
 from pathlib import Path
+from datetime import datetime
 from nanoid import generate
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import argparse
 import pyperclip
-import sys
-import threading
-import logging
-from datetime import datetime
 from colorama import init, Fore, Style
-from logging.handlers import RotatingFileHandler
 import win32file
 import win32con
-import shutil
-import logging
 import numpy as np
-import yaml as yaml_c
-from rich.progress import Progress, BarColumn, TextColumn
+from nodes.record.logger_config import setup_logger
+from nodes.tui.textual_preset import create_config_app
+import orjson  # 使用orjson进行更快的JSON处理
+import zipfile
+from typing import Dict, Any, Optional
+
 # 导入自定义日志模块
-# 添加父目录到Python路径
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from tui.config import create_config_app
-# ================= 日志配置 =================
-script_name = os.path.basename(__file__).replace('.py', '')
-logspath=r"D:/1VSCODE/1ehv/logs"
-LOG_BASE_DIR = Path(logspath + f"/{script_name}")
-DATE_STR = datetime.now().strftime("%Y%m%d")
-HOUR_STR = datetime.now().strftime("%H")  # 新增小时目录
-LOG_DIR = LOG_BASE_DIR / DATE_STR / HOUR_STR  # 修改目录结构
-LOG_FILE = LOG_DIR / f"{datetime.now().strftime('%M%S')}.log"  # 文件名只保留分秒
-
-# 创建日志目录
-LOG_DIR.mkdir(parents=True, exist_ok=True)
-
-# 配置日志格式
-LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
-formatter = logging.Formatter(LOG_FORMAT)
-
-# 文件处理器
-file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
-file_handler.setFormatter(formatter)
-file_handler.setLevel(logging.DEBUG)
-
-# 控制台处理器
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(formatter)
-console_handler.setLevel(logging.INFO)
-
-# 主日志器配置
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
-logger.addHandler(file_handler)
-logger.addHandler(console_handler)
-
-# 禁用第三方库的日志
-logging.getLogger("PIL").setLevel(logging.WARNING)
-logging.getLogger("urllib3").setLevel(logging.WARNING)
+config = {
+    'script_name': 'comic_auto_uuid',
+    'console_enabled': False
+}
+logger, config_info = setup_logger(config)
 # 初始化 colorama
 init()
+
+class JsonHandler:
+    """JSON文件处理类"""
+    
+    @staticmethod
+    def load(file_path: str) -> Dict[str, Any]:
+        """快速加载JSON文件"""
+        try:
+            with open(file_path, 'rb') as f:
+                return orjson.loads(f.read())
+        except Exception as e:
+            logger.error(f"加载JSON文件失败 {file_path}: {e}")
+            return {}
+    
+    @staticmethod
+    def save(file_path: str, data: Dict[str, Any]) -> bool:
+        """快速保存JSON文件"""
+        temp_path = f"{file_path}.tmp"
+        try:
+            # 使用orjson进行快速序列化
+            json_bytes = orjson.dumps(
+                data,
+                option=orjson.OPT_INDENT_2 | orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY
+            )
+            
+            with open(temp_path, 'wb') as f:
+                f.write(json_bytes)
+            
+            if os.path.exists(file_path):
+                os.replace(temp_path, file_path)
+            else:
+                os.rename(temp_path, file_path)
+            return True
+            
+        except Exception as e:
+            logger.error(f"保存JSON文件失败 {file_path}: {e}")
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            return False
+
+    @staticmethod
+    def convert_yaml_to_json(yaml_data: list) -> Dict[str, Any]:
+        """将YAML数据转换为新的JSON格式"""
+        json_data = {
+            "timestamps": {}
+        }
+        
+        for record in yaml_data:
+            timestamp = record.get('Timestamp', '')
+            if not timestamp:
+                continue
+                
+            json_data["timestamps"][timestamp] = {
+                "archive_name": record.get('ArchiveName', ''),
+                "artist_name": record.get('ArtistName', ''),
+                "relative_path": record.get('RelativePath', '')
+            }
+        
+        return json_data
+
+class ArchiveHandler:
+    """压缩包处理类"""
+    
+    @staticmethod
+    def load_yaml_uuid_from_archive(archive_path: str) -> Optional[str]:
+        """从压缩包中加载YAML文件的UUID"""
+        try:
+            with zipfile.ZipFile(archive_path, 'r') as zf:
+                for name in zf.namelist():
+                    if name.endswith('.yaml'):
+                        return os.path.splitext(name)[0]
+        except zipfile.BadZipFile:
+            # 如果不是zip文件，尝试使用7z
+            return ArchiveHandler._load_uuid_from_7z(archive_path, '.yaml')
+        except Exception as e:
+            logger.error(f"读取压缩包失败 {archive_path}: {e}")
+        return None
+    
+    @staticmethod
+    def load_json_uuid_from_archive(archive_path: str) -> Optional[str]:
+        """从压缩包中加载JSON文件的UUID"""
+        try:
+            with zipfile.ZipFile(archive_path, 'r') as zf:
+                for name in zf.namelist():
+                    if name.endswith('.json'):
+                        return os.path.splitext(name)[0]
+        except zipfile.BadZipFile:
+            # 如果不是zip文件，尝试使用7z
+            return ArchiveHandler._load_uuid_from_7z(archive_path, '.json')
+        except Exception as e:
+            logger.error(f"读取压缩包失败 {archive_path}: {e}")
+        return None
+    
+    @staticmethod
+    def _load_uuid_from_7z(archive_path: str, ext: str) -> Optional[str]:
+        """使用7z命令行工具加载UUID"""
+        try:
+            startupinfo = None
+            if os.name == 'nt':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            
+            result = subprocess.run(
+                ['7z', 'l', archive_path],
+                capture_output=True,
+                text=True,
+                encoding='gbk',
+                errors='ignore',
+                startupinfo=startupinfo,
+                check=False
+            )
+            
+            if result.returncode != 0:
+                return None
+            
+            for line in result.stdout.splitlines():
+                if not line.strip():
+                    continue
+                if line.endswith(ext):
+                    return os.path.splitext(line.split()[-1])[0]
+                    
+        except Exception as e:
+            logger.error(f"使用7z读取压缩包失败 {archive_path}: {e}")
+        return None
+    
+    @staticmethod
+    def convert_yaml_archive_to_json(archive_path: str) -> Optional[Dict[str, Any]]:
+        """转换压缩包中的YAML文件为JSON格式"""
+        try:
+            yaml_uuid = ArchiveHandler.load_yaml_uuid_from_archive(archive_path)
+            if not yaml_uuid:
+                return None
+            
+            # 创建临时目录
+            temp_dir = os.path.join(os.path.dirname(archive_path), '.temp_extract')
+            os.makedirs(temp_dir, exist_ok=True)
+            
+            try:
+                # 提取YAML文件
+                with zipfile.ZipFile(archive_path, 'r') as zf:
+                    try:
+                        zf.extract(f"{yaml_uuid}.yaml", temp_dir)
+                    except KeyError:
+                        # 如果不是zip文件，使用7z
+                        subprocess.run(
+                            ['7z', 'e', archive_path, f"{yaml_uuid}.yaml", f"-o{temp_dir}"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            check=True
+                        )
+                
+                yaml_path = os.path.join(temp_dir, f"{yaml_uuid}.yaml")
+                if not os.path.exists(yaml_path):
+                    return None
+                
+                # 读取并转换YAML
+                with open(yaml_path, 'r', encoding='utf-8') as f:
+                    yaml_data = yaml.safe_load(f)
+                
+                # 转换为JSON
+                json_data = JsonHandler.convert_yaml_to_json(yaml_data)
+                json_data["uuid"] = yaml_uuid
+                
+                # 创建JSON文件
+                json_path = os.path.join(temp_dir, f"{yaml_uuid}.json")
+                if JsonHandler.save(json_path, json_data):
+                    # 更新压缩包
+                    try:
+                        with zipfile.ZipFile(archive_path, 'a') as zf:
+                            # 删除旧的YAML文件
+                            zf.remove(f"{yaml_uuid}.yaml")
+                            # 添加新的JSON文件
+                            zf.write(json_path, f"{yaml_uuid}.json")
+                    except Exception:
+                        # 如果不是zip文件，使用7z
+                        subprocess.run(
+                            ['7z', 'd', archive_path, f"{yaml_uuid}.yaml"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            check=True
+                        )
+                        subprocess.run(
+                            ['7z', 'a', archive_path, json_path],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            check=True
+                        )
+                    
+                    return json_data
+                
+            finally:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                
+        except Exception as e:
+            logger.error(f"转换压缩包中的YAML失败 {archive_path}: {e}")
+        return None
 
 # 定义文件路径和线程锁
 # uuid_file_path = r'E:\1BACKUP\ehv\uuid.md'  # 存储唯一 UUID 的 Markdown 文件
@@ -235,39 +400,26 @@ def repair_uuid_records(uuid_record_path):
         return []
 
 def load_existing_uuids():
-    """添加超时机制的加载函数"""
-    logger.info("🔍 开始加载现有UUID...")
+    """从JSON记录中加载现有UUID"""
+    logging.info("🔍 开始加载现有UUID...")
     start_time = time.time()
-    loader = FastUUIDLoader(r'E:\1BACKUP\ehv\uuid\uuid_records.yaml')
     
-    # 超时设置（5分钟）
-    timeout = 300  
-    last_percent = 0
-    
-    while True:
-        if time.time() - start_time > timeout:
-            raise TimeoutError(f"UUID加载超时，已等待{timeout}秒")
-            
-        progress = loader.get_loading_progress()
+    json_record_path = r'E:\1BACKUP\ehv\uuid\uuid_records.json'
+    if not os.path.exists(json_record_path):
+        return set()
         
-        # 进度监控
-        if progress['percentage'] != last_percent:
-            logger.info(f"⏳ {progress['message']} [{progress['percentage']:.1f}%]")
-            last_percent = progress['percentage']
-            
-        if progress['percentage'] >= 100:
-            if progress['message'].startswith("构建失败"):
-                raise RuntimeError("缓存构建失败")
-            break
-            
-        # 动态调整轮询间隔
-        sleep_time = 0.5 if progress['percentage'] < 50 else 0.1
-        time.sleep(sleep_time)
-    
-    uuids = loader.get_uuids()
-    elapsed = time.time() - start_time
-    logger.info(f"✅ 加载完成！共加载 {len(uuids)} 个UUID，耗时 {elapsed:.2f} 秒")
-    return uuids
+    try:
+        with open(json_record_path, 'r', encoding='utf-8') as f:
+            records = json.load(f)
+        uuids = set(records.keys())
+        
+        elapsed = time.time() - start_time
+        logging.info(f"✅ 加载完成！共加载 {len(uuids)} 个UUID，耗时 {elapsed:.2f} 秒")
+        return uuids
+        
+    except Exception as e:
+        logging.error(f"加载UUID记录失败: {e}")
+        return set()
 
 def add_uuid_to_file(uuid, timestamp, archive_name, artist_name, relative_path=None):
     """将生成的 UUID 添加到记录文件中。"""
@@ -544,52 +696,86 @@ def add_yaml_to_zip(yaml_path, archive_path):
 def process_single_archive(archive_path, target_directory, uuid_directory, timestamp):
     """处理单个压缩文件的逻辑。"""
     try:
-        yaml_uuid = load_yaml_uuid_from_archive(archive_path)
+        # 检查是否存在YAML文件并转换为JSON
+        yaml_uuid = ArchiveHandler.load_yaml_uuid_from_archive(archive_path)
+        if yaml_uuid:
+            json_data = ArchiveHandler.convert_yaml_archive_to_json(archive_path)
+            if not json_data:
+                logger.error(f"转换YAML到JSON失败: {archive_path}")
+                return True
+        
+        # 获取或创建UUID
+        uuid_value = yaml_uuid or generate_uuid(load_existing_uuids())
+        json_filename = f"{uuid_value}.json"
+        
+        # 获取文件信息
         artist_name = get_artist_name(target_directory, archive_path)
         archive_name = os.path.basename(archive_path)
         relative_path = get_relative_path(target_directory, archive_path)
         
-        if yaml_uuid:
-            yaml_filename = f"{yaml_uuid}.yaml"
-            # 更新现有UUID的记录
-            add_uuid_to_file(yaml_uuid, timestamp, archive_name, artist_name, relative_path)
-        else:
-            new_uuid = generate_uuid(load_existing_uuids())
-            yaml_filename = f"{new_uuid}.yaml"
-            # 添加新UUID的记录
-            add_uuid_to_file(new_uuid, timestamp, archive_name, artist_name, relative_path)
-            yaml_uuid = new_uuid
-
         # 获取按年月日分层的目录路径
         day_dir = get_uuid_path(uuid_directory, timestamp)
-        yaml_path = os.path.join(day_dir, yaml_filename)
+        json_path = os.path.join(day_dir, json_filename)
         
-        if os.path.exists(yaml_path):
-            updated = update_yaml(yaml_path, artist_name, archive_name, relative_path, timestamp)
-            if not updated:
-                logging.info(f"⏭️ 跳过更新: {archive_name}")
-                return False
+        # 准备新的记录数据
+        new_record = {
+            "archive_name": archive_name,
+            "artist_name": artist_name,
+            "relative_path": relative_path
+        }
+        
+        # 更新或创建JSON文件
+        if os.path.exists(json_path):
+            json_data = JsonHandler.load(json_path)
+            if not json_data:
+                json_data = {"uuid": uuid_value, "timestamps": {}}
         else:
-            create_yaml(yaml_path, artist_name, archive_name, relative_path, timestamp, yaml_uuid)
-
-        # 确保yaml文件存在后再添加到压缩包
-        if os.path.exists(yaml_path):
+            json_data = {"uuid": uuid_value, "timestamps": {}}
+        
+        # 添加新的时间戳记录
+        json_data["timestamps"][timestamp] = new_record
+        
+        # 保存JSON文件
+        if JsonHandler.save(json_path, json_data):
+            logger.info(f"✅ 已更新JSON文件: {json_filename}")
+            
+            # 确保JSON文件存在后再添加到压缩包
             try:
-                add_yaml_to_zip(yaml_path, archive_path)
-                logging.info(f"✅ 已添加YAML到压缩包: {archive_name}")
-            except Exception as e:
-                logging.error(f"添加YAML到压缩包失败: {archive_name} - {str(e)}")
+                with zipfile.ZipFile(archive_path, 'a') as zf:
+                    # 删除旧的YAML文件（如果存在）
+                    try:
+                        zf.remove(f"*.yaml")
+                    except:
+                        pass
+                    # 添加新的JSON文件
+                    zf.write(json_path, json_filename)
+                logger.info(f"✅ 已添加JSON到压缩包: {archive_name}")
+            except Exception:
+                # 如果不是zip文件，使用7z
+                subprocess.run(
+                    ['7z', 'd', archive_path, f"*.yaml"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=True
+                )
+                subprocess.run(
+                    ['7z', 'a', archive_path, json_path],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=True
+                )
+                logger.info(f"✅ 已添加JSON到压缩包: {archive_name}")
         else:
-            logging.error(f"YAML文件不存在，无法添加到压缩包: {archive_name}")
+            logger.error(f"JSON文件保存失败: {archive_name}")
             
         return True
 
     except subprocess.CalledProcessError:
-        logging.error(f"发现损坏的压缩包: {archive_path}")
+        logger.error(f"发现损坏的压缩包: {archive_path}")
         return True
     except Exception as e:
-        logging.info(f"处理压缩包时出错 {archive_path}: {str(e)}")
-        return True  # 错误情况不计入跳过次数
+        logger.error(f"处理压缩包时出错 {archive_path}: {str(e)}")
+        return True
 
 def warm_up_cache(target_directory, max_workers=32, handler=None):
     """并行预热系统缓存"""
@@ -648,7 +834,7 @@ def _warm_up_cache_internal(target_directory, max_workers):
     logging.info("✨ 缓存预热完成")
 
 def process_archives(target_directory, max_workers=5, handler=None):
-    """遍历目录中的压缩文件，生成或更新YAML文件。"""
+    """遍历目录中的压缩文件，生成或更新JSON文件。"""
     if handler is None:
         return _process_archives_internal(target_directory, max_workers)
     else:
@@ -742,10 +928,10 @@ def _process_archives_internal(target_directory, max_workers):
     else:
         logging.info("✨ 所有文件处理完成")
     
-    return skip_count >= 100  # 返回是否因为跳过次数达到限制而提前结束
+    return skip_count >= 100
 
-def load_yaml_uuid_from_archive(archive_path):
-    """尝试从压缩包内加载 YAML 文件以获取 UUID。"""
+def load_json_uuid_from_archive(archive_path):
+    """尝试从压缩包内加载JSON文件以获取UUID。"""
     try:
         short_path = get_short_path(archive_path)
         
@@ -759,14 +945,14 @@ def load_yaml_uuid_from_archive(archive_path):
             command, 
             capture_output=True, 
             text=True, 
-            encoding='gbk',  # 使用GBK编码
-            errors='ignore',  # 忽略无法解码的字符
+            encoding='gbk',
+            errors='ignore',
             startupinfo=startupinfo,
             check=False
         )
         
         if result.returncode != 0:
-            print(f"列出压缩包内容失败: {archive_path}")
+            logging.error(f"列出压缩包内容失败: {archive_path}")
             return None
             
         if result.stdout:
@@ -775,15 +961,15 @@ def load_yaml_uuid_from_archive(archive_path):
                     continue
                     
                 line = line.strip()
-                if line.endswith('.yaml'):
+                if line.endswith('.json'):
                     parts = line.split()
                     if parts:
-                        yaml_filename = parts[-1]
-                        yaml_uuid = os.path.splitext(yaml_filename)[0]
-                        return yaml_uuid
+                        json_filename = parts[-1]
+                        json_uuid = os.path.splitext(json_filename)[0]
+                        return json_uuid
 
     except Exception as e:
-        print(f"无法加载压缩包中的 YAML 文件 ({archive_path}): {e}")
+        logging.error(f"无法加载压缩包中的JSON文件 ({archive_path}): {e}")
         
     return None
 
@@ -807,6 +993,7 @@ def main():
         ("自动序列 - 执行完整处理流程", "auto_sequence", "-a"),  # 添加序列模式选项
         ("重组UUID - 按时间重组UUID文件", "reorganize", "-r"),  # 添加重组选项
         ("更新记录 - 更新UUID记录文件", "update_records", "-u"),  # 添加更新记录选项
+        ("转换YAML - 转换现有YAML到JSON", "convert_yaml", "--convert"),  # 添加YAML转换选项
     ]
 
     # 定义输入框选项
@@ -832,7 +1019,7 @@ def main():
             "input_values": {"path": ""}
         },
         "完整序列": {
-            "description": "执行完整处理流程：UUID-YAML -> 自动文件名 -> UUID-YAML",
+            "description": "执行完整处理流程：UUID-JSON -> 自动文件名 -> UUID-JSON",
             "checkbox_options": ["keep_timestamp", "clipboard", "auto_sequence"],
             "input_values": {"path": ""}
         },
@@ -845,6 +1032,11 @@ def main():
             "description": "执行完整序列并更新UUID记录",
             "checkbox_options": ["keep_timestamp", "clipboard", "auto_sequence", "reorganize", "update_records"],
             "input_values": {"path": ""}
+        },
+        "YAML转换": {
+            "description": "转换现有YAML文件到JSON格式",
+            "checkbox_options": ["convert_yaml"],
+            "input_values": {"path": ""}
         }
     }
 
@@ -853,62 +1045,33 @@ def main():
         program=__file__,
         checkbox_options=checkbox_options,
         input_options=input_options,
-        title="UUID-YAML 工具",
+        title="UUID-JSON 工具",
         preset_configs=preset_configs
     )
     app.run()
 
-def reorganize_uuid_files(uuid_directory=r'E:\1BACKUP\ehv\uuid', handler=None):
-    """根据最后修改时间重新组织 UUID 文件的目录结构"""
-    logging.info("🔄 开始重新组织 UUID 文件...")
+def reorganize_uuid_files(uuid_directory=r'E:\1BACKUP\ehv\uuid'):
+    """根据最后修改时间重新组织UUID文件的目录结构"""
+    logging.info("🔄 开始重新组织UUID文件...")
     
-    # 加载记录文件
-    uuid_record_path = os.path.join(uuid_directory, 'uuid_records.yaml')
-    if not os.path.exists(uuid_record_path):
-        logging.info("❌ UUID 记录文件不存在")
+    json_record_path = os.path.join(uuid_directory, 'uuid_records.json')
+    if not os.path.exists(json_record_path):
+        logging.error("❌ UUID记录文件不存在")
         return
-    
+        
     try:
-        with open(uuid_record_path, 'r', encoding='utf-8') as file:
-            records = yaml.safe_load(file) or []
-    except Exception as e:
-        logging.info(f"❌ 读取记录文件失败: {e}")
-        return
-    
-    
-    # 遍历所有记录
-    for record in records:
-        try:
-            uuid = record.get('UUID')
-            if not uuid:
+        with open(json_record_path, 'r', encoding='utf-8') as f:
+            records = json.load(f)
+            
+        for uuid, data in records.items():
+            # 获取最新的时间戳
+            if not data.get("timestamps"):
                 continue
                 
-            # 获取时间戳
-            timestamp = record.get('LastModified') or record.get('CreatedAt')
-            if not timestamp:
-                continue
+            latest_timestamp = max(data["timestamps"].keys())
             
-            # 查找当前 UUID 的 YAML 文件
-            yaml_found = False
-            current_yaml_path = None
-            
-            # 在目录结构中查找现有的 YAML 文件
-            for root, _, files in os.walk(uuid_directory):
-                for file in files:
-                    if file == f"{uuid}.yaml":
-                        current_yaml_path = os.path.join(root, file)
-                        yaml_found = True
-                        break
-                if yaml_found:
-                    break
-            
-            if not yaml_found:
-                logging.info(f"⚠️ 未找到 UUID {uuid} 的 YAML 文件")
-                continue
-            
-            # 获取目标路径
             try:
-                date = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+                date = datetime.strptime(latest_timestamp, "%Y-%m-%d %H:%M:%S")
                 year = str(date.year)
                 month = f"{date.month:02d}"
                 day = f"{date.day:02d}"
@@ -917,136 +1080,140 @@ def reorganize_uuid_files(uuid_directory=r'E:\1BACKUP\ehv\uuid', handler=None):
                 year_dir = os.path.join(uuid_directory, year)
                 month_dir = os.path.join(year_dir, month)
                 day_dir = os.path.join(month_dir, day)
-                target_path = os.path.join(day_dir, f"{uuid}.yaml")
+                target_path = os.path.join(day_dir, f"{uuid}.json")
                 
-                # 如果文件已经在正确的位置，跳过
-                if current_yaml_path == target_path:
-                    logging.info(f"✓ UUID {uuid} 已在正确位置")
-                    continue
+                # 查找当前JSON文件
+                current_json_path = None
+                for root, _, files in os.walk(uuid_directory):
+                    if f"{uuid}.json" in files:
+                        current_json_path = os.path.join(root, f"{uuid}.json")
+                        break
                 
-                # 如果文件在年/月目录下但没有日期目录
-                current_parts = current_yaml_path.split(os.sep)
-                target_parts = target_path.split(os.sep)
-                
-                # 检查是否需要移动
-                need_move = True
-                if len(current_parts) >= 2:
-                    current_year = current_parts[-3] if len(current_parts) >= 3 else None
-                    current_month = current_parts[-2] if len(current_parts) >= 2 else None
-                    
-                    if current_year == year and current_month == month:
-                        # 如果年月正确，只需要移动到日期目录
-                        logging.info(f"📁 UUID {uuid} 已在正确的年月目录，移动到日期目录")
-                    
-                if need_move:
-                    # 确保目标目录存在
+                if current_json_path and current_json_path != target_path:
                     os.makedirs(day_dir, exist_ok=True)
-                    # 移动文件
-                    shutil.move(current_yaml_path, target_path)
-                
+                    shutil.move(current_json_path, target_path)
+                    logging.info(f"✅ 已移动: {uuid}.json")
+                    
             except ValueError as e:
-                logging.info(f"❌ UUID {uuid} 的时间戳格式无效: {timestamp}")
-            
-        except Exception as e:
-            logging.info(f"❌ 处理 UUID {uuid} 时出错: {e}")
-
+                logging.error(f"❌ UUID {uuid} 的时间戳格式无效: {latest_timestamp}")
+                
+    except Exception as e:
+        logging.error(f"重组UUID文件失败: {e}")
     
-    logging.info("✨ UUID 文件重组完成")
+    logging.info("✨ UUID文件重组完成")
 
-def update_uuid_records(uuid_directory=r'E:\1BACKUP\ehv\uuid', handler=None):
-    """更新 UUID 记录文件，确保所有 UUID 都被记录"""
-    logging.info("🔄 开始更新 UUID 记录...")
+def update_json_records(uuid_directory=r'E:\1BACKUP\ehv\uuid'):
+    """更新JSON记录文件，确保所有记录都被保存"""
+    logging.info("🔄 开始更新JSON记录...")
     
-    uuid_record_path = os.path.join(uuid_directory, 'uuid_records.yaml')
+    json_record_path = os.path.join(uuid_directory, 'uuid_records.json')
     
     # 加载现有记录
-    existing_records = {}
-    if os.path.exists(uuid_record_path):
-        try:
-            with open(uuid_record_path, 'r', encoding='utf-8') as file:
-                records = yaml.safe_load(file) or []
-                existing_records = {record['UUID']: record for record in records if 'UUID' in record}
-        except Exception as e:
-            logging.info(f"❌ 读取记录文件失败: {e}")
-            return
+    existing_records = JsonHandler.load(json_record_path)
     
-    # 遍历目录结构查找所有 YAML 文件
-    new_uuids = []
+    # 遍历目录结构查找所有JSON文件
+    for root, _, files in os.walk(uuid_directory):
+        for file in files:
+            if file.endswith('.json') and file != 'uuid_records.json':
+                uuid = os.path.splitext(file)[0]
+                json_path = os.path.join(root, file)
+                try:
+                    file_data = JsonHandler.load(json_path)
+                    if uuid not in existing_records:
+                        existing_records[uuid] = file_data
+                    else:
+                        # 合并时间戳记录
+                        existing_records[uuid]["timestamps"].update(file_data.get("timestamps", {}))
+                        
+                except Exception as e:
+                    logging.error(f"处理JSON文件失败 {json_path}: {e}")
+    
+    # 保存更新后的记录
+    if JsonHandler.save(json_record_path, existing_records):
+        logging.info("✅ JSON记录更新完成")
+    else:
+        logging.error("❌ JSON记录更新失败")
+
+def convert_yaml_to_json_structure():
+    """将现有的YAML文件结构转换为JSON结构"""
+    logging.info("🔄 开始转换YAML到JSON结构...")
+    
+    uuid_directory = r'E:\1BACKUP\ehv\uuid'
+    yaml_record_path = os.path.join(uuid_directory, 'uuid_records.yaml')
+    json_record_path = os.path.join(uuid_directory, 'uuid_records.json')
+    
+    # 转换主记录文件
+    if os.path.exists(yaml_record_path):
+        try:
+            with open(yaml_record_path, 'r', encoding='utf-8') as f:
+                yaml_data = yaml.safe_load(f)
+                
+            json_records = {}
+            for record in yaml_data:
+                uuid = record.get('UUID')
+                if not uuid:
+                    continue
+                    
+                if uuid not in json_records:
+                    json_records[uuid] = {"timestamps": {}}
+                    
+                timestamp = record.get('LastModified') or record.get('CreatedAt')
+                if timestamp:
+                    json_records[uuid]["timestamps"][timestamp] = {
+                        "archive_name": record.get('ArchiveName', ''),
+                        "artist_name": record.get('ArtistName', ''),
+                        "relative_path": record.get('LastPath', '')
+                    }
+            
+            JsonHandler.save(json_record_path, json_records)
+            logging.info("✅ 主记录文件转换完成")
+            
+        except Exception as e:
+            logging.error(f"转换主记录文件失败: {e}")
+    
+    # 转换目录中的YAML文件
     for root, _, files in os.walk(uuid_directory):
         for file in files:
             if file.endswith('.yaml') and file != 'uuid_records.yaml':
-                uuid = os.path.splitext(file)[0]
-                if uuid not in existing_records:
-                    yaml_path = os.path.join(root, file)
-                    try:
-                        with open(yaml_path, 'r', encoding='utf-8') as f:
-                            yaml_data = yaml.safe_load(f)
-                            if yaml_data and isinstance(yaml_data, list):
-                                latest_record = yaml_data[-1]
-                                new_record = {
-                                    'UUID': uuid,
-                                    'CreatedAt': latest_record.get('Timestamp', ''),
-                                    'ArchiveName': latest_record.get('ArchiveName', ''),
-                                    'ArtistName': latest_record.get('ArtistName', ''),
-                                    'LastModified': latest_record.get('Timestamp', ''),
-                                    'LastPath': latest_record.get('RelativePath', '')
-                                }
-                                new_uuids.append(new_record)
-                                logging.info(f"✨ 发现新 UUID: {uuid}")
-                    except Exception as e:
-                        logging.info(f"❌ 处理 YAML 文件失败 {yaml_path}: {e}")
+                yaml_path = os.path.join(root, file)
+                json_path = os.path.join(root, f"{os.path.splitext(file)[0]}.json")
+                
+                try:
+                    with open(yaml_path, 'r', encoding='utf-8') as f:
+                        yaml_data = yaml.safe_load(f)
+                        
+                    json_data = JsonHandler.convert_yaml_to_json(yaml_data)
+                    json_data["uuid"] = os.path.splitext(file)[0]
+                    
+                    if JsonHandler.save(json_path, json_data):
+                        os.remove(yaml_path)
+                        logging.info(f"✅ 转换完成: {file}")
+                    
+                except Exception as e:
+                    logging.error(f"转换文件失败 {file}: {e}")
     
-    if new_uuids:
-        # 更新记录文件
-        all_records = list(existing_records.values()) + new_uuids
-        try:
-            # 创建备份
-            if os.path.exists(uuid_record_path):
-                backup_path = f"{uuid_record_path}.bak"
-                shutil.copy2(uuid_record_path, backup_path)
-            
-            # 写入更新后的记录
-            with open(uuid_record_path, 'w', encoding='utf-8') as file:
-                yaml.dump(all_records, file, allow_unicode=True, sort_keys=False)
-            
-            logging.info(f"✅ 已添加 {len(new_uuids)} 个新 UUID 到记录")
-        except Exception as e:
-            logging.info(f"❌ 更新记录文件失败: {e}")
-    else:
-        logging.info("✓ 所有 UUID 都已在记录中")
-
-def validate_yaml_file(file_path):
-    """交互式YAML文件验证工具"""
-    from yaml import scanner
-    try:
-        with open(file_path, 'r') as f:
-            data = yaml.safe_load(f)
-            print(f"✅ 文件验证通过，共包含{len(data)}条记录")
-            return True
-    except scanner.ScannerError as e:
-        print(f"❌ 扫描错误：{e}")
-        print(f"建议：检查第{e.problem_mark.line+1}行附近的缩进和符号")
-    except yaml.parser.ParserError as e:
-        print(f"❌ 解析错误：{e}")
-        print(f"建议：检查第{e.problem_mark.line+1}行的语法结构")
-    except Exception as e:
-        print(f"❌ 未知错误：{e}")
-    return False
+    logging.info("✨ YAML到JSON转换完成")
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='处理文件UUID和YAML生成')
+    parser = argparse.ArgumentParser(description='处理文件UUID和JSON生成')
     parser.add_argument('-c', '--clipboard', action='store_true', help='从剪贴板读取路径')
     parser.add_argument('-m', '--mode', choices=['multi', 'single'], help='处理模式：multi(多人模式)或single(单人模式)')
     parser.add_argument('--no-artist', action='store_true', help='无画师模式 - 不添加画师名')
     parser.add_argument('--keep-timestamp', action='store_true', help='保持文件的修改时间')
     parser.add_argument('--path', help='要处理的路径')
-    parser.add_argument('-a', '--auto-sequence', action='store_true', help='自动执行完整序列：UUID-YAML -> 自动文件名 -> UUID-YAML')
+    parser.add_argument('-a', '--auto-sequence', action='store_true', help='自动执行完整序列：UUID-JSON -> 自动文件名 -> UUID-JSON')
     parser.add_argument('-r', '--reorganize', action='store_true', help='重新组织 UUID 文件结构')
     parser.add_argument('-u', '--update-records', action='store_true', help='更新 UUID 记录文件')
+    parser.add_argument('--convert', action='store_true', help='转换YAML到JSON结构')
     args = parser.parse_args()
 
     if len(sys.argv) == 1:  # 如果没有命令行参数，启动TUI界面
         main()
+        sys.exit(0)
+
+    # 如果指定了转换参数，执行转换
+    if args.convert:
+        convert_yaml_to_json_structure()
         sys.exit(0)
 
     # 处理路径参数
@@ -1067,9 +1234,7 @@ if __name__ == '__main__':
     print(f"\n{Fore.CYAN}当前模式: {'多人模式' if args.mode == 'multi' else '单人模式'}{Style.RESET_ALL}")
 
     # 根据系统资源自动设置线程数
-    import multiprocessing
     max_workers = min(32, (multiprocessing.cpu_count() * 4) + 1)
-    
     
     if args.reorganize:
         logging.info("\n📝 开始重新组织 UUID 文件...")
@@ -1077,12 +1242,12 @@ if __name__ == '__main__':
         
     if args.update_records:
         logging.info("\n📝 开始更新 UUID 记录...")
-        update_uuid_records(r'E:\1BACKUP\ehv\uuid')
+        update_json_records(r'E:\1BACKUP\ehv\uuid')
     
     if args.auto_sequence:
         logging.info("🔄 开始执行完整序列...")
         
-        logging.info("\n📝 第1步：执行UUID-YAML处理...")
+        logging.info("\n📝 第1步：执行UUID-JSON处理...")
         if args.mode == 'multi':
             warm_up_cache(target_directory, max_workers)
         elif args.mode == 'single':
@@ -1126,13 +1291,13 @@ if __name__ == '__main__':
                 
                 logging.info("✅ 自动文件名处理完成")
             except subprocess.CalledProcessError as e:
-                logging.info(f"自动文件名处理失败: {str(e)}")
+                logging.error(f"自动文件名处理失败: {str(e)}")
                 if e.output:
-                    logging.info(f"错误输出: {e.output}")
+                    logging.error(f"错误输出: {e.output}")
         else:
-            logging.info(f"找不到自动文件名脚本: {auto_filename_script}")
+            logging.error(f"找不到自动文件名脚本: {auto_filename_script}")
             
-        logging.info("\n📝 第3步：再次执行UUID-YAML处理...")
+        logging.info("\n📝 第3步：再次执行UUID-JSON处理...")
         if args.mode == 'multi':
             warm_up_cache(target_directory, max_workers)
         process_archives(target_directory, max_workers)
@@ -1144,7 +1309,16 @@ if __name__ == '__main__':
             warm_up_cache(target_directory, max_workers)
         process_archives(target_directory, max_workers)
     
-    if not validate_yaml_file(r'E:\1BACKUP\ehv\uuid\uuid_records.yaml'):
-        print("请先修复YAML文件后再继续操作")
-        sys.exit(1)
+    # 验证JSON记录文件
+    json_record_path = r'E:\1BACKUP\ehv\uuid\uuid_records.json'
+    if os.path.exists(json_record_path):
+        try:
+            with open(json_record_path, 'r', encoding='utf-8') as f:
+                json.load(f)
+            logging.info("✅ JSON记录文件验证通过")
+        except json.JSONDecodeError as e:
+            logging.error(f"❌ JSON记录文件验证失败: {e}")
+            sys.exit(1)
+    else:
+        logging.warning("⚠️ JSON记录文件不存在")
     
