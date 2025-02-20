@@ -24,7 +24,7 @@ load_dotenv()
 from nodes.record.logger_config import setup_logger
 
 # 创建全局日志记录器
-logger = setup_logger({
+logger, _ = setup_logger({
     'script_name': '012-低于指定宽度',
 })
 
@@ -42,7 +42,7 @@ class ImageProcessor:
         
         # 添加排除关键词列表
         self.exclude_paths = [
-            '画集', '日原版', 'pixiv', '图集', '作品集', 'FANTIA', 'cg', 'multi', 'trash'
+            '画集', '日原版', 'pixiv', '图集', '作品集', 'FANTIA', 'cg', 'multi', 'trash', '小说', 'cg'
         ]
         # 将所有排除路径转换为小写，并确保是独立的词
         self.exclude_paths = [path.lower().strip() for path in self.exclude_paths]
