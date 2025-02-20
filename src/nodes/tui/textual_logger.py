@@ -310,9 +310,21 @@ class LogPanel(Static):
         # 更新显示
         self._update_display()
         
-        # 设置定时刷新并滚动到底部
-        self.set_interval(0.1, self.refresh)
+        # 无论是否有进度条，都确保面板定期刷新
+        if not hasattr(self, '_refresh_timer'):
+            self._refresh_timer = self.set_interval(0.1, self._periodic_refresh)
+            
         self.scroll_end()
+
+    def _periodic_refresh(self) -> None:
+        """定期刷新面板内容"""
+        self._update_display()
+        self.refresh()
+
+    def on_unmount(self) -> None:
+        """组件卸载时清理定时器"""
+        if hasattr(self, '_refresh_timer'):
+            self._refresh_timer.stop()
 
     def _is_progress_message(self, text: str) -> bool:
         """检查是否为进度条消息"""
@@ -825,6 +837,7 @@ if __name__ == "__main__":
                 ("配置更新", "带括号分数"),
                 ("缓存优化", "带方括号分数"),
                 ("", "带方括号分数")  # 测试空任务名
+                
             ]
         }
         
