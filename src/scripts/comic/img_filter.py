@@ -869,7 +869,7 @@ class ArchiveProcessor:
             with ThreadPoolExecutor(max_workers=params['max_workers']) as executor:
                 futures = []
                 total_files = len(image_files)
-                logger.info(f"[@file_ops] 开始处理图片 ({total_files})")
+                logger.info(f"[#file_ops]开始处理图片，总数: {total_files}")
                 processed_files = 0
                 
                 for img_path in image_files:
@@ -883,6 +883,7 @@ class ArchiveProcessor:
                         lock
                     )
                     futures.append((future, img_path))
+                    logger.info(f"[#file_ops]提交处理任务: {os.path.basename(img_path)}")
                     
                 image_hashes = []
                 for future, img_path in futures:
@@ -890,19 +891,22 @@ class ArchiveProcessor:
                         img_hash, img_data, _, reason = future.result()
                         processed_files += 1
                         percentage = (processed_files / total_files) * 100
-                        logger.info(f"[@cur_progress] 处理图片 ({processed_files}/{total_files}) {percentage:.1f}%")
+                        logger.info(f"[@cur_progress]处理进度 ({processed_files}/{total_files}) {percentage:.1f}%")
+                        logger.info(f"[#file_ops]完成处理: {os.path.basename(img_path)}")
                         
                         if reason in ['small_image', 'white_image']:
                             removed_files.add(img_path)
                             removal_reasons[img_path] = reason
+                            logger.info(f"[#file_ops]标记删除文件: {os.path.basename(img_path)} (原因: {reason})")
                         elif img_hash is not None and params['remove_duplicates']:
                             image_hashes.append((img_hash, img_data, img_path, reason))
+                            logger.info(f"[#file_ops]添加到哈希比较列表: {os.path.basename(img_path)}")
                             
                     except Exception as e:
-                        logger.info(f"[#hash_calc]❌ 处理图片失败 {img_path}: {e}")
+                        logger.info(f"[#file_ops]处理失败: {os.path.basename(img_path)} - {str(e)}")
                         processed_files += 1
                         percentage = (processed_files / total_files) * 100
-                        logger.info(f"[@hash_calc] 处理图片 ({processed_files}/{total_files}) {percentage:.1f}%")
+                        logger.info(f"[@cur_progress]处理进度 ({processed_files}/{total_files}) {percentage:.1f}%")
 
             if params['remove_duplicates'] and image_hashes:
                 unique_images, _, dup_removal_reasons = DuplicateDetector.remove_duplicates_in_memory(image_hashes, params)
