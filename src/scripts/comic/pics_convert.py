@@ -136,17 +136,17 @@ LAYOUT_CONFIG = {
         "title": "⚡ 性能配置",
         "style": "lightyellow"
     },
-    "image_convert": {
+    "image": {
         "ratio": 2,
         "title": "🖼️ 图片转换",
         "style": "lightsalmon"
     },   
-    "archive_ops": {
+    "archive": {
         "ratio": 2,
         "title": "📦 压缩包处理",
         "style": "lightpink"
     },
-    "file_ops": {
+    "file": {
         "ratio": 2,
         "title": "📂 文件操作",
         "style": "lightcyan"
@@ -157,8 +157,8 @@ LAYOUT_CONFIG = {
 def init_layout():
     TextualLoggerManager.set_layout(LAYOUT_CONFIG)
     # logger.info(f"[#performance]初始化性能配置面板")
-    # logger.info(f"[#file_ops]初始化文件操作面板")
-    # logger.info(f"[#archive_ops]初始化压缩包处理面板")
+    # logger.info(f"[#file]初始化文件操作面板")
+    # logger.info(f"[#archive]初始化压缩包处理面板")
 
 
 class FileSystem:
@@ -173,10 +173,10 @@ class FileSystem:
         try:
             if not self.fs.exists(directory):
                 self.fs.makedirs(directory)
-                logger.info(f"[#file_ops]创建目录: {directory}")
+                logger.info(f"[#file]创建目录: {directory}")
             return True
         except Exception as e:
-            logger.info(f"[#file_ops]创建目录失败 {directory}: {e}")
+            logger.info(f"[#file]创建目录失败 {directory}: {e}")
             return False
 
     def safe_delete_file(self, file_path):
@@ -184,44 +184,44 @@ class FileSystem:
         try:
             if self.fs.exists(file_path):
                 self.fs.delete(file_path)
-                logger.info(f"[#file_ops]删除文件: {file_path}")
+                logger.info(f"[#file]删除文件: {file_path}")
                 return True
             return False
         except Exception as e:
-            logger.info(f"[#file_ops]删除文件失败 {file_path}: {e}")
+            logger.info(f"[#file]删除文件失败 {file_path}: {e}")
             return False
 
     def safe_move_file(self, src_path, dst_path):
         """安全移动文件"""
         try:
             if not self.fs.exists(src_path):
-                logger.info(f"[#file_ops]源文件不存在: {src_path}")
+                logger.info(f"[#file]源文件不存在: {src_path}")
                 return False
             if self.fs.exists(dst_path):
-                logger.info(f"[#file_ops]目标文件已存在: {dst_path}")
+                logger.info(f"[#file]目标文件已存在: {dst_path}")
                 return False
             self.fs.move(src_path, dst_path)
-            logger.info(f"[#file_ops]移动文件: {src_path} -> {dst_path}")
+            logger.info(f"[#file]移动文件: {src_path} -> {dst_path}")
             return True
         except Exception as e:
-            logger.info(f"[#file_ops]移动文件失败 {src_path} -> {dst_path}: {e}")
+            logger.info(f"[#file]移动文件失败 {src_path} -> {dst_path}: {e}")
             return False
 
     def safe_copy_file(self, src_path, dst_path):
         """安全复制文件"""
         try:
             if not self.fs.exists(src_path):
-                logger.info(f"[#file_ops]源文件不存在: {src_path}")
+                logger.info(f"[#file]源文件不存在: {src_path}")
                 return False
             if self.fs.exists(dst_path):
-                logger.info(f"[#file_ops]目标文件已存在: {dst_path}")
+                logger.info(f"[#file]目标文件已存在: {dst_path}")
                 return False
             with self.fs.open(src_path, 'rb') as src, self.fs.open(dst_path, 'wb') as dst:
                 shutil.copyfileobj(src, dst)
-            logger.info(f"[#file_ops]复制文件: {src_path} -> {dst_path}")
+            logger.info(f"[#file]复制文件: {src_path} -> {dst_path}")
             return True
         except Exception as e:
-            logger.info(f"[#file_ops]复制文件失败 {src_path} -> {dst_path}: {e}")
+            logger.info(f"[#file]复制文件失败 {src_path} -> {dst_path}: {e}")
             return False
 
     def get_file_size(self, file_path):
@@ -229,7 +229,7 @@ class FileSystem:
         try:
             return self.fs.info(file_path)['size']
         except Exception as e:
-            logger.info(f"[#file_ops]获取文件大小失败 {file_path}: {e}")
+            logger.info(f"[#file]获取文件大小失败 {file_path}: {e}")
             return 0
 
     def list_files(self, directory, pattern=None):
@@ -242,7 +242,7 @@ class FileSystem:
                         files.append(os.path.join(root, filename))
             return files
         except Exception as e:
-            logger.info(f"[#file_ops]列出文件失败 {directory}: {e}")
+            logger.info(f"[#file]列出文件失败 {directory}: {e}")
             return []
 
 class PathHandler:
@@ -260,7 +260,7 @@ class PathHandler:
                     return Path('\\\\?\\' + path_str)
             return abs_path
         except Exception as e:
-            logger.info(f"[#file_ops]处理长路径时出错: {e}")
+            logger.info(f"[#file]处理长路径时出错: {e}")
             return Path(path)
 
     def create_temp_directory(self, file_path):
@@ -271,10 +271,10 @@ class PathHandler:
             temp_dir = base_path.parent / f'temp_{base_path.stem}_{int(time.time())}'
             safe_temp_dir = PathHandler.ensure_long_path(temp_dir)
             fs.makedirs(str(safe_temp_dir), exist_ok=True)
-            logger.info(f"[#file_ops]创建临时目录: {safe_temp_dir}")  
+            logger.info(f"[#file]创建临时目录: {safe_temp_dir}")  
             return safe_temp_dir
         except Exception as e:
-            logger.info(f"[#file_ops]创建临时目录失败: {e}")
+            logger.info(f"[#file]创建临时目录失败: {e}")
             raise
 
     def cleanup_temp_files(self, temp_dir, new_zip_path, backup_file_path):
@@ -285,19 +285,19 @@ class PathHandler:
                 safe_temp = PathHandler.ensure_long_path(temp_dir)
                 if fs.exists(str(safe_temp)):
                     fs.delete(str(safe_temp), recursive=True)
-                    logger.info(f"[#file_ops]已删除临时目录: {safe_temp}")  
+                    logger.info(f"[#file]已删除临时目录: {safe_temp}")  
             if new_zip_path:
                 safe_new = PathHandler.ensure_long_path(new_zip_path)
                 if fs.exists(str(safe_new)):
                     fs.delete(str(safe_new))
-                    logger.info(f"[#file_ops]已删除临时压缩包: {safe_new}")  
+                    logger.info(f"[#file]已删除临时压缩包: {safe_new}")  
             if backup_file_path:
                 safe_backup = PathHandler.ensure_long_path(backup_file_path)
                 if fs.exists(str(safe_backup)):
                     fs.delete(str(safe_backup))
-                    logger.info(f"[#file_ops]已删除备份文件: {safe_backup}")  
+                    logger.info(f"[#file]已删除备份文件: {safe_backup}")  
         except Exception as e:
-            logger.info(f"[#file_ops]清理临时文件时出错: {e}")
+            logger.info(f"[#file]清理临时文件时出错: {e}")
 
     def wrapper(self, path, *args, **kwargs):
         """路径处理包装器"""
@@ -306,7 +306,7 @@ class PathHandler:
             return self.func(long_path, *args, **kwargs)
         except OSError as e:
             if e.winerror == 3:
-                logger.info(f"[#file_ops]路径超长或无效: {path}")
+                logger.info(f"[#file]路径超长或无效: {path}")
             else:
                 raise
 
@@ -329,9 +329,9 @@ class DirectoryHandler:
                 dst = os.path.join(directory, item)
                 shutil.move(src, dst)
             os.rmdir(subdir)
-            logger.info(f"[#file_ops]已展平子文件夹: {subdir}")
+            logger.info(f"[#file]已展平子文件夹: {subdir}")
         except Exception as e:
-            logger.info(f"[#file_ops]展平子文件夹时出错: {e}")
+            logger.info(f"[#file]展平子文件夹时出错: {e}")
 
     def remove_empty_directories(self, directory):
         """删除指定目录下的所有空文件夹"""
@@ -343,9 +343,9 @@ class DirectoryHandler:
                     if not os.listdir(dir_path):
                         subprocess.run(['cmd', '/c', 'rd', '/s', '/q', dir_path], check=True)
                         removed_count += 1
-                        logger.info(f"[#file_ops]已删除空文件夹: {dir_path}")
+                        logger.info(f"[#file]已删除空文件夹: {dir_path}")
                 except Exception as e:
-                    logger.info(f"[#file_ops]删除空文件夹失败 {dir_path}: {e}")
+                    logger.info(f"[#file]删除空文件夹失败 {dir_path}: {e}")
         return removed_count
 
 
@@ -366,7 +366,7 @@ class Converter:
         """
         try:
             if not CJXL_PATH.exists():
-                logger.info(f"[#file_ops]cjxl.exe不存在: {CJXL_PATH}")
+                logger.info(f"[#file]cjxl.exe不存在: {CJXL_PATH}")
                 return False
                 
             # 构建命令
@@ -392,14 +392,14 @@ class Converter:
             # 执行转换
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode == 0:
-                logger.info(f"[#file_ops]cjxl转换成功: {input_path}")
+                logger.info(f"[#file]cjxl转换成功: {input_path}")
                 return True
             else:
-                logger.info(f"[#file_ops]cjxl转换失败: {input_path}\n错误: {result.stderr}")
+                logger.info(f"[#file]cjxl转换失败: {input_path}\n错误: {result.stderr}")
                 return False
                 
         except Exception as e:
-            logger.info(f"[#file_ops]cjxl转换出错: {e}")
+            logger.info(f"[#file]cjxl转换出错: {e}")
             return False
 
     def process_single_image(self, file_path, params):
@@ -423,7 +423,7 @@ class Converter:
             # 只在JXL无损模式下使用cjxl
             if target_ext == '.jxl' and params.get('use_cjxl', False):
                 is_jpeg = file_path.lower().endswith(('.jpg', '.jpeg'))
-                logger.info(f"[#image_convert]✅ 使用cjxl转换: {file_path}")
+                logger.info(f"[#image]✅ 使用cjxl转换: {file_path}")
                 if not self.convert_with_cjxl(file_path, new_file_path, is_jpeg):
                     return False
             else:
@@ -438,25 +438,25 @@ class Converter:
                 }
                 safe_new_path = self.path_handler.ensure_long_path(new_file_path)
                 image.write_to_file(str(safe_new_path), **params)
-                # logger.info(f"[#image_convert]✅ 使用libvip转换: {file_path}")
+                # logger.info(f"[#image]✅ 使用libvip转换: {file_path}")
             if fs.exists(new_file_path):
                 new_size = fs.info(new_file_path)['size'] / 1024
                 size_reduction = original_size - new_size
                 compression_ratio = size_reduction / original_size * 100
                 # status_message = f'{os.path.basename(file_path)}: {original_size:.0f}KB -> {new_size:.0f}KB (-{size_reduction:.0f}KB, -{compression_ratio:.1f}%)'
-                # logger.info(f"[#file_ops]{status_message}")
+                # logger.info(f"[#file]{status_message}")
                 try:
                     image = None
                     fs.delete(file_path)
                     return (True, original_size, new_size)
                 except Exception as e:
                     error_msg = f'删除原文件失败 {file_path}: {e}'
-                    logger.info(f"[#image_convert]{error_msg}")
+                    logger.info(f"[#image]{error_msg}")
                     return False
             return False
         except Exception as e:
             error_msg = f'处理图片失败 {file_path}: {e}'
-            logger.info(f"[#image_convert]{error_msg}")
+            logger.info(f"[#image]{error_msg}")
             return False
 
     def process_image_in_memory(self, image_data, min_size=640, min_width=0):
@@ -470,21 +470,21 @@ class Converter:
                     width_info = ''
                     if min_width > 0:
                         width_info = f', 最小宽度要求={min_width}px'
-                    logger.info(f"[#image_convert]处理图片: 格式={original_format}, 尺寸={original_dimensions}{width_info}, 大小={original_size:.2f}KB")
+                    logger.info(f"[#image]处理图片: 格式={original_format}, 尺寸={original_dimensions}{width_info}, 大小={original_size:.2f}KB")
                     if min_width > 0:
                         if img.width < min_width:
-                            logger.info(f"[#image_convert][宽度过小] 图片宽度 {img.width}px 小于指定的最小宽度 {min_width}px，跳过处理")
+                            logger.info(f"[#image][宽度过小] 图片宽度 {img.width}px 小于指定的最小宽度 {min_width}px，跳过处理")
                             return (image_data, 'width_too_small')
                         else:
-                            logger.info(f"[#image_convert][宽度符合] 图片宽度 {img.width}px 大于指定的最小宽度 {min_width}px，继续处理")
+                            logger.info(f"[#image][宽度符合] 图片宽度 {img.width}px 大于指定的最小宽度 {min_width}px，继续处理")
                     cur_format = img.format.lower()
                     target_format = IMAGE_CONVERSION_CONFIG['target_format'][1:].lower()
                     if cur_format == target_format:
-                        logger.info(f"[#image_convert]图片已经是目标格式 {target_format}，跳过转换")
+                        logger.info(f"[#image]图片已经是目标格式 {target_format}，跳过转换")
                         return (image_data, None)
             image = pyvips.Image.new_from_buffer(image_data, '')
             config = IMAGE_CONVERSION_CONFIG[f'{target_format}_config']
-            logger.info(f"[#image_convert]转换配置: 目标格式={target_format}, 参数={config}")
+            logger.info(f"[#image]转换配置: 目标格式={target_format}, 参数={config}")
             if target_format == 'avif':
                 params = {'Q': config['quality'], 'speed': config.get('speed', 7), 'strip': config.get('strip', True), 'lossless': config.get('lossless', False)}
             elif target_format == 'webp':
@@ -498,10 +498,10 @@ class Converter:
             output_buffer = image.write_to_buffer(f'.{target_format}', **params)
             converted_size = len(output_buffer) / 1024
             size_change = original_size - converted_size
-            logger.info(f"[#image_convert]转换完成: 新大小={converted_size:.2f}KB, 减少={size_change:.2f}KB ({size_change / original_size * 100:.1f}%)")
+            logger.info(f"[#image]转换完成: 新大小={converted_size:.2f}KB, 减少={size_change:.2f}KB ({size_change / original_size * 100:.1f}%)")
             return (output_buffer, None)
         except Exception as e:
-            logger.info(f"[#image_convert]图片转换错误: {str(e)}")
+            logger.info(f"[#image]图片转换错误: {str(e)}")
             return (None, 'processing_error')
 
     def has_processed_comment(self, zip_path, comment='Processed'):
@@ -509,16 +509,16 @@ class Converter:
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 return zip_ref.comment.decode('utf-8') == comment
         except Exception as e:
-            logger.info(f"[#file_ops]Error checking comment in {zip_path}: {e}")
+            logger.info(f"[#file]Error checking comment in {zip_path}: {e}")
             return False
 
     def add_processed_comment(self, zip_path, comment='Processed'):
         try:
             with zipfile.ZipFile(zip_path, 'a') as zip_ref:
                 zip_ref.comment = comment.encode('utf-8')
-            logger.info(f"[#archive_ops]Added comment '{comment}' to {zip_path}")
+            logger.info(f"[#archive]Added comment '{comment}' to {zip_path}")
         except Exception as e:
-            logger.info(f"[#archive_ops]Error adding comment to {zip_path}: {e}")
+            logger.info(f"[#archive]Error adding comment to {zip_path}: {e}")
 
 class BatchProcessor:
     """批量处理类"""
@@ -548,7 +548,7 @@ class BatchProcessor:
         log_file.write(f'- **图片总数**: `{initial_count}`\n\n')
         
         # 同时更新到面板
-        logger.info(f"[#archive_ops]📝 开始处理压缩包: {os.path.basename(archive_path) if archive_path else '未知'}")
+        logger.info(f"[#archive]📝 开始处理压缩包: {os.path.basename(archive_path) if archive_path else '未知'}")
     def _write_conversion_params(self, log_file):
         """写入转换参数"""
         log_file.write('## 转换参数\n\n')
@@ -575,7 +575,7 @@ class BatchProcessor:
             log_file.write(f"- **压缩方法**: `{format_config.get('method', 4)}`\n")
             params_text += f", 方法: {format_config.get('method', 4)}"
             
-        logger.info(f"[#image_convert]{params_text}")
+        logger.info(f"[#image]{params_text}")
 
     def _write_log_summary(self, log_file, processed_files, total_time, total_original_size, total_converted_size):
         """写入日志总结"""
@@ -599,7 +599,7 @@ class BatchProcessor:
         summary_text = (
             f"✨ 处理完成 📊 总文件数: {len(processed_files)} ⏱️ 总耗时: {total_time:.1f}秒 (平均 {avg_time:.1f}秒/张) 📦 总大小: {total_original_size/1024:.1f}MB -> {total_converted_size/1024:.1f}MB 📈 压缩率: {total_compression_ratio:.1f}"
         )
-        logger.info(f"[#archive_ops]{summary_text}")
+        logger.info(f"[#archive]{summary_text}")
 
     def _process_image_batch(self, batch, params, processed_files, log_file_path, temp_dir, total_status):
         """处理一批图片文件"""
@@ -625,7 +625,7 @@ class BatchProcessor:
                         compression_ratio = size_reduction / original_size * 100
                         
                         message = f"{os.path.relpath(file_path, temp_dir)} ({original_size:.0f}KB -> {new_size:.0f}KB, 减少{size_reduction:.0f}KB, 压缩率{compression_ratio:.1f})"
-                        logger.info(f"[#image_convert]✅ {message}")
+                        logger.info(f"[#image]✅ {message}")
                         archive_status=len(processed_files)/total_status['initial_count']*100
                         archive_ratio= str(len(processed_files))+'/'+str(total_status['initial_count'])
                         logger.info(f"[@progress] 当前进度: {archive_ratio} {archive_status:.1f}%")
@@ -633,7 +633,7 @@ class BatchProcessor:
                         with open(log_file_path, 'a', encoding='utf-8') as f:
                             f.write(f"| `{os.path.relpath(file_path, temp_dir)}` | {original_size:.0f}KB | {new_size:.0f}KB | {size_reduction:.0f}KB | {compression_ratio:.1f}% |\n")
                 except Exception as e:
-                    logger.info(f"[#file_ops]❌ 处理图片失败 {os.path.relpath(file_path, temp_dir)}: {e}")
+                    logger.info(f"[#file]❌ 处理图片失败 {os.path.relpath(file_path, temp_dir)}: {e}")
                     with open(log_file_path, 'a', encoding='utf-8') as f:
                         f.write(f"\n> ⚠️ 处理失败: `{os.path.relpath(file_path, temp_dir)}` - {str(e)}\n")
 
@@ -651,7 +651,7 @@ class BatchProcessor:
             total_status['initial_count'] = len(image_files)
             
             if not image_files:
-                logger.info(f"[#file_ops]未找到图片文件在目录: {temp_dir}")
+                logger.info(f"[#file]未找到图片文件在目录: {temp_dir}")
                 return set()
                 
             # 创建并初始化日志文件
@@ -679,7 +679,7 @@ class BatchProcessor:
             return processed_files
             
         except Exception as e:
-            logger.info(f"[#file_ops]处理目录的图片时出错: {e}")
+            logger.info(f"[#file]处理目录的图片时出错: {e}")
             return set()
 
 class ArchiveHandler:
@@ -690,26 +690,26 @@ class ArchiveHandler:
     def _validate_archive(self, file_path: Path, params: dict) -> tuple[bool, int]:
         """验证压缩包是否需要处理"""
         if not file_path.exists():
-            logger.info(f"[#file_ops]文件不存在: {file_path}")
+            logger.info(f"[#file]文件不存在: {file_path}")
             return False, 0
             
         if not self.should_process_file(file_path, params):
-            logger.info(f"[#archive_ops]根据过滤条件跳过文件: {file_path}")
-            logger.info(f"[#archive_ops]跳过: {file_path.name} - 不符合关键词要求")
+            logger.info(f"[#archive]根据过滤条件跳过文件: {file_path}")
+            logger.info(f"[#archive]跳过: {file_path.name} - 不符合关键词要求")
             return False, 0
             
-        logger.info(f"[#archive_ops]🔄 正在处理: {file_path.name}")
+        logger.info(f"[#archive]🔄 正在处理: {file_path.name}")
             
         needs_processing, image_count = self.check_archive_contents(str(file_path), params.get('min_width', 0))
         
         if needs_processing is None:
-            logger.info(f"[#archive_ops]文件被占用，将添加到重试队列: {file_path}")
+            logger.info(f"[#archive]文件被占用，将添加到重试队列: {file_path}")
             return False, 0
         elif needs_processing is False:
-            logger.info(f"[#archive_ops]压缩包 {file_path} 无需处理")
+            logger.info(f"[#archive]压缩包 {file_path} 无需处理")
             return False, 0
         elif image_count == 0:
-            logger.info(f"[#archive_ops]压缩包 {file_path} 不包含图片文件")
+            logger.info(f"[#archive]压缩包 {file_path} 不包含图片文件")
             return False, 0
             
         return True, image_count
@@ -722,7 +722,7 @@ class ArchiveHandler:
         
         # 创建备份
         shutil.copy2(file_path, backup_file_path)
-        logger.info(f"[#file_ops]创建备份: {backup_file_path}")
+        logger.info(f"[#file]创建备份: {backup_file_path}")
         
         return temp_dir, new_zip_path, backup_file_path
 
@@ -730,10 +730,10 @@ class ArchiveHandler:
                                 image_count: int) -> tuple[set, dict]:
         """处理压缩包内容"""
         if not self.extract_archive(file_path, temp_dir):
-            logger.info(f"[#file_ops]解压失败: {file_path}")
+            logger.info(f"[#file]解压失败: {file_path}")
             return set(), {}
             
-        logger.info(f"[#image_convert]正在处理图片: {file_path.name}")
+        logger.info(f"[#image]正在处理图片: {file_path.name}")
         processed_files = BatchProcessor().process_images_in_directory(
             temp_dir, params, archive_path=file_path
         )
@@ -747,19 +747,19 @@ class ArchiveHandler:
         processed_archives = []
         
         if any((reason == '连续低效率转换' for reason in skipped_files.values())):
-            logger.info(f"[#archive_ops]压缩包 {file_path} 因连续低效率转换被跳过")
-            logger.info(f"[#archive_ops]跳过: {file_path.name} - 连续低效率转换")
+            logger.info(f"[#archive]压缩包 {file_path} 因连续低效率转换被跳过")
+            logger.info(f"[#archive]跳过: {file_path.name} - 连续低效率转换")
             return []
             
         if not processed_files:
-            logger.info(f"[#archive_ops]没有需要处理的图片: {file_path}")
+            logger.info(f"[#archive]没有需要处理的图片: {file_path}")
             return []
             
-        logger.info(f"[#archive_ops]正在创建新压缩包: {file_path.name}")
+        logger.info(f"[#archive]正在创建新压缩包: {file_path.name}")
             
         if not ArchiveContent().cleanup_and_compress(temp_dir, processed_files, skipped_files, new_zip_path):
-            logger.info(f"[#archive_ops]清理和压缩失败: {file_path}")
-            logger.info(f"[#archive_ops]错误: {file_path.name} - 清理和压缩失败")
+            logger.info(f"[#archive]清理和压缩失败: {file_path}")
+            logger.info(f"[#archive]错误: {file_path.name} - 清理和压缩失败")
             return []
             
         success, size_change = self.handle_size_comparison(file_path, new_zip_path, backup_file_path)
@@ -771,9 +771,9 @@ class ArchiveHandler:
                 'size_reduction_mb': size_change
             }
             processed_archives.append(result)
-            logger.info(f"[#archive_ops]完成: {file_path.name} - 减少了 {size_change:.2f}MB")
+            logger.info(f"[#archive]完成: {file_path.name} - 减少了 {size_change:.2f}MB")
         else:
-            logger.info(f"[#archive_ops]跳过: {file_path.name} - 新文件大小未减小")
+            logger.info(f"[#archive]跳过: {file_path.name} - 新文件大小未减小")
 
                 
         return processed_archives
@@ -782,7 +782,7 @@ class ArchiveHandler:
         """处理单个压缩包文件"""
         try:
             file_path = Path(file_path)
-            logger.info(f"[#file_ops]开始处理文件: {file_path}")
+            logger.info(f"[#file]开始处理文件: {file_path}")
             
             # 验证压缩包
             is_valid, image_count = self._validate_archive(file_path, params)
@@ -813,8 +813,8 @@ class ArchiveHandler:
                 self.path_handler.cleanup_temp_files(temp_dir, new_zip_path, backup_file_path)
                 
         except Exception as e:
-            logger.info(f"[#archive_ops]处理压缩包时出错 {file_path}: {e}")
-            logger.info(f"[#archive_ops]错误: {file_path.name} - {str(e)}")
+            logger.info(f"[#archive]处理压缩包时出错 {file_path}: {e}")
+            logger.info(f"[#archive]错误: {file_path.name} - {str(e)}")
             return []
 
     def prepare_archive(self, file_path):
@@ -824,18 +824,18 @@ class ArchiveHandler:
         new_zip_path = file_path + '.new'
         try:
             shutil.copy(file_path, backup_file_path)
-            logger.info(f"[#file_ops]创建备份: {backup_file_path}")
+            logger.info(f"[#file]创建备份: {backup_file_path}")
             try:
                 with zipfile.ZipFile(file_path, 'r') as zip_ref:
                     zip_ref.extractall(temp_dir)
-                    logger.info(f"[#file_ops]成功解压文件到: {temp_dir}")
+                    logger.info(f"[#file]成功解压文件到: {temp_dir}")
                     return (temp_dir, backup_file_path, new_zip_path, file_path)
             except zipfile.BadZipFile:
-                logger.info(f"[#file_ops]无效的压缩包格式: {file_path}")
+                logger.info(f"[#file]无效的压缩包格式: {file_path}")
                 PathHandler.cleanup_temp_files(temp_dir, new_zip_path, backup_file_path)
                 return (None, None, None, None)
         except Exception as e:
-            logger.info(f"[#file_ops]准备环境失败 {file_path}: {e}")
+            logger.info(f"[#file]准备环境失败 {file_path}: {e}")
             PathHandler.cleanup_temp_files(temp_dir, new_zip_path, backup_file_path)
             return (None, None, None, None)
 
@@ -855,13 +855,13 @@ class ArchiveHandler:
                 cmd.extend(additional_args)
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode == 0:
-                logger.info(f"[#file_ops]成功执行7z {operation}: {zip_path}")
+                logger.info(f"[#file]成功执行7z {operation}: {zip_path}")
                 return (True, result.stdout)
             else:
-                logger.info(f"[#file_ops]7z {operation}失败: {zip_path}\n错误: {result.stderr}")
+                logger.info(f"[#file]7z {operation}失败: {zip_path}\n错误: {result.stderr}")
                 return (False, result.stderr)
         except Exception as e:
-            logger.info(f"[#file_ops]执行7z命令出错: {e}")
+            logger.info(f"[#file]执行7z命令出错: {e}")
             return (False, str(e))
 
     def create_new_archive(self, temp_dir, new_zip_path):
@@ -872,16 +872,16 @@ class ArchiveHandler:
             cmd = ['7z', 'a', '-tzip', str(safe_zip), os.path.join(str(safe_temp), '*')]
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode != 0:
-                logger.info(f"[#file_ops]创建压缩包失败: {safe_zip}\n错误: {result.stderr}")
+                logger.info(f"[#file]创建压缩包失败: {safe_zip}\n错误: {result.stderr}")
                 return False
             fs = fsspec.filesystem('file')
             if not fs.exists(str(safe_zip)):
-                logger.info(f"[#file_ops]压缩包创建失败，文件不存在: {safe_zip}")
+                logger.info(f"[#file]压缩包创建失败，文件不存在: {safe_zip}")
                 return False
-            logger.info(f"[#file_ops]成功创建新压缩包: {safe_zip}")
+            logger.info(f"[#file]成功创建新压缩包: {safe_zip}")
             return True
         except Exception as e:
-            logger.info(f"[#file_ops]创建压缩包时出错: {e}")
+            logger.info(f"[#file]创建压缩包时出错: {e}")
             return False
 
     def check_archive_contents(self, file_path, min_width=0):
@@ -898,12 +898,12 @@ class ArchiveHandler:
                 with open(file_path, 'rb') as f:
                     f.read(1)
             except (IOError, PermissionError):
-                logger.info(f"[#file_ops]文件正在被占用，稍后重试: {file_path}")
+                logger.info(f"[#file]文件正在被占用，稍后重试: {file_path}")
                 return (None, 0)
             with zipfile.ZipFile(file_path, 'r') as zip_ref:
                 file_list = zip_ref.namelist()
                 if not file_list:
-                    logger.info(f"[#file_ops]压缩包为空: {file_path}")
+                    logger.info(f"[#file]压缩包为空: {file_path}")
                     return (False, 0)
                 target_ext = IMAGE_CONVERSION_CONFIG['target_format'].lower()
                 image_count = 0
@@ -921,15 +921,15 @@ class ArchiveHandler:
                         file_ext = os.path.splitext(file_name.lower())[1]
                         if file_ext in VIDEO_FORMATS:
                             has_video = True
-                            logger.info(f"[#file_ops]发现视频文件: {file_name}")
+                            logger.info(f"[#file]发现视频文件: {file_name}")
                             return (False, 0)
                         elif file_ext in AUDIO_FORMATS:
                             has_audio = True
-                            logger.info(f"[#file_ops]发现音频文件: {file_name}")
+                            logger.info(f"[#file]发现音频文件: {file_name}")
                             return (False, 0)
                         elif file_ext in EXCLUDED_IMAGE_FORMATS:
                             has_excluded_format = True
-                            logger.info(f"[#file_ops]发现排除格式图片: {file_name}")
+                            logger.info(f"[#file]发现排除格式图片: {file_name}")
                             return (False, 0)
                         if any((file_ext == ext for ext in IMAGE_CONVERSION_CONFIG['source_formats'])):
                             image_count += 1
@@ -941,10 +941,10 @@ class ArchiveHandler:
                                         img_path = os.path.join(temp_dir, file_name)
                                         with Image.open(img_path) as img:
                                             if img.width < min_width:
-                                                logger.info(f"[#image_convert]发现宽度不足的图片: {file_name} (宽度: {img.width}px < {min_width}px)")
+                                                logger.info(f"[#image]发现宽度不足的图片: {file_name} (宽度: {img.width}px < {min_width}px)")
                                                 return (False, 0)
                                     except Exception as e:
-                                        logger.info(f"[#file_ops]检查图片宽度时出错 {file_name}: {e}")
+                                        logger.info(f"[#file]检查图片宽度时出错 {file_name}: {e}")
                                         continue
                                     finally:
                                         try:
@@ -959,13 +959,13 @@ class ArchiveHandler:
                         except:
                             pass
                 if needs_processing:
-                    logger.info(f"[#file_ops]压缩包 {file_path} 包含 {image_count} 个图片文件，需要处理")
+                    logger.info(f"[#file]压缩包 {file_path} 包含 {image_count} 个图片文件，需要处理")
                 return (needs_processing, image_count)
         except zipfile.BadZipFile:
-            logger.info(f"[#file_ops]无效的压缩包格式: {file_path}")
+            logger.info(f"[#file]无效的压缩包格式: {file_path}")
             return (False, 0)
         except Exception as e:
-            logger.info(f"[#file_ops]检查压缩包内容时出错 {file_path}: {e}")
+            logger.info(f"[#file]检查压缩包内容时出错 {file_path}: {e}")
             if '另一个程序正在使用此文件' in str(e) or 'being used by another process' in str(e):
                 return (None, 0)
             return (False, 0)
@@ -975,22 +975,22 @@ class ArchiveHandler:
         if params.get('exclude_paths'):
             is_excluded = any((exclude_path in str(file_path) for exclude_path in params['exclude_paths']))
             if is_excluded:
-                logger.info(f"[#file_ops]文件在排除路径中，跳过: {file_path}")
+                logger.info(f"[#file]文件在排除路径中，跳过: {file_path}")
                 return False
         if params.get('keywords'):
             file_name = os.path.basename(str(file_path)).lower()
             if params['keywords'] == 'internal':
                 has_keyword = any((keyword.lower() in file_name for keyword in INCLUDED_KEYWORDS))
                 if not has_keyword:
-                    logger.info(f"[#file_ops]文件名不包含内置关键词，跳过: {file_path}")
+                    logger.info(f"[#file]文件名不包含内置关键词，跳过: {file_path}")
                     return False
-                logger.info(f"[#file_ops]文件名包含内置关键词，继续处理: {file_path}")
+                logger.info(f"[#file]文件名包含内置关键词，继续处理: {file_path}")
             elif isinstance(params['keywords'], list):
                 has_keyword = any((keyword.lower() in file_name for keyword in params['keywords']))
                 if not has_keyword:
-                    logger.info(f"[#file_ops]文件名不包含指定关键词，跳过: {file_path}")
+                    logger.info(f"[#file]文件名不包含指定关键词，跳过: {file_path}")
                     return False
-                logger.info(f"[#file_ops]文件名包含指定关键词，继续处理: {file_path}")
+                logger.info(f"[#file]文件名包含指定关键词，继续处理: {file_path}")
         is_art = self.is_artbook(str(file_path), params['artbook_keywords'])
         if params['handle_artbooks']:
             return is_art
@@ -1011,34 +1011,34 @@ class ArchiveHandler:
         try:
             safe_src = PathHandler.ensure_long_path(file_path)
             safe_dest = PathHandler.ensure_long_path(temp_dir)
-            logger.info(f"[#file_ops]开始解压: {safe_src} ")
+            logger.info(f"[#file]开始解压: {safe_src} ")
             try:
                 # 使用 7z x 命令，保持目录结构
                 cmd = ['7z', 'x', str(safe_src), f'-o{str(safe_dest)}', '-y']
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 if result.returncode == 0:
-                    logger.info(f"[#file_ops]使用7z成功解压: {safe_src}")
+                    logger.info(f"[#file]使用7z成功解压: {safe_src}")
                     return True
                 else:
-                    logger.info(f"[#file_ops]7z解压失败，尝试备用方案: {result.stderr}")
+                    logger.info(f"[#file]7z解压失败，尝试备用方案: {result.stderr}")
                     
                 # 如果 x 命令失败，尝试使用 e 命令（不保持目录结构）
                 # cmd = ['7z', 'e', str(safe_src), f'-o{str(safe_dest)}', '-y']
                 # result = subprocess.run(cmd, capture_output=True, text=True)
                 # if result.returncode == 0:
-                #     logger.info(f"[#file_ops]使用7z (e)成功解压: {safe_src}")
+                #     logger.info(f"[#file]使用7z (e)成功解压: {safe_src}")
                 #     return True
                 # else:
-                #     logger.info(f"[#file_ops]7z (e)解压也失败，尝试其他方案: {result.stderr}")
+                #     logger.info(f"[#file]7z (e)解压也失败，尝试其他方案: {result.stderr}")
             except Exception as e:
-                logger.info(f"[#file_ops]7z解压出错，尝试备用方案: {e}")
+                logger.info(f"[#file]7z解压出错，尝试备用方案: {e}")
                 
             # 尝试使用 zipfile
             try:
                 with zipfile.ZipFile(str(safe_src), 'r') as zip_ref:
                     file_list = zip_ref.namelist()
                     if not file_list:
-                        logger.info(f"[#file_ops]压缩包为空: {safe_src}")
+                        logger.info(f"[#file]压缩包为空: {safe_src}")
                         return False
                     for file_name in file_list:
                         decoded_name = file_name
@@ -1051,17 +1051,17 @@ class ArchiveHandler:
                         if not file_name.endswith('/'):
                             with zip_ref.open(file_name) as source, open(str(target_path), 'wb') as target:
                                 shutil.copyfileobj(source, target)
-                    logger.info(f"[#file_ops]使用zipfile成功解压: {safe_src}")
+                    logger.info(f"[#file]使用zipfile成功解压: {safe_src}")
                     return True
             except zipfile.BadZipFile:
-                logger.info(f"[#file_ops]zipfile解压失败: {safe_src}")
+                logger.info(f"[#file]zipfile解压失败: {safe_src}")
             except Exception as e:
-                logger.info(f"[#file_ops]zipfile解压出错: {e}")
+                logger.info(f"[#file]zipfile解压出错: {e}")
                 
-            logger.info(f"[#file_ops]所有解压方案都失败: {safe_src}")
+            logger.info(f"[#file]所有解压方案都失败: {safe_src}")
             return False
         except Exception as e:
-            logger.info(f"[#file_ops]解压文件时出错: {e}")
+            logger.info(f"[#file]解压文件时出错: {e}")
             return False
 
     def handle_size_comparison(self, file_path, new_zip_path, backup_file_path):
@@ -1072,14 +1072,14 @@ class ArchiveHandler:
             safe_new = PathHandler.ensure_long_path(new_zip_path)
             safe_backup = PathHandler.ensure_long_path(backup_file_path)
             if not fs.exists(str(safe_new)):
-                logger.info(f"[#file_ops]新压缩包不存在: {safe_new}")
+                logger.info(f"[#file]新压缩包不存在: {safe_new}")
                 return (False, 0)
             original_size = fs.info(str(safe_file))['size']
             new_size = fs.info(str(safe_new))['size']
             # 如果新文件大小超过原文件的80%，认为压缩效果不理想
             SIZE_THRESHOLD_RATIO = 0.8  # 80%
             if new_size >= original_size * SIZE_THRESHOLD_RATIO:
-                logger.info(f"[#file_ops]新压缩包 ({new_size / 1024 / 1024:.2f}MB) 大小超过原始文件 ({original_size / 1024 / 1024:.2f}MB) 的{SIZE_THRESHOLD_RATIO*100}%，压缩效果不理想")
+                logger.info(f"[#file]新压缩包 ({new_size / 1024 / 1024:.2f}MB) 大小超过原始文件 ({original_size / 1024 / 1024:.2f}MB) 的{SIZE_THRESHOLD_RATIO*100}%，压缩效果不理想")
                 fs.delete(str(safe_new))
                 if fs.exists(str(safe_backup)):
                     fs.move(str(safe_backup), str(safe_file))
@@ -1087,48 +1087,48 @@ class ArchiveHandler:
                     if hasattr(self, 'rename_cbr') and self.rename_cbr:
                         new_name = safe_file.with_suffix('.cbr')
                         fs.move(str(safe_file), str(new_name))
-                        logger.info(f"[#file_ops]已将文件改为CBR: {new_name}")
+                        logger.info(f"[#file]已将文件改为CBR: {new_name}")
                 return (False, 0)
             try:
                 with fs.open(str(safe_file), 'rb') as f:
                     f.read(1)
             except Exception as e:
-                logger.info(f"[#file_ops]无法访问目标文件，可能正在被使用: {safe_file}")
+                logger.info(f"[#file]无法访问目标文件，可能正在被使用: {safe_file}")
                 return (False, 0)
             try:
                 fs.delete(str(safe_file))
                 fs.move(str(safe_new), str(safe_file))
             except Exception as e:
-                logger.info(f"[#file_ops]替换文件时出错: {e}")
+                logger.info(f"[#file]替换文件时出错: {e}")
                 if fs.exists(str(safe_backup)):
                     try:
                         fs.move(str(safe_backup), str(safe_file))
-                        logger.info("[#file_ops]已还原原始文件")
+                        logger.info("[#file]已还原原始文件")
                     except Exception as restore_error:
-                        logger.info(f"[#file_ops]还原文件失败: {restore_error}")
+                        logger.info(f"[#file]还原文件失败: {restore_error}")
                 return (False, 0)
             if fs.exists(str(safe_backup)):
                 try:
                     fs.delete(str(safe_backup))
-                    logger.info(f"[#file_ops]已删除备份文件: {safe_backup}")
+                    logger.info(f"[#file]已删除备份文件: {safe_backup}")
                 except Exception as e:
-                    logger.info(f"[#file_ops]删除备份文件失败: {e}")
+                    logger.info(f"[#file]删除备份文件失败: {e}")
             size_change = (original_size - new_size) / (1024 * 1024)
-            logger.info(f"[#file_ops]更新压缩包: {safe_file} (减少 {size_change:.2f}MB)")
+            logger.info(f"[#file]更新压缩包: {safe_file} (减少 {size_change:.2f}MB)")
             return (True, size_change)
         except Exception as e:
-            logger.info(f"[#file_ops]比较文件大小时出错: {e}")
+            logger.info(f"[#file]比较文件大小时出错: {e}")
             if fs.exists(str(safe_backup)):
                 try:
                     fs.move(str(safe_backup), str(safe_file))
-                    logger.info("[#file_ops]已还原原始文件")
+                    logger.info("[#file]已还原原始文件")
                 except Exception as restore_error:
-                    logger.info(f"[#file_ops]还原文件失败: {restore_error}")
+                    logger.info(f"[#file]还原文件失败: {restore_error}")
             if fs.exists(str(safe_new)):
                 try:
                     fs.delete(str(safe_new))
                 except Exception as remove_error:
-                    logger.info(f"[#file_ops]删除新文件失败: {remove_error}")
+                    logger.info(f"[#file]删除新文件失败: {remove_error}")
             return (False, 0)
 
     def is_artbook(self, file_path, artbook_keywords):
@@ -1147,7 +1147,7 @@ class ArchiveContent:
     def cleanup_and_compress(self, temp_dir, processed_files, skipped_files, new_zip_path):
         """清理文件并创建新压缩包"""
         try:
-            logger.info(f"[#file_ops]处理了 {len(processed_files)} 张图片，跳过了 {len(skipped_files)} 张图片")
+            logger.info(f"[#file]处理了 {len(processed_files)} 张图片，跳过了 {len(skipped_files)} 张图片")
             if backup_removed_files_enabled:
                 self.backup_removed_files(new_zip_path, processed_files, skipped_files)
             removed_count = 0
@@ -1156,20 +1156,20 @@ class ArchiveContent:
                     if file_path and os.path.exists(file_path):
                         os.remove(file_path)
                         removed_count += 1
-                        logger.info(f"[#file_ops]已删除文件: {file_path}")
+                        logger.info(f"[#file]已删除文件: {file_path}")
                 except Exception as e:
-                    logger.info(f"[#file_ops]删除文件失败 {file_path}: {e}")
+                    logger.info(f"[#file]删除文件失败 {file_path}: {e}")
                     continue
-            logger.info(f"[#file_ops]已删除 {removed_count} 个文件")
+            logger.info(f"[#file]已删除 {removed_count} 个文件")
             empty_dirs_removed = self.directory_handler.remove_empty_directories(temp_dir)
             if empty_dirs_removed != 0:
-                logger.info(f"[#file_ops]已删除 {empty_dirs_removed} 个空文件夹")
+                logger.info(f"[#file]已删除 {empty_dirs_removed} 个空文件夹")
             self.directory_handler.flatten_single_subfolder(temp_dir, [])
             if not os.path.exists(temp_dir):
-                logger.info(f"[#file_ops]临时目录不存在: {temp_dir}")
+                logger.info(f"[#file]临时目录不存在: {temp_dir}")
                 return False
             if not any(os.scandir(temp_dir)):
-                logger.info(f"[#file_ops]临时目录为空: {temp_dir}")
+                logger.info(f"[#file]临时目录为空: {temp_dir}")
                 return False
             try:
                 with zipfile.ZipFile(new_zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_ref:
@@ -1179,36 +1179,36 @@ class ArchiveContent:
                             arcname = os.path.relpath(file_path, temp_dir)
                             zip_ref.write(file_path, arcname)
                 if not os.path.exists(new_zip_path):
-                    logger.info(f"[#archive_ops]压缩包创建失败: {new_zip_path}")
+                    logger.info(f"[#archive]压缩包创建失败: {new_zip_path}")
                     return False
-                logger.info(f"[#archive_ops]成功创建新压缩包: {new_zip_path}")
+                logger.info(f"[#archive]成功创建新压缩包: {new_zip_path}")
                 return True
             except Exception as e:
-                logger.info(f"[#archive_ops]创建压缩包失败: {e}")
+                logger.info(f"[#archive]创建压缩包失败: {e}")
                 return False
         except Exception as e:
-            logger.info(f"[#archive_ops]清理和压缩时出错: {e}")
+            logger.info(f"[#archive]清理和压缩时出错: {e}")
             return False
 
     def create_new_zip(self, zip_path, temp_dir):
         """从临时目录创建新的压缩包"""
         try:
             if not any(os.scandir(temp_dir)):
-                logger.info(f"[#file_ops]临时目录为空: {temp_dir}")
+                logger.info(f"[#file]临时目录为空: {temp_dir}")
                 return False
             cmd = ['7z', 'a', '-tzip', zip_path, os.path.join(temp_dir, '*')]
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode == 0:
                 if not os.path.exists(zip_path):
-                    logger.info(f"[#archive_ops]压缩包创建失败: {zip_path}")
+                    logger.info(f"[#archive]压缩包创建失败: {zip_path}")
                     return False
-                logger.info(f"[#archive_ops]成功创建新压缩包: {zip_path} ({os.path.getsize(zip_path) / 1024 / 1024:.2f} MB)")
+                logger.info(f"[#archive]成功创建新压缩包: {zip_path} ({os.path.getsize(zip_path) / 1024 / 1024:.2f} MB)")
                 return True
             else:
-                logger.info(f"[#archive_ops]创建压缩包失败: {result.stderr}")
+                logger.info(f"[#archive]创建压缩包失败: {result.stderr}")
                 return False
         except Exception as e:
-            logger.info(f"[#file_ops]创建压缩包时出错: {e}")
+            logger.info(f"[#file]创建压缩包时出错: {e}")
             return False
 
     def read_zip_contents(self, zip_path):
@@ -1217,7 +1217,7 @@ class ArchiveContent:
             cmd = ['7z', 'l', '-slt', zip_path]
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode != 0:
-                logger.info(f"[#file_ops]读取压缩包失败: {zip_path}\n错误: {result.stderr}")
+                logger.info(f"[#file]读取压缩包失败: {zip_path}\n错误: {result.stderr}")
                 return []
             files = []
             cur_file = None
@@ -1227,10 +1227,10 @@ class ArchiveContent:
                     cur_file = line[7:]
                     if cur_file and (not cur_file.endswith('/')):
                         files.append(cur_file)
-            logger.info(f"[#file_ops]Found {len(files)} files in archive: {zip_path}")
+            logger.info(f"[#file]Found {len(files)} files in archive: {zip_path}")
             return files
         except Exception as e:
-            logger.info(f"[#file_ops]读取压缩包内容时出错 {zip_path}: {e}")
+            logger.info(f"[#file]读取压缩包内容时出错 {zip_path}: {e}")
             return []
 
     def extract_file_from_zip(self, zip_path, file_name, temp_dir):
@@ -1248,10 +1248,10 @@ class ArchiveContent:
         """如果处理成功则删除备份文件"""
         if os.path.exists(backup_path) and backup_path.endswith('.bak'):
             try:
-                logger.info(f"[#file_ops]将备份文件移至回收站: {backup_path}")
+                logger.info(f"[#file]将备份文件移至回收站: {backup_path}")
                 send2trash(backup_path)
             except Exception as e:
-                logger.info(f"[#file_ops]移动备份文件到回收站失败: {backup_path} - {e}")
+                logger.info(f"[#file]移动备份文件到回收站失败: {backup_path} - {e}")
 
     def backup_removed_files(self, zip_path, removed_files, duplicate_files):
         """将删除的文件备份到trash文件夹中，保持原始目录结构"""
@@ -1271,9 +1271,9 @@ class ArchiveContent:
                 dest_path = os.path.join(trash_dir, 'duplicates', rel_path)
                 os.makedirs(os.path.dirname(dest_path), exist_ok=True)
                 shutil.copy2(file_path, dest_path)
-            logger.info(f"[#file_ops]已备份删除的文件到: {trash_dir}")
+            logger.info(f"[#file]已备份删除的文件到: {trash_dir}")
         except Exception as e:
-            logger.info(f"[#file_ops]备份删除文件时出错: {e}")
+            logger.info(f"[#file]备份删除文件时出错: {e}")
 
 
 class Performance:
@@ -1309,7 +1309,7 @@ class PerformanceConfig:
             self.get_batch_size = module.get_batch_size
             return True
         except Exception as e:
-            logger.info(f"[#file_ops]加载性能配置文件失败: {e}")
+            logger.info(f"[#file]加载性能配置文件失败: {e}")
             self.get_thread_count = self.default_thread_count
             self.get_batch_size = self.default_batch_size
             return False
@@ -1330,10 +1330,10 @@ class PerformanceConfig:
             self.config_path = path
             success = self._load_config()
             if success:
-                logger.info(f"[#file_ops]已设置性能配置文件路径: {path}")
+                logger.info(f"[#file]已设置性能配置文件路径: {path}")
             return success
         else:
-            logger.info(f"[#file_ops]性能配置文件不存在: {path}")
+            logger.info(f"[#file]性能配置文件不存在: {path}")
             return False
 
     def get_optimal_thread_count(self, image_count):
@@ -1430,9 +1430,9 @@ class Monitor:
             
             self._run_process_loop(directories, params, interval_minutes, infinite_mode)
         except KeyboardInterrupt:
-            logger.info("[#file_ops]⚠️ 用户中断处理")
+            logger.info("[#file]⚠️ 用户中断处理")
         except Exception as e:
-            logger.info(f"[#file_ops]❌ 处理过程出错: {e}")
+            logger.info(f"[#file]❌ 处理过程出错: {e}")
 
     def _update_status(self):
         """更新统计信息"""
@@ -1451,18 +1451,18 @@ class Monitor:
         while True:
             try:
                 round_count += 1
-                logger.info(f"[#file_ops]🔄 开始第 {round_count} 轮处理...")
+                logger.info(f"[#file]🔄 开始第 {round_count} 轮处理...")
                 
                 # 获取要处理的文件列表
                 files_to_process = self._get_files_to_process(directories, processed_files, skipped_files, occupied_files)
                 
                 if not files_to_process:
                     if infinite_mode:
-                        logger.info("[#file_ops]⏸️ 当前没有需要处理的文件，继续监控...")
+                        logger.info("[#file]⏸️ 当前没有需要处理的文件，继续监控...")
                         self._wait_next_round(interval_minutes)
                         continue
                     else:
-                        logger.info("[#file_ops]✅ 所有文件已处理完成")
+                        logger.info("[#file]✅ 所有文件已处理完成")
                         break
                 
                 # 更新总文件数
@@ -1475,16 +1475,16 @@ class Monitor:
                 # 等待下一轮
                 if infinite_mode or occupied_files or len(processed_files) > 0 or len(skipped_files) > 0:
                     wait_minutes = min(round_count, 10)
-                    logger.info(f"[#file_ops]⏸️ 等待 {wait_minutes} 分钟后开始下一轮...")
+                    logger.info(f"[#file]⏸️ 等待 {wait_minutes} 分钟后开始下一轮...")
                     self._wait_next_round(wait_minutes)
                     continue
                 else:
                     break
                     
             except Exception as e:
-                logger.info(f"[#file_ops]❌ 处理过程出错: {e}")
+                logger.info(f"[#file]❌ 处理过程出错: {e}")
                 if infinite_mode:
-                    logger.info(f"[#file_ops]⚠️ 处理出错: {e}，等待下一轮...")
+                    logger.info(f"[#file]⚠️ 处理出错: {e}，等待下一轮...")
                     self._wait_next_round(interval_minutes)
                     continue
                 else:
@@ -1513,7 +1513,7 @@ class Monitor:
                 # 检查文件是否被占用
                 if self._is_file_locked(file_path):
                     occupied_files.add(file_path)
-                    logger.info(f"[#file_ops]⚠️ 文件被占用: {file_name}")
+                    logger.info(f"[#file]⚠️ 文件被占用: {file_name}")
                     continue
                 
                 # 处理单个文件
@@ -1523,17 +1523,17 @@ class Monitor:
                     processed_files.add(file_path)
                     self.processed_files += 1
                     self._update_status()
-                    logger.info(f"[#file_ops]✅ 处理完成: {file_name}")
+                    logger.info(f"[#file]✅ 处理完成: {file_name}")
                 else:
                     reason = skipped_files.get(file_path, "未知原因")
                     if file_path in skipped_files:
-                        logger.info(f"[#file_ops]⚠️ 跳过文件: {file_name} - {reason}")
+                        logger.info(f"[#file]⚠️ 跳过文件: {file_name} - {reason}")
                         self.skipped_files += 1  # 增加跳过文件计数
                     else:
-                        logger.info(f"[#file_ops]⚠️ 跳过文件: {file_name} - 处理失败或不需要处理")
+                        logger.info(f"[#file]⚠️ 跳过文件: {file_name} - 处理失败或不需要处理")
                     
             except Exception as e:
-                logger.info(f"[#file_ops]❌ 处理文件出错 {file_path}: {e}")
+                logger.info(f"[#file]❌ 处理文件出错 {file_path}: {e}")
 
 
     def _get_files_to_process(self, directories, processed_files, skipped_files, occupied_files):
@@ -1556,7 +1556,7 @@ class Monitor:
         files_to_process = [f for f in files_to_process if not self._is_file_locked(f)]
         
         if files_to_process:
-            logger.info(f"[#file_ops]📝 找到 {len(files_to_process)} 个待处理文件")
+            logger.info(f"[#file]📝 找到 {len(files_to_process)} 个待处理文件")
         
         return files_to_process
 
@@ -1597,15 +1597,15 @@ class InputHandler:
             paths = [path.strip().strip('"') for path in clipboard_content.splitlines() if path.strip()]
             valid_paths = [path for path in paths if os.path.exists(path)]
             if valid_paths:
-                logger.info(f"[#file_ops]从剪贴板读取到 {len(valid_paths)} 个有效路径")
+                logger.info(f"[#file]从剪贴板读取到 {len(valid_paths)} 个有效路径")
             else:
-                logger.info(f"[#file_ops]剪贴板中没有有效路径")
+                logger.info(f"[#file]剪贴板中没有有效路径")
             return valid_paths
         except ImportError:
-            logger.info(f"[#file_ops]未安装 pyperclip 模块，无法读取剪贴板")
+            logger.info(f"[#file]未安装 pyperclip 模块，无法读取剪贴板")
             return []
         except Exception as e:
-            logger.info(f"[#file_ops]读取剪贴板时出错: {e}")
+            logger.info(f"[#file]读取剪贴板时出错: {e}")
             return []
 
 
@@ -1636,7 +1636,7 @@ class FileWatcher:
             return
         with self.processing_queue.processing_lock:
             self.processing_queue.pending_files.add(file_path)
-            logger.info(f"[#file_ops]添加文件到待处理列表: {file_path}")
+            logger.info(f"[#file]添加文件到待处理列表: {file_path}")
             self.processing_queue.last_check_time = 0
             self.check_pending_files()
 
@@ -1662,14 +1662,14 @@ class FileWatcher:
                         with open(file_path, 'rb') as f:
                             f.read(1)
                     except (IOError, PermissionError):
-                        logger.info(f"[#file_ops]文件被占用，跳过: {file_path}")
+                        logger.info(f"[#file]文件被占用，跳过: {file_path}")
                         files_to_remove.add(file_path)
                         continue
                         
                     files_to_process.add(file_path)
                     
                 except Exception as e:
-                    logger.info(f"[#file_ops]检查文件时出错 {file_path}: {e}")
+                    logger.info(f"[#file]检查文件时出错 {file_path}: {e}")
                     files_to_remove.add(file_path)
             
             self.processing_queue.pending_files -= files_to_remove
@@ -1688,7 +1688,7 @@ class FileWatcher:
         try:
             ArchiveHandler().process_single_archive(file_path, {})
         except Exception as e:
-            logger.info(f"[#file_ops]处理文件时出错 {file_path}: {e}")
+            logger.info(f"[#file]处理文件时出错 {file_path}: {e}")
         finally:
             with self.processing_queue.processing_lock:
                 self.processing_queue.processing_files.remove(file_path)
@@ -1715,31 +1715,31 @@ class ErrorHandler:
     def handle_file_error(e, file_path, operation):
         """处理文件操作错误"""
         if isinstance(e, PermissionError):
-            logger.info(f"[#file_ops]{operation}失败(权限不足): {file_path}")
+            logger.info(f"[#file]{operation}失败(权限不足): {file_path}")
         elif isinstance(e, FileNotFoundError):
-            logger.info(f"[#file_ops]{operation}失败(文件不存在): {file_path}")
+            logger.info(f"[#file]{operation}失败(文件不存在): {file_path}")
         else:
-            logger.info(f"[#file_ops]{operation}失败: {file_path} - {str(e)}")
+            logger.info(f"[#file]{operation}失败: {file_path} - {str(e)}")
 
     @staticmethod
     def handle_archive_error(e, archive_path):
         """处理压缩包错误"""
         if isinstance(e, zipfile.BadZipFile):
-            logger.info(f"[#file_ops]无效的压缩包格式: {archive_path}")
+            logger.info(f"[#file]无效的压缩包格式: {archive_path}")
         elif isinstance(e, PermissionError):
-            logger.info(f"[#file_ops]压缩包访问权限不足: {archive_path}")
+            logger.info(f"[#file]压缩包访问权限不足: {archive_path}")
         else:
-            logger.info(f"[#file_ops]处理压缩包时出错: {archive_path} - {str(e)}")
+            logger.info(f"[#file]处理压缩包时出错: {archive_path} - {str(e)}")
 
     @staticmethod
     def handle_image_error(e, image_path):
         """处理图片错误"""
         if isinstance(e, Image.DecompressionBombError):
-            logger.info(f"[#file_ops]图片过大: {image_path}")
+            logger.info(f"[#file]图片过大: {image_path}")
         elif isinstance(e, Image.UnidentifiedImageError):
-            logger.info(f"[#file_ops]无法识别的图片格式: {image_path}")
+            logger.info(f"[#file]无法识别的图片格式: {image_path}")
         else:
-            logger.info(f"[#file_ops]处理图片时出错: {image_path} - {str(e)}")
+            logger.info(f"[#file]处理图片时出错: {image_path} - {str(e)}")
 
 class ConfigManager:
     """配置管理类"""
@@ -1756,20 +1756,20 @@ class ConfigManager:
                 self.config_file = config_file
             return True
         except Exception as e:
-            logger.info(f"[#file_ops]加载配置文件失败: {e}")
+            logger.info(f"[#file]加载配置文件失败: {e}")
             return False
 
     def save_config(self):
         """保存配置到文件"""
         if not self.config_file:
-            logger.info(f"[#file_ops]未指定配置文件路径")
+            logger.info(f"[#file]未指定配置文件路径")
             return False
         try:
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 yaml.safe_dump(self.config, f, allow_unicode=True)
             return True
         except Exception as e:
-            logger.info(f"[#file_ops]保存配置文件失败: {e}")
+            logger.info(f"[#file]保存配置文件失败: {e}")
             return False
 
     def get_value(self, key, default=None):
@@ -1833,16 +1833,16 @@ def init_performance_config(args):
     if args.performance_config:
         performance_config = PerformanceConfig(args.performance_config)
         if not performance_config.load_config():
-            logger.info(f"[#file_ops]使用默认性能配置")
+            logger.info(f"[#file]使用默认性能配置")
 
 def init_keywords(args):
     """初始化关键词设置"""
     if args.keywords:
         keywords = 'internal'
-        logger.info(f"[#file_ops]将使用内置关键词列表: {INCLUDED_KEYWORDS}")
+        logger.info(f"[#file]将使用内置关键词列表: {INCLUDED_KEYWORDS}")
     else:
         keywords = None
-        logger.info("[#file_ops]未启用关键词过滤")
+        logger.info("[#file]未启用关键词过滤")
     return keywords
 
 def configure_image_conversion(args):
@@ -1861,7 +1861,7 @@ def configure_image_conversion(args):
     # 处理特殊格式设置
     if args.format == 'jxl' and args.jxl_jpeg_lossless:
         params['use_cjxl'] = True  # 添加标志以启用CJXL
-        logger.info("[#file_ops]已启用 CJXL 的 JPEG 无损转换模式")
+        logger.info("[#file]已启用 CJXL 的 JPEG 无损转换模式")
     elif args.lossless:
         configure_lossless_mode()
         
@@ -1880,7 +1880,7 @@ def configure_lossless_mode():
     })
     IMAGE_CONVERSION_CONFIG['jpeg_config']['quality'] = 100
     IMAGE_CONVERSION_CONFIG['png_config'].update({'optimize': True, 'compress_level': 9})
-    logger.info("[#file_ops]已启用普通无损压缩模式")
+    logger.info("[#file]已启用普通无损压缩模式")
 
 def process_directories(use_clipboard, input_handler):
     """处理目录输入"""
@@ -1897,9 +1897,9 @@ def process_directories(use_clipboard, input_handler):
             if os.path.exists(directory):
                 directories.append(directory)
                 progress = (i+1)/len(directories)*100
-                logger.info(f"[#file_ops]✅ 已添加路径: {directory}")
+                logger.info(f"[#file]✅ 已添加路径: {directory}")
             else:
-                logger.info(f"[#file_ops]路径不存在: {directory}")
+                logger.info(f"[#file]路径不存在: {directory}")
     return directories
 
 def run_with_args(args):
@@ -1937,9 +1937,9 @@ def run_with_args(args):
         # 启动性能配置GUI
         config_gui_thread = threading.Thread(target=lambda: ConfigGUI().run(), daemon=True)
         config_gui_thread.start()
-        logger.info("[#file_ops]🔧 已启动性能配置调整器")
+        logger.info("[#file]🔧 已启动性能配置调整器")
         
-        logger.info(f"[#file_ops]🚀 启动{('无限循环' if args.infinite else '自动运行')}模式，每 {args.interval} 分钟运行一次...")
+        logger.info(f"[#file]🚀 启动{('无限循环' if args.infinite else '自动运行')}模式，每 {args.interval} 分钟运行一次...")
         monitor = Monitor()
         monitor.auto_run_process(directories, params, args.interval, args.infinite)
 

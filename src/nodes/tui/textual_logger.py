@@ -164,6 +164,11 @@ class TextualLogHandler(logging.Handler):
         self.path_regex = re.compile(r'([A-Za-z]:\\[^\s]+|/([^\s/]+/){2,}[^\s/]+|\S+\.[a-zA-Z0-9]+)')
         self.max_msg_length = 80  # 调整为更合理的长度
         self.max_filename_length = 40  # 文件名最大长度
+        self.enable_truncate = False  # 默认不启用截断
+
+    def set_truncate(self, enable: bool = False):
+        """设置是否启用截断功能"""
+        self.enable_truncate = enable
 
     def _truncate_path(self, path: str, max_length: int = None) -> str:
         """智能路径截断处理
@@ -175,6 +180,9 @@ class TextualLogHandler(logging.Handler):
         Returns:
             截断后的字符串
         """
+        if not self.enable_truncate:  # 如果未启用截断，直接返回原始路径
+            return path
+            
         if max_length is None:
             max_length = self.max_filename_length
             
@@ -236,40 +244,77 @@ class TextualLogHandler(logging.Handler):
                 content = normal_match.group(2).strip()
                 tag = f"[#{panel_name}]"
             
-            # 处理消息截断
-            if len(content) > self.max_msg_length - len(tag):
-                # 查找所有需要截断的路径
-                matches = list(self.path_regex.finditer(content))
-                if not matches:
-                    # 如果没有找到文件名或路径，直接截断
-                    content = f"{content[:self.max_msg_length-len(tag)-3]}..."
-                else:
-                    truncated_content = content
-                    offset = 0
+            # 只在启用截断时进行处理
+            if self.enable_truncate:
+                # 获取终端宽度
+                try:
+                    terminal_width = self.app.console.width if self.app and self.app.console else 80
+                except:
+                    terminal_width = 80
                     
-                    # 处理所有匹配项
-                    for match in matches:
-                        start = match.start() - offset
-                        end = match.end() - offset
-                        original = match.group()
+                # 调整最大消息长度为终端宽度
+                self.max_msg_length = max(terminal_width - 2, 40)  # 预留2个字符的边距
+                
+                # 处理消息截断
+                if len(content) > self.max_msg_length - len(tag):
+                    # 查找所有需要截断的路径
+                    matches = list(self.path_regex.finditer(content))
+                    if not matches:
+                        # 如果没有找到文件名或路径，保留开头和结尾的重要信息
+                        available_length = self.max_msg_length - len(tag) - 5  # 5是...和空格的长度
+                        if available_length > 20:  # 确保有足够空间显示
+                            # 分配60%给前部分，40%给后部分
+                            front_length = int(available_length * 0.6)
+                            back_length = available_length - front_length
+                            content = f"{content[:front_length]}...{content[-back_length:]}"
+                        else:
+                            # 空间不足时只显示开头部分
+                            content = f"{content[:self.max_msg_length-len(tag)-3]}..."
+                    else:
+                        truncated_content = content
+                        offset = 0
                         
-                        # 计算当前位置的可用长度
-                        remaining_length = self.max_msg_length - len(tag) - (len(truncated_content) - (end - start))
-                        if remaining_length < 10:  # 如果剩余空间太小
-                            truncated_content = truncated_content[:start] + "..."
-                            break
+                        # 处理所有匹配项
+                        for match in matches:
+                            start = match.start() - offset
+                            end = match.end() - offset
+                            original = match.group()
                             
-                        truncated = self._truncate_path(original, min(remaining_length, self.max_filename_length))
+                            # 计算当前位置的可用长度
+                            remaining_space = self.max_msg_length - len(tag)
+                            if remaining_space < 10:  # 空间不足
+                                remaining_space = self.max_msg_length  # 忽略标签长度以确保显示内容
+                                
+                            # 为文件名保留合理空间
+                            file_space = min(remaining_space // 2, self.max_filename_length)
+                            truncated = self._truncate_path(original, file_space)
+                            
+                            # 确保截断后的内容不会完全消失
+                            if not truncated or len(truncated) < 5:  # 如果截断后太短
+                                truncated = f"...{original[-10:]}"  # 至少保留最后10个字符
+                                
+                            if truncated != original:
+                                truncated_content = truncated_content[:start] + truncated + truncated_content[end:]
+                                offset += len(original) - len(truncated)
                         
-                        if truncated != original:
-                            truncated_content = truncated_content[:start] + truncated + truncated_content[end:]
-                            offset += len(original) - len(truncated)
-                    
-                    content = truncated_content
-                    
-                    # 确保总长度不超过限制
-                    if len(content) > self.max_msg_length - len(tag):
-                        content = f"{content[:self.max_msg_length-len(tag)-3]}..."
+                        content = truncated_content
+                        
+                        # 如果内容仍然太长，保留重要信息
+                        if len(content) > self.max_msg_length - len(tag):
+                            # 查找最后的数字信息（如：89.5）
+                            number_match = re.search(r'(\d+\.?\d*%?|\(\d+/\d+\))[^\d]*$', content)
+                            if number_match:
+                                # 保留开头部分和结尾的数字信息
+                                end_part = content[number_match.start():]
+                                available_length = self.max_msg_length - len(tag) - len(end_part) - 3
+                                if available_length > 10:
+                                    content = f"{content[:available_length]}...{end_part}"
+                                else:
+                                    # 空间实在不足时
+                                    content = f"{content[:self.max_msg_length-len(tag)-10]}...{end_part[-7:]}"
+                            else:
+                                # 如果没有数字信息，保留开头部分
+                                content = f"{content[:self.max_msg_length-len(tag)-3]}..."
             
             # 重新组合消息
             final_msg = f"{tag}{content}" if tag else content
