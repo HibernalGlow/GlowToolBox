@@ -26,7 +26,7 @@ from nodes.tui.textual_preset import create_config_app
 from nodes.tui.textual_logger import TextualLoggerManager
 import orjson  # 使用orjson进行更快的JSON处理
 import zipfile
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 # 定义日志布局配置
 TEXTUAL_LAYOUT = {
@@ -229,9 +229,118 @@ class ArchiveHandler:
         return None
     
     @staticmethod
+    def extract_yaml_from_archive(archive_path: str, yaml_uuid: str, temp_dir: str) -> Optional[str]:
+        """从压缩包中提取YAML文件
+        
+        Args:
+            archive_path: 压缩包路径
+            yaml_uuid: YAML文件的UUID（不含扩展名）
+            temp_dir: 临时目录路径
+            
+        Returns:
+            Optional[str]: 提取的YAML文件路径，失败返回None
+        """
+        yaml_path = os.path.join(temp_dir, f"{yaml_uuid}.yaml")
+        
+        try:
+            # 尝试使用zipfile
+            with zipfile.ZipFile(archive_path, 'r') as zf:
+                zf.extract(f"{yaml_uuid}.yaml", temp_dir)
+                return yaml_path
+        except Exception:
+            # 如果zipfile失败，尝试使用7z
+            try:
+                subprocess.run(
+                    ['7z', 'e', archive_path, f"{yaml_uuid}.yaml", f"-o{temp_dir}"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=True
+                )
+                if os.path.exists(yaml_path):
+                    return yaml_path
+            except subprocess.CalledProcessError:
+                logger.warning(f"[#process]提取YAML文件失败: {os.path.basename(archive_path)}")
+        
+        return None
+
+    @staticmethod
+    def delete_files_from_archive(archive_path: str, files_to_delete: List[str]) -> bool:
+        """从压缩包中删除指定文件
+        
+        Args:
+            archive_path: 压缩包路径
+            files_to_delete: 要删除的文件列表
+            
+        Returns:
+            bool: 是否删除成功
+        """
+        try:
+            # 尝试使用zipfile
+            try:
+                with zipfile.ZipFile(archive_path, 'a') as zf:
+                    for file in files_to_delete:
+                        try:
+                            zf.remove(file)
+                            logger.info(f"[#process]删除文件: {file}")
+                        except KeyError:
+                            pass
+                return True
+            except Exception:
+                # 如果zipfile失败，使用7z
+                for file in files_to_delete:
+                    try:
+                        subprocess.run(
+                            ['7z', 'd', archive_path, file],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            check=True
+                        )
+                        logger.info(f"[#process]删除文件: {file}")
+                    except subprocess.CalledProcessError:
+                        continue
+                return True
+        except Exception as e:
+            logger.error(f"[#process]删除文件失败: {str(e)}")
+            return False
+
+    @staticmethod
+    def add_json_to_archive(archive_path: str, json_path: str, json_name: str) -> bool:
+        """添加JSON文件到压缩包
+        
+        Args:
+            archive_path: 压缩包路径
+            json_path: JSON文件路径
+            json_name: 要保存在压缩包中的文件名
+            
+        Returns:
+            bool: 是否添加成功
+        """
+        try:
+            # 尝试使用zipfile
+            with zipfile.ZipFile(archive_path, 'a') as zf:
+                zf.write(json_path, json_name)
+                logger.info(f"[#process]添加JSON文件: {json_name}")
+                return True
+        except Exception:
+            # 如果zipfile失败，使用7z
+            try:
+                subprocess.run(
+                    ['7z', 'a', archive_path, json_path],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=True
+                )
+                logger.info(f"[#process]添加JSON文件: {json_name}")
+                return True
+            except subprocess.CalledProcessError:
+                logger.error(f"[#process]添加JSON文件失败: {json_name}")
+                return False
+
+    @staticmethod
     def convert_yaml_archive_to_json(archive_path: str) -> Optional[Dict[str, Any]]:
         """转换压缩包中的YAML文件为JSON格式"""
         try:
+            # 检查是否存在YAML文件
             yaml_uuid = ArchiveHandler.load_yaml_uuid_from_archive(archive_path)
             if not yaml_uuid:
                 return None
@@ -241,93 +350,69 @@ class ArchiveHandler:
             os.makedirs(temp_dir, exist_ok=True)
             
             try:
-                # 提取YAML文件
-                yaml_extracted = False
-                try:
-                    with zipfile.ZipFile(archive_path, 'r') as zf:
-                        zf.extract(f"{yaml_uuid}.yaml", temp_dir)
-                        yaml_extracted = True
-                except Exception:
-                    # 如果zipfile失败，尝试使用7z
-                    try:
-                        subprocess.run(
-                            ['7z', 'e', archive_path, f"{yaml_uuid}.yaml", f"-o{temp_dir}"],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            check=True
-                        )
-                        yaml_extracted = True
-                    except subprocess.CalledProcessError:
-                        logger.warning(f"[#process]7z提取YAML文件失败，但将继续处理: {os.path.basename(archive_path)}")
-                
-                if not yaml_extracted:
+                # 1. 提取YAML文件
+                yaml_path = ArchiveHandler.extract_yaml_from_archive(archive_path, yaml_uuid, temp_dir)
+                if not yaml_path or not os.path.exists(yaml_path):
                     logger.error(f"[#process]无法提取YAML文件: {os.path.basename(archive_path)}")
                     return None
                 
-                yaml_path = os.path.join(temp_dir, f"{yaml_uuid}.yaml")
-                if not os.path.exists(yaml_path):
-                    return None
-                
-                # 读取并转换YAML
+                # 2. 读取并转换YAML数据
                 with open(yaml_path, 'r', encoding='utf-8') as f:
                     yaml_data = yaml.safe_load(f)
                 
-                # 转换为JSON
+                # 3. 检查是否存在同名JSON文件
+                json_files = []
+                try:
+                    with zipfile.ZipFile(archive_path, 'r') as zf:
+                        json_files = [f for f in zf.namelist() if f.endswith('.json')]
+                except Exception:
+                    # 如果zipfile失败，使用7z列出文件
+                    try:
+                        result = subprocess.run(
+                            ['7z', 'l', archive_path],
+                            capture_output=True,
+                            text=True,
+                            encoding='gbk',
+                            errors='ignore',
+                            check=True
+                        )
+                        if result.returncode == 0:
+                            json_files = [line.split()[-1] for line in result.stdout.splitlines() 
+                                        if line.strip() and line.endswith('.json')]
+                    except subprocess.CalledProcessError:
+                        pass
+                
+                # 如果存在JSON文件，删除它们并生成新的UUID
+                if json_files:
+                    logger.info(f"[#process]发现现有JSON文件，将删除并生成新UUID: {os.path.basename(archive_path)}")
+                    ArchiveHandler.delete_files_from_archive(archive_path, json_files)
+                    yaml_uuid = UuidHandler.generate_uuid(UuidHandler.load_existing_uuids())
+                
+                # 4. 转换为JSON格式
                 json_data = JsonHandler.convert_yaml_to_json(yaml_data)
                 json_data["uuid"] = yaml_uuid
                 
-                # 创建JSON文件
+                # 5. 保存JSON文件
                 json_path = os.path.join(temp_dir, f"{yaml_uuid}.json")
-                if JsonHandler.save(json_path, json_data):
-                    # 更新压缩包
-                    json_added = False
-                    try:
-                        with zipfile.ZipFile(archive_path, 'a') as zf:
-                            # 删除旧的YAML文件
-                            try:
-                                zf.remove(f"{yaml_uuid}.yaml")
-                            except Exception:
-                                pass
-                            # 添加新的JSON文件
-                            zf.write(json_path, f"{yaml_uuid}.json")
-                            json_added = True
-                    except Exception:
-                        # 如果zipfile失败，尝试使用7z
-                        try:
-                            # 删除旧的YAML文件
-                            subprocess.run(
-                                ['7z', 'd', archive_path, f"{yaml_uuid}.yaml"],
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                                check=False  # 不检查返回值
-                            )
-                        except Exception:
-                            pass
-                        
-                        try:
-                            # 添加新的JSON文件
-                            subprocess.run(
-                                ['7z', 'a', archive_path, json_path],
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                                check=False  # 不检查返回值
-                            )
-                            json_added = True
-                        except Exception:
-                            logger.warning(f"[#process]添加JSON文件到压缩包失败，但JSON文件已创建: {os.path.basename(archive_path)}")
-                    
-                    if json_added:
-                        logger.info(f"[#process]✅ YAML转换完成并更新压缩包: {os.path.basename(archive_path)}")
-                    else:
-                        logger.warning(f"[#process]YAML转换完成但更新压缩包失败: {os.path.basename(archive_path)}")
-                    
+                if not JsonHandler.save(json_path, json_data):
+                    logger.error(f"[#process]保存JSON文件失败: {os.path.basename(archive_path)}")
+                    return None
+                
+                # 6. 添加JSON到压缩包并删除YAML
+                if ArchiveHandler.add_json_to_archive(archive_path, json_path, f"{yaml_uuid}.json"):
+                    # 删除YAML文件
+                    ArchiveHandler.delete_files_from_archive(archive_path, [f"{yaml_uuid}.yaml"])
+                    logger.info(f"[#process]✅ YAML转换完成: {os.path.basename(archive_path)}")
                     return json_data
+                
+                logger.error(f"[#process]更新压缩包失败: {os.path.basename(archive_path)}")
+                return None
                 
             finally:
                 shutil.rmtree(temp_dir, ignore_errors=True)
                 
         except Exception as e:
-            logger.error(f"[#process]转换YAML到JSON失败 {os.path.basename(archive_path)}: {str(e)}")
+            logger.error(f"[#process]转换失败 {os.path.basename(archive_path)}: {str(e)}")
             return None
 
 # 定义文件路径和线程锁
@@ -967,13 +1052,9 @@ class ArchiveProcessor:
         """处理单个压缩文件"""
         try:
             # 检查是否存在YAML文件并转换为JSON
-            yaml_uuid = ArchiveHandler.load_yaml_uuid_from_archive(archive_path)
-            if yaml_uuid:
+            json_data = ArchiveHandler.convert_yaml_archive_to_json(archive_path)
+            if json_data:
                 logger.info(f"[#process]检测到YAML文件: {os.path.basename(archive_path)}")
-                json_data = ArchiveHandler.convert_yaml_archive_to_json(archive_path)
-                if not json_data:
-                    logger.error(f"[#process]转换YAML到JSON失败: {archive_path}")
-                    return True
                 logger.info(f"[#process]YAML转换完成: {os.path.basename(archive_path)}")
                 return True  # 如果是YAML转换流程,完成后直接返回
             
@@ -1629,9 +1710,9 @@ class UuidRecordManager:
                             
                     except Exception as e:
                         logger.error(f"[#process]处理JSON文件失败 {json_path}: {e}")
-                    
-                    processed += 1
-                    logger.info(f"[@current_progress]更新进度 {processed}/{total_files} ({(processed/total_files*100):.1f}%)")
+                
+                processed += 1
+                logger.info(f"[@current_progress]更新进度 {processed}/{total_files} ({(processed/total_files*100):.1f}%)")
         
         if JsonHandler.save(json_record_path, existing_records):
             logger.info("[#current_stats]✅ JSON记录更新完成")
