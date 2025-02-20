@@ -1,0 +1,4 @@
+[hash_storage]
+global_cache = "E:/1EHV/image_hashes_global.json"
+collection_file = "E:/1EHV/image_hashes_collection.json"
+files_list = "E:/1EHV/hash_files_list.txt"
