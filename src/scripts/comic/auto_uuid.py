@@ -242,17 +242,27 @@ class ArchiveHandler:
             
             try:
                 # 提取YAML文件
-                with zipfile.ZipFile(archive_path, 'r') as zf:
-                    try:
+                yaml_extracted = False
+                try:
+                    with zipfile.ZipFile(archive_path, 'r') as zf:
                         zf.extract(f"{yaml_uuid}.yaml", temp_dir)
-                    except KeyError:
-                        # 如果不是zip文件，使用7z
+                        yaml_extracted = True
+                except Exception:
+                    # 如果zipfile失败，尝试使用7z
+                    try:
                         subprocess.run(
                             ['7z', 'e', archive_path, f"{yaml_uuid}.yaml", f"-o{temp_dir}"],
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL,
                             check=True
                         )
+                        yaml_extracted = True
+                    except subprocess.CalledProcessError:
+                        logger.warning(f"[#process]7z提取YAML文件失败，但将继续处理: {os.path.basename(archive_path)}")
+                
+                if not yaml_extracted:
+                    logger.error(f"[#process]无法提取YAML文件: {os.path.basename(archive_path)}")
+                    return None
                 
                 yaml_path = os.path.join(temp_dir, f"{yaml_uuid}.yaml")
                 if not os.path.exists(yaml_path):
@@ -270,26 +280,46 @@ class ArchiveHandler:
                 json_path = os.path.join(temp_dir, f"{yaml_uuid}.json")
                 if JsonHandler.save(json_path, json_data):
                     # 更新压缩包
+                    json_added = False
                     try:
                         with zipfile.ZipFile(archive_path, 'a') as zf:
                             # 删除旧的YAML文件
-                            zf.remove(f"{yaml_uuid}.yaml")
+                            try:
+                                zf.remove(f"{yaml_uuid}.yaml")
+                            except Exception:
+                                pass
                             # 添加新的JSON文件
                             zf.write(json_path, f"{yaml_uuid}.json")
+                            json_added = True
                     except Exception:
-                        # 如果不是zip文件，使用7z
-                        subprocess.run(
-                            ['7z', 'd', archive_path, f"{yaml_uuid}.yaml"],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            check=True
-                        )
-                        subprocess.run(
-                            ['7z', 'a', archive_path, json_path],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            check=True
-                        )
+                        # 如果zipfile失败，尝试使用7z
+                        try:
+                            # 删除旧的YAML文件
+                            subprocess.run(
+                                ['7z', 'd', archive_path, f"{yaml_uuid}.yaml"],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                check=False  # 不检查返回值
+                            )
+                        except Exception:
+                            pass
+                        
+                        try:
+                            # 添加新的JSON文件
+                            subprocess.run(
+                                ['7z', 'a', archive_path, json_path],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                check=False  # 不检查返回值
+                            )
+                            json_added = True
+                        except Exception:
+                            logger.warning(f"[#process]添加JSON文件到压缩包失败，但JSON文件已创建: {os.path.basename(archive_path)}")
+                    
+                    if json_added:
+                        logger.info(f"[#process]✅ YAML转换完成并更新压缩包: {os.path.basename(archive_path)}")
+                    else:
+                        logger.warning(f"[#process]YAML转换完成但更新压缩包失败: {os.path.basename(archive_path)}")
                     
                     return json_data
                 
@@ -297,8 +327,8 @@ class ArchiveHandler:
                 shutil.rmtree(temp_dir, ignore_errors=True)
                 
         except Exception as e:
-            logger.error(f"转换压缩包中的YAML失败 {archive_path}: {e}")
-        return None
+            logger.error(f"[#process]转换YAML到JSON失败 {os.path.basename(archive_path)}: {str(e)}")
+            return None
 
 # 定义文件路径和线程锁
 # uuid_file_path = r'E:\1BACKUP\ehv\uuid.md'  # 存储唯一 UUID 的 Markdown 文件
@@ -586,13 +616,14 @@ class PathHandler:
                 # 将路径转换为相对路径
                 archive_path = Path(archive_path)
                 target_path = Path(target_directory)
+                
+                # 获取相对于目标目录的路径
                 relative_path = archive_path.relative_to(target_path)
                 
                 # 获取第一级子文件夹名
-                parts = relative_path.parts
-                if len(parts) > 0:
-                    return parts[0]
-                    
+                if len(relative_path.parts) > 0:
+                    return relative_path.parts[0]
+                
                 logger.warning(f"[#process]无法从路径提取画师名: {archive_path}")
                 return ""
                 
@@ -602,8 +633,34 @@ class PathHandler:
     
     @staticmethod
     def get_relative_path(target_directory: str, archive_path: str) -> str:
-        """获取相对路径"""
-        return Path(archive_path).relative_to(target_directory).parent.as_posix()
+        """获取相对路径
+        
+        Args:
+            target_directory: 目标目录路径
+            archive_path: 压缩文件路径
+            
+        Returns:
+            str: 相对路径，不包含文件名
+        """
+        try:
+            # 将路径转换为Path对象并规范化
+            archive_path = Path(archive_path).resolve()
+            target_path = Path(target_directory).resolve()
+            
+            # 获取相对路径
+            relative_path = archive_path.relative_to(target_path)
+            
+            # 如果是直接在目标目录下的文件，返回"."
+            if not relative_path.parent.parts:
+                return "."
+                
+            # 返回父目录的相对路径（不包含文件名）
+            return str(relative_path.parent)
+            
+        except Exception as e:
+            # 如果出错，记录错误但返回一个安全的默认值
+            logger.error(f"[#process]获取相对路径失败 ({archive_path}): {str(e)}")
+            return "."
     
     @staticmethod
     def get_uuid_path(uuid_directory: str, timestamp: str) -> str:
@@ -1359,6 +1416,7 @@ class TaskExecutor:
         logger.info(f"[#current_stats]当前模式: {'多人模式' if self.args.mode == 'multi' else '单人模式'}")
         if self.confirmed_artists:
             logger.info(f"[#current_stats]已确认画师: {', '.join(sorted(self.confirmed_artists))}")
+            logger.info(f"[#current_stats]开始下一步")
 
         if self.args.convert:
             self._execute_convert_task()
