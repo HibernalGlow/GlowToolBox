@@ -221,9 +221,13 @@ class ArchiveHandler:
         logger.info(f"[#process]开始处理压缩包: {archive_name}")
         logger.info(f"[#process]需要删除的文件: {files_to_delete}")
 
+        # 定义所有可能的临时文件路径
+        backup_path = archive_path + ".bak"
+        temp_path = archive_path + ".temp"
+        success = False
+
         try:
             # 备份原文件
-            backup_path = archive_path + ".bak"
             shutil.copy2(archive_path, backup_path)
             logger.info(f"[#process][备份] 创建原文件备份: {backup_path}")
 
@@ -265,15 +269,12 @@ class ArchiveHandler:
                 if os.path.exists(backup_path):
                     shutil.copy2(backup_path, archive_path)
                     logger.info("[#process][恢复] 从备份恢复原文件")
-                return False
+                success = False
+            else:
+                logger.info(f"[#process][完成] 成功删除了 {deleted_count} 个文件")
+                success = True
 
-            logger.info(f"[#process][完成] 成功删除了 {deleted_count} 个文件")
-            
-            # 删除备份
-            if os.path.exists(backup_path):
-                os.remove(backup_path)
-            
-            return True
+            return success
 
         except Exception as e:
             logger.error(f"[#process]处理过程中发生错误: {e}")
@@ -287,13 +288,25 @@ class ArchiveHandler:
             return False
 
         finally:
-            # 确保删除备份文件
-            if os.path.exists(backup_path):
-                try:
-                    os.remove(backup_path)
-                    logger.debug("[#process][清理] 删除备份文件")
-                except Exception as e:
-                    logger.error(f"[#process]删除备份文件失败: {e}")
+            # 清理所有临时文件和备份文件
+            for path in [backup_path, temp_path]:
+                if os.path.exists(path):
+                    try:
+                        os.remove(path)
+                        logger.debug(f"[#process][清理] 删除临时文件: {os.path.basename(path)}")
+                    except Exception as e:
+                        logger.error(f"[#process]删除临时文件失败 {os.path.basename(path)}: {e}")
+            
+            # 清理同名的其他临时文件
+            dir_path = os.path.dirname(archive_path)
+            base_name = os.path.splitext(archive_name)[0]
+            for file in os.listdir(dir_path):
+                if file.startswith(base_name) and (file.endswith('.bak') or file.endswith('.temp')):
+                    try:
+                        os.remove(os.path.join(dir_path, file))
+                        logger.debug(f"[#process][清理] 删除相关临时文件: {file}")
+                    except Exception as e:
+                        logger.error(f"[#process]删除相关临时文件失败 {file}: {e}")
     
     @staticmethod
     def load_yaml_uuid_from_archive(archive_path: str) -> Optional[str]:
