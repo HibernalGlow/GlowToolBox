@@ -1073,10 +1073,12 @@ class FileSystemHandler:
 class ArchiveProcessor:
     """压缩文件处理类"""
     
-    def __init__(self, target_directory: str, uuid_directory: str, max_workers: int = 5):
+    def __init__(self, target_directory: str, uuid_directory: str, 
+                 max_workers: int = 5, order: str = 'mtime'):
         self.target_directory = target_directory
         self.uuid_directory = uuid_directory
         self.max_workers = max_workers
+        self.order = order  # 保存排序方式
     
     def process_archives(self) -> bool:
         """处理所有压缩文件"""
@@ -1096,8 +1098,12 @@ class ArchiveProcessor:
                     file_count += 1
                     logger.info(f"[@current_progress]扫描进度 ({file_count}) {(file_count/len(files)*100):.1f}%")
         
-        # 按修改时间排序
-        archive_files.sort(key=lambda x: x[1], reverse=True)
+        # 修改排序方式
+        if self.order == 'path':
+            archive_files.sort(key=lambda x: x[0])  # 按路径升序
+        else:  # mtime
+            archive_files.sort(key=lambda x: x[1], reverse=True)  # 按修改时间倒序
+        
         archive_files = [file_path for file_path, _ in archive_files]
         
         logger.info(f"[#current_stats]📊 共发现 {file_count} 个压缩文件")
@@ -1180,6 +1186,10 @@ class ArchiveProcessor:
             bool: 处理是否成功
         """
         try:
+            # 保存原始时间戳
+            original_mtime = os.path.getmtime(archive_path)
+            original_atime = os.path.getatime(archive_path)
+            
             # 获取文件信息
             artist_name = PathHandler.get_artist_name(self.target_directory, archive_path, args.mode if hasattr(args, 'mode') else 'multi')
             archive_name = os.path.basename(archive_path)
@@ -1396,6 +1406,8 @@ def main():
         ("重组UUID - 按时间重组UUID文件", "reorganize", "-r"),  # 添加重组选项
         ("更新记录 - 更新UUID记录文件", "update_records", "-u"),  # 添加更新记录选项
         ("转换YAML - 转换现有YAML到JSON", "convert_yaml", "--convert"),  # 添加YAML转换选项
+        ("按路径排序 - 按文件路径升序处理", "order_path", "--order path"),
+        ("按时间排序 - 按修改时间倒序处理", "order_mtime", "--order mtime", True),  # 默认选中
     ]
 
     # 定义输入框选项
@@ -1636,6 +1648,8 @@ class CommandManager:
         parser.add_argument('-r', '--reorganize', action='store_true', help='重新组织 UUID 文件结构')
         parser.add_argument('-u', '--update-records', action='store_true', help='更新 UUID 记录文件')
         parser.add_argument('--convert', action='store_true', help='转换YAML到JSON结构')
+        parser.add_argument('--order', choices=['path', 'mtime'], default='mtime',
+                          help='处理顺序: path(按路径升序) 或 mtime(按修改时间倒序)')
         return parser
 
     @staticmethod
@@ -1664,7 +1678,12 @@ class TaskExecutor:
         self.max_workers = min(32, (multiprocessing.cpu_count() * 4) + 1)
         self.confirmed_artists = set()
         self.uuid_directory = r'E:\1BACKUP\ehv\uuid'
-        self.archive_processor = ArchiveProcessor(self.target_directory, self.uuid_directory, self.max_workers)
+        self.archive_processor = ArchiveProcessor(
+            self.target_directory, 
+            self.uuid_directory,
+            self.max_workers,
+            order=args.order  # 添加排序参数
+        )
         self.uuid_record_manager = UuidRecordManager(self.uuid_directory)
 
     def _confirm_artists(self) -> None:
