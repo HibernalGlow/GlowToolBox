@@ -10,7 +10,7 @@ config = {
 logger = setup_logger(config)
 # 初始化 TextualLoggerManager
 HAS_TUI = True
-USE_DEBUGGER = False
+USE_DEBUGGER = True
 
 TEXTUAL_LAYOUT = {
     "cur_stats": {
@@ -529,7 +529,6 @@ class ArchiveExtractor:
     """
     类描述
     """
-    @staticmethod
     def get_image_files(directory):
         """获取目录中的所有图片文件"""
         image_files = []
@@ -539,7 +538,7 @@ class ArchiveExtractor:
             for file in files:
                 if file.lower().endswith(image_extensions):
                     image_files.append(os.path.join(root, file))
-                    
+        logger.info( f'找到 {len(image_files)} 个图片文件')            
         return image_files
 
 
@@ -843,6 +842,7 @@ class ArchiveProcessor:
                 return []
                 
             logger.info(f"[#file_ops]环境准备完成")
+
             
             image_files = ArchiveExtractor.get_image_files(temp_dir)
             if not image_files:
@@ -2091,7 +2091,6 @@ class Application:
         if not directories:
             print('未提供任何输入路径')
             return
-        # initialize_textual_logger()
         ProcessManager.print_config(args, ProcessManager.get_max_workers())
         if args.remove_duplicates:
             

@@ -34,8 +34,8 @@ HASH_PARAMS = {
     'hash_version': 1  # 哈希版本号，用于后续兼容性处理
 }
 class ImgUtils:
-    @staticmethod
-    def get_image_files(directory):
+    
+    def get_img_files(directory):
         """获取目录中的所有图片文件"""
         image_files = []
         image_extensions = ('.jpg', '.jpeg', '.png', '.webp', '.jxl', '.avif', '.bmp')

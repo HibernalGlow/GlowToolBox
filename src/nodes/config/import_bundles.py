@@ -56,5 +56,3 @@ from io import BytesIO
 # 环境加载（保持最后）
 from dotenv import load_dotenv
 load_dotenv()
-# file_list = ImgUtils.get_image_files(r"E:\1EHV")
-# print(file_list)
