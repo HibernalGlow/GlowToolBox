@@ -2,19 +2,19 @@
 使用说明:
 1. 导入和初始化:
    ```python
-   from tui.textual_logger import TextualLoggerManager
+   from nodes.tui.textual_logger import TextualLoggerManager
    注意插入时机，不要干扰输入
-   # 定义布局配置
+   # 定义布局配置 颜色强烈建议使用淡色系light
    TEXTUAL_LAYOUT = {
        "current_stats": {  # 面板名称，用于日志定位
            "ratio": 2,     # 面板高度比例
            "title": "📊 总体进度",  # 面板标题
-           "style": "yellow"  # 面板样式颜色
+           "style": "lightyellow"  # 面板样式颜色
        },
        "current_progress": {
            "ratio": 2,
            "title": "🔄 当前进度",
-           "style": "cyan"
+           "style": "lightcyan"
        },
        # ... 更多面板
    }

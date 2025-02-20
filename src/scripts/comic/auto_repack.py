@@ -16,9 +16,6 @@ import win32api
 import win32con
 import ntsecuritycon as con
 import tempfile
-from prompt_toolkit import prompt
-from prompt_toolkit.shortcuts import checkboxlist_dialog
-from prompt_toolkit.styles import Style
 from nodes.tui.textual_logger import TextualLoggerManager
 from nodes.tui.textual_preset import create_config_app
 from nodes.record.logger_config import setup_logger
@@ -29,22 +26,22 @@ TEXTUAL_LAYOUT = {
     "cur_stats": {
         "ratio": 2,
         "title": "📊 总体进度",
-        "style": "yellow"
+        "style": "lightyellow"
     },
     "cur_progress": {
         "ratio": 2,
         "title": "🔄 当前进度",
-        "style": "cyan"
+        "style": "lightcyan"
     },
     "file_ops": {
         "ratio": 3,
         "title": "📂 文件操作",
-        "style": "magenta"
+        "style": "lightpink"
     },
     "process": {
         "ratio": 3,
         "title": "📝 处理日志",
-        "style": "blue"
+        "style": "lightblue"
     }
 }
 

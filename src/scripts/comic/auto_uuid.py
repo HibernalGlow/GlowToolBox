@@ -33,22 +33,22 @@ TEXTUAL_LAYOUT = {
     "current_stats": {
         "ratio": 2,
         "title": "📊 总体进度",
-        "style": "yellow"
+        "style": "lightyellow"
     },
     "current_progress": {
         "ratio": 2,
         "title": "🔄 当前进度",
-        "style": "cyan"
+        "style": "lightcyan"
     },
     "process": {
         "ratio": 3,
         "title": "📝 处理日志",
-        "style": "magenta"
+        "style": "lightpink"
     },
     "update": {
         "ratio": 2,
         "title": "ℹ️ 更新日志",
-        "style": "blue"
+        "style": "lightblue"
     }
 }
 
