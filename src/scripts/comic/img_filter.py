@@ -1504,13 +1504,6 @@ class ProcessManager:
                              for file in files if file.lower().endswith('zip')))
         
         # 更新总体进度面板
-        logger.info( 
-            f"总文件数: {total_zip_files}\n"
-            f"已处理: 0\n"
-            f"成功: 0\n"
-            f"警告: 0\n"
-            f"错误: 0"
-        )
 
         # 设置总数
         StatisticsManager.set_total(total_zip_files)
