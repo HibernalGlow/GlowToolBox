@@ -737,9 +737,16 @@ def process_single_archive(archive_path, target_directory, uuid_directory, times
                 logger.error(f"[#process]转换YAML到JSON失败: {archive_path}")
                 return True
             logger.info(f"[#process]YAML转换完成: {os.path.basename(archive_path)}")
+            return True  # 如果是YAML转换流程,完成后直接返回
         
-        # 获取或创建UUID
-        uuid_value = yaml_uuid or generate_uuid(load_existing_uuids())
+        # 检查是否已存在JSON文件
+        json_uuid = ArchiveHandler.load_json_uuid_from_archive(archive_path)
+        if json_uuid:
+            logger.info(f"[#process]已存在JSON文件: {os.path.basename(archive_path)}")
+            return True
+        
+        # 获取或创建新的UUID
+        uuid_value = generate_uuid(load_existing_uuids())
         json_filename = f"{uuid_value}.json"
         
         # 获取文件信息
@@ -762,42 +769,26 @@ def process_single_archive(archive_path, target_directory, uuid_directory, times
             "relative_path": relative_path
         }
         
-        # 更新或创建JSON文件
-        if os.path.exists(json_path):
-            json_data = JsonHandler.load(json_path)
-            if not json_data:
-                json_data = {"uuid": uuid_value, "timestamps": {}}
-            logger.info(f"[#process]更新现有JSON: {json_filename}")
-        else:
-            json_data = {"uuid": uuid_value, "timestamps": {}}
-            logger.info(f"[#process]创建新JSON: {json_filename}")
-        
-        # 添加新的时间戳记录
-        json_data["timestamps"][timestamp] = new_record
+        # 创建新的JSON文件
+        json_data = {
+            "uuid": uuid_value,
+            "timestamps": {
+                timestamp: new_record
+            }
+        }
         
         # 保存JSON文件
         if JsonHandler.save(json_path, json_data):
+            logger.info(f"[#process]创建新JSON: {json_filename}")
             logger.info(f"[#update]✅ 已更新JSON文件: {json_filename}")
             
-            # 确保JSON文件存在后再添加到压缩包
+            # 添加JSON到压缩包
             try:
                 with zipfile.ZipFile(archive_path, 'a') as zf:
-                    # 删除旧的YAML文件（如果存在）
-                    try:
-                        zf.remove(f"*.yaml")
-                    except:
-                        pass
-                    # 添加新的JSON文件
                     zf.write(json_path, json_filename)
                 logger.info(f"[#update]✅ 已添加JSON到压缩包: {archive_name}")
             except Exception:
                 # 如果不是zip文件，使用7z
-                subprocess.run(
-                    ['7z', 'd', archive_path, f"*.yaml"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=True
-                )
                 subprocess.run(
                     ['7z', 'a', archive_path, json_path],
                     stdout=subprocess.DEVNULL,
