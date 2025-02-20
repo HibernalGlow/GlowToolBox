@@ -33,7 +33,7 @@ config = {
     'script_name': 'pics_convert',
     'console_enabled': False
 }
-logger = setup_logger(config)
+logger, real_log_file = setup_logger(config)
 
 # 全局变量
 verbose_logging = True
@@ -155,7 +155,7 @@ LAYOUT_CONFIG = {
 }
 
 def init_layout():
-    TextualLoggerManager.set_layout(LAYOUT_CONFIG)
+    TextualLoggerManager.set_layout(LAYOUT_CONFIG,real_log_file)
     # logger.info(f"[#performance]初始化性能配置面板")
     # logger.info(f"[#file]初始化文件操作面板")
     # logger.info(f"[#archive]初始化压缩包处理面板")

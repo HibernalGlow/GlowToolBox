@@ -172,11 +172,6 @@ class TextualLogHandler(logging.Handler):
         self.last_position = 0
         self._file_check_timer = None
 
-    def _setup_file_watching(self):
-        """设置日志文件监控"""
-        if self.log_file and not self._file_check_timer:
-            self._file_check_timer = self.app.set_interval(0.1, self._check_log_file)
-
     def _check_log_file(self):
         """检查日志文件更新"""
         if not self.log_file or not os.path.exists(self.log_file):
@@ -190,14 +185,37 @@ class TextualLogHandler(logging.Handler):
                     for line in new_lines:
                         line = line.strip()
                         if line:
+                            # 查找第一个面板标识符 [# 或 [@
+                            start_idx = -1
+                            for i in range(len(line)):
+                                if line[i:i+2] in ['[#', '[@']:
+                                    start_idx = i
+                                    break
+                            
+                            if start_idx >= 0:
+                                # 找到面板标识符的结束位置 ]
+                                end_idx = line.find(']', start_idx)
+                                if end_idx > start_idx:
+                                    # 提取消息内容（去掉面板标识符）
+                                    msg = line[end_idx + 1:].strip()
+                                else:
+                                    msg = line
+                            else:
+                                msg = line
+                                
                             self.emit(logging.makeLogRecord({
-                                'msg': line,
+                                'msg': msg,
                                 'levelno': logging.INFO,
                                 'created': time.time()
                             }))
                 self.last_position = f.tell()
         except Exception as e:
             print(f"Error reading log file: {e}")
+
+    def _setup_file_watching(self):
+        """设置日志文件监控"""
+        if self.log_file and not self._file_check_timer:
+            self._file_check_timer = self.app.set_interval(0.1, self._check_log_file)
 
     def set_truncate(self, enable: bool = False):
         """设置是否启用截断功能"""
@@ -421,6 +439,14 @@ class LogPanel(Static):
         self.progress_positions = {}  # 存储进度条位置 {position: msg}
         self.next_progress_position = 0  # 下一个进度条位置
 
+    def _escape_markup(self, text: str) -> str:
+        """转义可能导致标记解析错误的字符"""
+        # 替换方括号为转义字符
+        text = text.replace('[', '\\[').replace(']', '\\]')
+        # 替换其他可能导致问题的字符
+        text = text.replace('{', '\\{').replace('}', '\\}')
+        return text
+
     def _create_progress_bar(self, width: int, percentage: float, fraction: str = None, fraction_format: str = None) -> str:
         """创建带简单ASCII进度条的文本显示"""
         bar_width = max(10, width - 20)
@@ -434,8 +460,8 @@ class LogPanel(Static):
         
         # 组合内容
         if fraction_format:
-            return f"{progress_bar} {fraction_format} {percentage:.1f}%"
-        return f"{progress_bar} {percentage:.1f}%"
+            return self._escape_markup(f"{progress_bar} {fraction_format} {percentage:.1f}%")
+        return self._escape_markup(f"{progress_bar} {percentage:.1f}%")
 
     def append(self, text: str) -> None:
         """追加内容并保持在最大行数限制内"""
@@ -622,7 +648,7 @@ class LogPanel(Static):
                     fraction,
                     fraction_format
                 )
-                content.append(f"{msg_prefix}{progress_bar}")
+                content.append(self._escape_markup(f"{msg_prefix}{progress_bar}"))
         return content
 
     def _get_normal_message_content(self) -> List[str]:
@@ -634,9 +660,9 @@ class LogPanel(Static):
             messages = list(reversed(self.content[-remaining_lines:]))
             for msg in messages:
                 if self.app and self.app.console.width > 4:
-                    content.append(f"- {msg}")
+                    content.append(f"- {self._escape_markup(msg)}")
                 else:
-                    content.append(f"- {msg}")
+                    content.append(f"- {self._escape_markup(msg)}")
                     
         return list(reversed(content))  # 恢复正确顺序
 
