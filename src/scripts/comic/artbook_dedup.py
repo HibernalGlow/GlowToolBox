@@ -20,7 +20,7 @@ from nodes.record.logger_config import setup_logger
 config = {
     'script_name': 'artbook_dedup',
 }
-logger = setup_logger(config)
+logger, config_info = setup_logger(config)
 
 # 参数配置
 DEFAULT_PARAMS = {
@@ -61,7 +61,7 @@ WORKER_COUNT = 2  # 线程数
 FORCE_UPDATE = False  # 是否强制更新哈希值
 
 def init_TextualLogger():
-    TextualLoggerManager.set_layout(TEXTUAL_LAYOUT)
+    TextualLoggerManager.set_layout(TEXTUAL_LAYOUT, config_info['log_file'])
 
 def get_artist_folder_from_path(path: Path) -> Optional[Path]:
     """从给定路径获取画师文件夹

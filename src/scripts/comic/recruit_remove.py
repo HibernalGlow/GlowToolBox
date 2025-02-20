@@ -20,7 +20,7 @@ from nodes.record.logger_config import setup_logger
 config = {
     'script_name': 'recruit_remove',
 }
-logger = setup_logger(config)
+logger, config_info = setup_logger(config)
 
 # 参数配置
 DEFAULT_PARAMS = {
@@ -62,7 +62,7 @@ WORKER_COUNT = 2  # 线程数
 FORCE_UPDATE = False  # 是否强制更新哈希值
 
 def init_TextualLogger():
-    TextualLoggerManager.set_layout(TEXTUAL_LAYOUT)
+    TextualLoggerManager.set_layout(TEXTUAL_LAYOUT, config_info['log_file'])
 
 def process_single_path(path: Path, workers: int = 4, force_update: bool = False, params: dict = None) -> bool:
     """处理单个路径

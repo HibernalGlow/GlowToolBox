@@ -7,7 +7,7 @@ config = {
     'script_name': 'comic_img_filter',
     'console_enabled': False
 }
-logger = setup_logger(config)
+logger, config_info = setup_logger(config)
 # 初始化 TextualLoggerManager
 HAS_TUI = True
 USE_DEBUGGER = True
@@ -50,7 +50,7 @@ HASH_FILES_LIST = os.path.expanduser(r"E:\1EHV\hash_files_list.txt")
 def initialize_textual_logger():
     """初始化日志布局，确保在所有模式下都能正确初始化"""
     try:
-        TextualLoggerManager.set_layout(TEXTUAL_LAYOUT)
+        TextualLoggerManager.set_layout(TEXTUAL_LAYOUT, config_info['log_file'])
         logger.info("[#update_log]✅ 日志系统初始化完成")  # 添加面板标识
     except Exception as e:
         print(f"❌ 日志系统初始化失败: {e}")

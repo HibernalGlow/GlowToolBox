@@ -34,46 +34,16 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from nodes.tui.textual_preset import create_config_app
 from nodes.pics.calculate_hash_custom import ImageHashCalculator
 from nodes.tui.textual_logger import TextualLoggerManager
+from nodes.record.logger_config import setup_logger
 
 # 在全局配置部分添加以下内容
 # ================= 日志配置 =================
-script_name = os.path.basename(__file__).replace('.py', '')
-logspath=r"D:/1VSCODE/1ehv/logs"
-LOG_BASE_DIR = Path(logspath + f"/{script_name}")
-DATE_STR = datetime.now().strftime("%Y%m%d")
-HOUR_STR = datetime.now().strftime("%H")  # 新增小时目录
-LOG_DIR = LOG_BASE_DIR / DATE_STR / HOUR_STR  # 修改目录结构
-LOG_FILE = LOG_DIR / f"{datetime.now().strftime('%M%S')}.log"  # 文件名只保留分秒
+config = {
+    'script_name': 'hash_prepare',
+    'console_enabled': False
+}
+logger, config_info = setup_logger(config)
 
-# 创建日志目录
-LOG_DIR.mkdir(parents=True, exist_ok=True)
-
-# 配置日志格式
-LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
-formatter = logging.Formatter(LOG_FORMAT)
-
-# 文件处理器
-file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
-file_handler.setFormatter(formatter)
-file_handler.setLevel(logging.DEBUG)
-
-# 控制台处理器
-console_handler = logging.StreamHandler(sys.stdout)  # 修改为直接输出到stdout
-console_handler.setFormatter(formatter)
-console_handler.setLevel(logging.INFO)
-
-# 主日志器配置
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
-logger.addHandler(file_handler)
-# logger.addHandler(console_handler)
-
-# 禁用第三方库的日志
-logging.getLogger("PIL").setLevel(logging.WARNING)
-logging.getLogger("urllib3").setLevel(logging.WARNING)
-
-# 强制刷新输出
-# sys.stdout.flush()  # 添加这行
 
 # 添加默认配置常量
 DEFAULT_PROCESS_CONFIG = {
@@ -830,7 +800,7 @@ def main():
         print(f"共找到 {len(valid_paths)} 个有效路径")
         
         # 在这里初始化日志面板，因为已经收集完了所有路径
-        TextualLoggerManager.set_layout(FULL_LAYOUT_CONFIG)
+        TextualLoggerManager.set_layout(FULL_LAYOUT_CONFIG,config_info['log_file'])
         
         # 更新哈希参数
         params['hash_size'] = args.hash_size

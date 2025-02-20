@@ -36,7 +36,7 @@ config = {
     'script_name': 'no_translate_find',
     'console_enabled': False
 }
-logger = setup_logger(config)
+logger, config_info = setup_logger(config)
     # 设置Textual日志布局
 TEXTUAL_LAYOUT = {
     "stats": {
@@ -992,7 +992,7 @@ def safe_path(path: str) -> str:
 
 def process_paths(paths: List[str]) -> List[str]:
     """处理输入的路径列表"""
-    TextualLoggerManager.set_layout(TEXTUAL_LAYOUT)
+    TextualLoggerManager.set_layout(TEXTUAL_LAYOUT,config_info['log_file'])
 
     # 过滤掉空路径和引号
     valid_paths = []
