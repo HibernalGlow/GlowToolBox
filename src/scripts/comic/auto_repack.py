@@ -133,7 +133,7 @@ class CompressionStats:
             f"原始总大小: {self.format_size(self.total_original_size)}\n"
             f"压缩后总大小: {self.format_size(self.total_compressed_size)}\n"
             f"节省空间: {self.format_size(self.total_space_saved)}\n"
-            f"平均压缩率: {self.compression_ratio:.1f}%"
+            f"平均压缩率: {self.compression_ratio:.1f}"
         )
 
 @dataclass
@@ -141,7 +141,6 @@ class ZipCompressor:
     """压缩处理类，封装所有压缩相关的操作"""
     seven_zip_path: str = SEVEN_ZIP_PATH
     compression_level: int = COMPRESSION_LEVEL
-    
     
     def create_temp_workspace(self) -> Tuple[Path, Path]:
         """创建临时工作目录"""
@@ -153,6 +152,8 @@ class ZipCompressor:
     
     def compress_files(self, source_path: Path, target_zip: Path, files_to_zip: List[Path] = None, delete_source: bool = False) -> subprocess.CompletedProcess:
         """压缩文件到目标路径"""
+        logger.info(f"[#process]🔄 开始压缩: {source_path}")
+        
         if files_to_zip:
             # 压缩指定的文件列表
             files_str = " ".join(f'"{safe_path(f)}"' for f in files_to_zip)
@@ -163,19 +164,24 @@ class ZipCompressor:
             if delete_source:
                 cmd += " -sdel"
         
-        return subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        if result.returncode == 0:
+            logger.info(f"[#process]✅ 压缩完成: {target_zip}")
+        else:
+            logger.info(f"[#process]❌ 压缩失败: {result.stderr}")
+        return result
     
     def process_normal_folder(self, folder_path: Path) -> CompressionResult:
         """处理普通文件夹的压缩"""
-        if self.handler is None:
-            raise ValueError("Handler is not set")
-            
+        logger.info(f"[#cur_progress]🔄 处理文件夹: {folder_path.name}")
+        
         zip_name = folder_path.name
         zip_path = folder_path.parent / f"{zip_name}.zip"
         original_size = get_folder_size(folder_path)
         
         try:
             if not folder_path.exists():
+                logger.info(f"[#file_ops]❌ 文件夹不存在: {folder_path}")
                 return CompressionResult(False, error_message=f"Folder not found: {folder_path}")
             
             # 创建临时工作目录
@@ -193,69 +199,30 @@ class ZipCompressor:
                         if final_zip_path:
                             compressed_size = final_zip_path.stat().st_size
                             self._cleanup_empty_folder(folder_path)
+                            compression_ratio = (compressed_size / original_size) * 100 if original_size > 0 else 0
+                            logger.info(f"[#cur_stats]📊 压缩率: {compression_ratio:.1f} ({compressed_size/1024/1024:.2f}MB / {original_size/1024/1024:.2f}MB)")
                             return CompressionResult(True, original_size, compressed_size)
                 
+                logger.info(f"[#file_ops]❌ 压缩失败: {result.stderr}")
                 return CompressionResult(False, error_message=f"Compression failed: {result.stderr}")
             finally:
                 # 清理临时目录
                 shutil.rmtree(temp_base_path, ignore_errors=True)
                 
         except Exception as e:
-            return CompressionResult(False, error_message=f"Error: {str(e)}")
-    
-    def process_scattered_images(self, folder_path: Path, image_files: List[Path]) -> CompressionResult:
-        """处理散图文件夹的压缩"""
-        zip_name = folder_path.name
-        zip_path = folder_path / f"{zip_name}_散图.zip"
-        original_size = sum(f.stat().st_size for f in image_files)
-        
-        try:
-            # 创建临时工作目录
-            temp_base_path, temp_work_dir = self.create_temp_workspace()
-            temp_zip_path = temp_base_path / f"{zip_name}_temp.zip"
-            
-            try:
-                # 复制图片到临时目录
-                copy_success = True
-                for idx, file in enumerate(image_files, 1):
-                    temp_file = temp_work_dir / f"img_{idx:03d}{file.suffix}"
-                    if not safe_copy_file(file, temp_file):
-                        copy_success = False
-                        break
-                
-                if not copy_success:
-                    return CompressionResult(False, error_message="Failed to copy files to temp folder")
-                
-                # 压缩临时目录中的文件
-                result = self.compress_files(temp_work_dir, temp_zip_path)
-                
-                if result.returncode == 0:
-                    if temp_zip_path.exists():
-                        # 处理目标文件
-                        final_zip_path = self._handle_existing_zip(temp_zip_path, zip_path, zip_name)
-                        if final_zip_path:
-                            # 删除原始图片文件
-                            self._delete_source_files(image_files)
-                            compressed_size = final_zip_path.stat().st_size
-                            return CompressionResult(True, original_size, compressed_size)
-                
-                return CompressionResult(False, error_message=f"Compression failed: {result.stderr}")
-            finally:
-                # 清理临时目录
-                shutil.rmtree(temp_base_path, ignore_errors=True)
-                
-        except Exception as e:
+            logger.info(f"[#file_ops]❌ 处理出错: {str(e)}")
             return CompressionResult(False, error_message=f"Error: {str(e)}")
     
     def _handle_existing_zip(self, temp_zip_path: Path, target_zip_path: Path, base_name: str) -> Optional[Path]:
         """处理已存在的压缩包"""
         try:
             if target_zip_path.exists():
-                if compare_zip_contents(temp_zip_path, target_zip_path, self.handler):
+                logger.info(f"[#file_ops]🔍 检查已存在的压缩包: {target_zip_path}")
+                if compare_zip_contents(temp_zip_path, target_zip_path):
                     # 内容相同，替换原文件
                     target_zip_path.unlink()
                     shutil.move(str(temp_zip_path), str(target_zip_path))
-                    self.logger.info(f"📦 压缩包内容相同，已覆盖原文件: {target_zip_path}")
+                    logger.info(f"[#file_ops]📦 压缩包内容相同，已覆盖原文件: {target_zip_path}")
                     return target_zip_path
                 else:
                     # 内容不同，使用新名称
@@ -264,14 +231,16 @@ class ZipCompressor:
                         new_zip_path = target_zip_path.parent / f"{base_name}_{counter}.zip"
                         if not new_zip_path.exists():
                             shutil.move(str(temp_zip_path), str(new_zip_path))
+                            logger.info(f"[#file_ops]📦 创建新压缩包: {new_zip_path}")
                             return new_zip_path
                         counter += 1
             else:
                 # 目标文件不存在，直接移动
                 shutil.move(str(temp_zip_path), str(target_zip_path))
+                logger.info(f"[#file_ops]📦 创建压缩包: {target_zip_path}")
                 return target_zip_path
         except Exception as e:
-            self.logger.info(f"❌ 处理压缩包时发生错误: {e}")
+            logger.info(f"[#file_ops]❌ 处理压缩包时发生错误: {e}")
             return None
     
     def _cleanup_empty_folder(self, folder_path: Path) -> None:
@@ -279,26 +248,26 @@ class ZipCompressor:
         if not any(folder_path.iterdir()):
             try:
                 folder_path.rmdir()
-                self.logger.info(f"🗑️ 已删除空文件夹: {folder_path}")
+                logger.info(f"[#file_ops]🗑️ 已删除空文件夹: {folder_path}")
             except Exception as e:
-                self.logger.info(f"❌ 删除空文件夹失败: {folder_path}, 错误: {e}")
+                logger.info(f"[#file_ops]❌ 删除空文件夹失败: {folder_path}, 错误: {e}")
     
     def _delete_source_files(self, files: List[Path]) -> None:
         """删除源文件"""
         delete_failures = []
         for file in files:
             if file.exists():
-                if not safe_remove_file(file, self.handler):
+                if not safe_remove_file(file):
                     delete_failures.append(str(file))
-                    self.logger.info(f"⚠️ 无法删除原始文件: {file}")
+                    logger.info(f"[#file_ops]⚠️ 无法删除原始文件: {file}")
         
         if delete_failures:
             try:
                 files_list = '" "'.join(delete_failures)
-                if not cmd_delete(f'"{files_list}"', handler=self.handler):
-                    self.logger.info(f"❌ 批量删除失败: {files_list}")
+                if not cmd_delete(f'"{files_list}"'):
+                    logger.info(f"[#file_ops]❌ 批量删除失败: {files_list}")
             except Exception as e:
-                self.logger.info(f"❌ 批量删除命令执行失败: {e}")
+                logger.info(f"[#file_ops]❌ 批量删除命令执行失败: {e}")
 
 def get_folder_size(folder_path: Path) -> int:
     return sum(f.stat().st_size for f in folder_path.rglob('*') if f.is_file())
@@ -695,11 +664,21 @@ def process_folders(base_path: str, exclude_keywords: List[str]) -> List[Path]:
                 finally:
                     processed_folders += 1
                     percentage = (processed_folders / total_folders) * 100
-                    logger.info(f"[@cur_progress]处理进度 ({processed_folders}/{total_folders}) {percentage:.1f}%")
+                    logger.info(f"[#cur_progress]📊 总进度: {processed_folders}/{total_folders} ({percentage:.1f}%)")
+                    
+                    # 更新当前统计信息
+                    if stats.total_original_size > 0:
+                        compression_ratio = (stats.total_compressed_size / stats.total_original_size) * 100
+                        logger.info(f"[#cur_stats]📈 当前统计:\n"
+                                  f"成功: {stats.successful_compressions} | 失败: {stats.failed_compressions}\n"
+                                  f"原始: {stats.format_size(stats.total_original_size)} | "
+                                  f"压缩后: {stats.format_size(stats.total_compressed_size)}\n"
+                                  f"压缩率: {compression_ratio:.1f} | "
+                                  f"节省: {stats.format_size(stats.total_space_saved)}")
     else:
         logger.info("[#process]⚠️ 未找到需要打包的文件夹")
     
-    # 输出统计信息
+    # 输出最终统计信息
     summary = stats.get_summary()
     logger.info(f"[#cur_stats]{summary}")
     return zip_paths
@@ -878,7 +857,7 @@ def organize_media_files(source_path: Path, target_base_path: Path) -> Tuple[int
     
     return moved_count, moved_size
 
-def cmd_delete(path: str, is_directory: bool = False,) -> bool:
+def cmd_delete(path: str, is_directory: bool = False) -> bool:
     """
     使用 CMD 命令删除文件或文件夹
     """
