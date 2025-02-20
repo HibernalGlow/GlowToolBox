@@ -1549,9 +1549,9 @@ class TaskExecutor:
         init_TextualLogger()
         
         logger.info(f"[#current_stats]当前模式: {'多人模式' if self.args.mode == 'multi' else '单人模式'}")
-        if self.confirmed_artists:
-            logger.info(f"[#current_stats]已确认画师: {', '.join(sorted(self.confirmed_artists))}")
-            logger.info(f"[#current_stats]开始下一步")
+        # if self.confirmed_artists:
+        #     logger.info(f"[#current_stats]已确认画师: {', '.join(sorted(self.confirmed_artists))}")
+        #     logger.info(f"[#current_stats]开始下一步")
 
         if self.args.convert:
             self._execute_convert_task()
