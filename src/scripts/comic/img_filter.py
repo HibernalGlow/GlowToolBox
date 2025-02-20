@@ -529,6 +529,7 @@ class ArchiveExtractor:
     """
     类描述
     """
+    @staticmethod
     def get_image_files(directory):
         """获取目录中的所有图片文件"""
         image_files = []
@@ -538,7 +539,7 @@ class ArchiveExtractor:
             for file in files:
                 if file.lower().endswith(image_extensions):
                     image_files.append(os.path.join(root, file))
-        logger.info( f'找到 {len(image_files)} 个图片文件')            
+        logger.info( f'[#file_ops]找到 {len(image_files)} 个图片文件')            
         return image_files
 
 
@@ -849,6 +850,8 @@ class ArchiveProcessor:
                 logger.info(f"[#file_ops]⚠️ 未找到图片文件")
                 PathManager.cleanup_temp_files(temp_dir, new_zip_path, backup_file_path)
                 return []
+            else:
+                logger.info(f"[#file_ops]找到图片文件")
                 
             
             removed_files = set()
@@ -866,6 +869,7 @@ class ArchiveProcessor:
             with ThreadPoolExecutor(max_workers=params['max_workers']) as executor:
                 futures = []
                 total_files = len(image_files)
+                logger.info(f"[@file_ops] 开始处理图片 ({total_files})")
                 processed_files = 0
                 
                 for img_path in image_files:
