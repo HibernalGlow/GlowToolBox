@@ -24,7 +24,7 @@ load_dotenv()
 from nodes.record.logger_config import setup_logger
 
 # 创建全局日志记录器
-logger, _ = setup_logger({
+logger = setup_logger({
     'script_name': '012-低于指定宽度',
 })
 
