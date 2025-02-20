@@ -23,7 +23,6 @@ from prompt_toolkit.styles import Style
 # 添加父目录到Python路径
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.rich_logger import RichProgressHandler
 
 # 配置常量
 SEVEN_ZIP_PATH = "C:\\Program Files\\7-Zip\\7z.exe"

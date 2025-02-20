@@ -2352,7 +2352,7 @@ class DebuggerHandler:
         return []
     
 if __name__ == '__main__':
-    if USE_DEBUGGER:
+    if USE_DEBUGGER and len(sys.argv) <= 1:
         selected_options = DebuggerHandler.get_debugger_options()
         if selected_options:
             # 移除多余的--no-tui参数
