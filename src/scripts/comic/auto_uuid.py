@@ -167,8 +167,57 @@ class ArchiveHandler:
     """压缩包处理类"""
     
     @staticmethod
+    def check_archive_integrity(archive_path: str) -> bool:
+        """检查压缩包完整性
+        
+        Args:
+            archive_path: 压缩包路径
+            
+        Returns:
+            bool: 压缩包是否完整
+        """
+        try:
+            # 尝试使用zipfile
+            try:
+                with zipfile.ZipFile(archive_path, 'r') as zf:
+                    # 测试压缩包完整性
+                    if zf.testzip() is not None:
+                        logger.warning(f"[#process]压缩包损坏: {os.path.basename(archive_path)}")
+                        return False
+                    return True
+            except zipfile.BadZipFile:
+                # 如果不是zip文件，使用7z测试
+                startupinfo = None
+                if os.name == 'nt':
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                
+                result = subprocess.run(
+                    ['7z', 't', archive_path],
+                    capture_output=True,
+                    text=True,
+                    encoding='gbk',
+                    errors='ignore',
+                    startupinfo=startupinfo,
+                    check=False
+                )
+                
+                if result.returncode != 0:
+                    logger.warning(f"[#process]压缩包损坏: {os.path.basename(archive_path)}")
+                    return False
+                return True
+                
+        except Exception as e:
+            logger.error(f"[#process]检查压缩包完整性失败: {str(e)}")
+            return False
+    
+    @staticmethod
     def load_yaml_uuid_from_archive(archive_path: str) -> Optional[str]:
         """从压缩包中加载YAML文件的UUID"""
+        # 首先检查压缩包完整性
+        if not ArchiveHandler.check_archive_integrity(archive_path):
+            return None
+            
         try:
             with zipfile.ZipFile(archive_path, 'r') as zf:
                 for name in zf.namelist():
@@ -178,7 +227,7 @@ class ArchiveHandler:
             # 如果不是zip文件，尝试使用7z
             return ArchiveHandler._load_uuid_from_7z(archive_path, '.yaml')
         except Exception as e:
-            logger.error(f"读取压缩包失败 {archive_path}: {e}")
+            logger.error(f"[#process]读取压缩包失败: {archive_path}")
         return None
     
     @staticmethod
@@ -340,6 +389,11 @@ class ArchiveHandler:
     def convert_yaml_archive_to_json(archive_path: str) -> Optional[Dict[str, Any]]:
         """转换压缩包中的YAML文件为JSON格式"""
         try:
+            # 首先检查压缩包完整性
+            if not ArchiveHandler.check_archive_integrity(archive_path):
+                logger.warning(f"[#process]跳过损坏的压缩包: {os.path.basename(archive_path)}")
+                return None
+            
             # 检查是否存在YAML文件
             yaml_uuid = ArchiveHandler.load_yaml_uuid_from_archive(archive_path)
             if not yaml_uuid:
