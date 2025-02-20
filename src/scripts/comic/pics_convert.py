@@ -131,11 +131,11 @@ LAYOUT_CONFIG = {
         "title": "🔄 当前进度",
         "style": "lightgreen"
     },
-    # "performance": {
-    #     "ratio": 1,
-    #     "title": "⚡ 性能配置",
-    #     "style": "lightyellow"
-    # },
+    "performance": {
+        "ratio": 1,
+        "title": "⚡ 性能配置",
+        "style": "lightyellow"
+    },
     "image_convert": {
         "ratio": 2,
         "title": "🖼️ 图片转换",
@@ -606,7 +606,7 @@ class BatchProcessor:
         futures = []
         current_threads = get_thread_count()
         batch_size = get_batch_size()
-        # logger.info(f"[#performance]当前线程数: {current_threads}, 当前批处理大小: {batch_size}")
+        logger.info(f"[#performance]当前线程数: {current_threads}, 当前批处理大小: {batch_size}")
      
         with ThreadPoolExecutor(max_workers=current_threads) as executor:
             for file_path in batch:
@@ -1420,7 +1420,7 @@ class Monitor:
         """更新性能面板信息（单次更新）"""
         thread_count = get_thread_count()
         batch_size = get_batch_size()
-        # logger.info(f"[#performance]线程数: {thread_count} 批处理大小: {batch_size} ")
+        logger.info(f"[#performance]线程数: {thread_count} 批处理大小: {batch_size} ")
 
     def auto_run_process(self, directories, params, interval_minutes=10, infinite_mode=False):
         """自动运行处理过程"""
