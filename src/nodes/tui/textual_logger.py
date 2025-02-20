@@ -215,7 +215,8 @@ class TextualLogHandler(logging.Handler):
     def _setup_file_watching(self):
         """设置日志文件监控"""
         if self.log_file and not self._file_check_timer:
-            self._file_check_timer = self.app.set_interval(0.1, self._check_log_file)
+            # 当前是0.1秒检查一次，改为0.05秒
+            self._file_check_timer = self.app.set_interval(0.05, self._check_log_file)
 
     def set_truncate(self, enable: bool = False):
         """设置是否启用截断功能"""
