@@ -744,13 +744,11 @@ def add_uuid_to_file(uuid, timestamp, archive_name, artist_name, relative_path=N
     # 使用缓存代替直接写入
     if cache is not None:
         cache[uuid] = {
-            "record": {  # 新增统一记录键
-                "timestamps": {
-                    timestamp: {
-                        "archive_name": archive_name,
-                        "artist_name": artist_name,
-                        "relative_path": relative_path
-                    }
+            "timestamps": {
+                timestamp: {
+                    "archive_name": archive_name,
+                    "artist_name": artist_name,
+                    "relative_path": relative_path
                 }
             }
         }
@@ -987,11 +985,13 @@ class ArchiveProcessor:
         self.order = order  # 保存排序方式
         self.uuid_cache = {}  # 新增UUID缓存
         self.batch_size = 1000  # 批量更新阈值
+        self.total_archives = 0  # 总文件数
+        self.processed_archives = 0  # 已处理文件数
     
     def process_archives(self) -> bool:
         """处理所有压缩文件（SSD优化版）"""
         try:
-            timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())  # 添加时间戳定义
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
             logger.info("[#current_stats]🔍 开始扫描压缩文件")
             
             # 直接快速扫描SSD
@@ -1001,18 +1001,26 @@ class ArchiveProcessor:
                     if file.endswith(('.zip', '.rar', '.7z')):
                         archive_files.append(os.path.join(root, file))
             
+            self.total_archives = len(archive_files)
+            self.processed_archives = 0
+            logger.info(f"[#current_stats]共发现 {self.total_archives} 个压缩文件")
+            
             # 使用内存缓存处理
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 futures = [executor.submit(self.process_single_archive, path, timestamp) 
                          for path in archive_files]
                 
-                for future in tqdm(as_completed(futures), total=len(futures), desc="处理进度"):
+                for future in as_completed(futures):
                     future.result()
+                    self.processed_archives += 1
+                    progress = (self.processed_archives / self.total_archives) * 100
+                    logger.info(f"[@current_progress]处理进度: ({self.processed_archives}/{self.total_archives}) {progress:.1f}%")
             
             return True
         finally:
             # 确保最后强制更新
             self._batch_update_records(force=True)
+            logger.info("[#current_stats]✨ 所有文件处理完成！")
     
     def process_single_archive(self, archive_path: str, timestamp: str) -> bool:
         """处理单个压缩文件
@@ -1241,7 +1249,12 @@ class ArchiveProcessor:
             existing_records = JsonHandler.load(json_record_path) or {"record": {}}
             
             # 合并到record键下
-            existing_records["record"].update(self.uuid_cache)
+            for uuid, data in self.uuid_cache.items():
+                if uuid not in existing_records["record"]:
+                    existing_records["record"][uuid] = data
+                else:
+                    # 合并时间戳记录
+                    existing_records["record"][uuid]["timestamps"].update(data["timestamps"])
             
             # 使用原子操作保存
             temp_path = f"{json_record_path}.tmp"
