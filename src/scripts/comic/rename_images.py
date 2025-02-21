@@ -7,6 +7,7 @@ import argparse
 import pyperclip
 import sys
 import subprocess
+import time  # 添加time模块导入
 
 class InputHandler:
     """输入处理类"""
@@ -65,13 +66,13 @@ class InputHandler:
                 
         return [p for p in paths if os.path.exists(p)]
 
-def backup_file(file_path, original_path):
-    """备份文件到统一回收站目录"""
+def backup_file(file_path, original_path, input_base_path):
+    """备份文件到统一回收站目录，保持从输入路径开始的完整目录结构"""
     try:
         # 构建备份路径
         backup_base = r"E:\2EHV\.trash"
-        # 保持原始目录结构
-        rel_path = os.path.relpath(os.path.dirname(original_path), os.path.dirname(os.path.dirname(original_path)))
+        # 计算相对路径（从输入路径开始）
+        rel_path = os.path.relpath(os.path.dirname(original_path), input_base_path)
         backup_dir = os.path.join(backup_base, rel_path)
         
         # 确保备份目录存在
@@ -141,12 +142,13 @@ def has_hash_files_in_zip(zip_path):
         print(f"检查压缩包失败 {zip_path}: {e}")
         return False
 
-def rename_images_in_zip(zip_path):
+def rename_images_in_zip(zip_path, input_base_path):
     """直接重命名压缩包内的文件，不解压"""
     # 先检查压缩包中是否有需要处理的文件
     if not has_hash_files_in_zip(zip_path):
         return
 
+    new_zip_path = None  # 初始化变量
     try:
         # 创建新的压缩包路径
         original_dir = os.path.dirname(zip_path)
@@ -154,11 +156,8 @@ def rename_images_in_zip(zip_path):
         timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
         new_zip_path = os.path.join(original_dir, f'{file_name}.new.zip')
         
-        # 备份原始文件
-        backup_file_path = zip_path + '.bak'
-        if not os.path.exists(backup_file_path):
-            shutil.copy2(zip_path, backup_file_path)
-            print(f"已备份: {backup_file_path}")
+        # 备份原始文件（使用完整路径）
+        backup_file(zip_path, zip_path, input_base_path)
 
         # 使用7z重命名文件
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
@@ -196,7 +195,7 @@ def rename_images_in_zip(zip_path):
         
     except Exception as e:
         print(f"❌ 处理压缩包时出错: {str(e)}")
-        if os.path.exists(new_zip_path):
+        if new_zip_path and os.path.exists(new_zip_path):
             os.remove(new_zip_path)
     finally:
         # 清理临时目录
@@ -237,10 +236,10 @@ if __name__ == "__main__":
     if not target_paths:
         print("没有有效的输入路径")
         sys.exit(1)
-    
     # 处理每个路径
     for target_path in target_paths:
         print(f"\n处理路径: {target_path}")
+        input_base_path = os.path.dirname(target_path)  # 获取输入路径的父目录
         
         if os.path.isdir(target_path):
             if args.mode == 'image':
@@ -253,11 +252,10 @@ if __name__ == "__main__":
                     for file in files:
                         if file.lower().endswith('.zip'):
                             zip_path = os.path.join(root, file)
-                            # print(f"\n处理压缩包: {zip_path}")
-                            rename_images_in_zip(zip_path)
+                            rename_images_in_zip(zip_path, input_base_path)
         elif zipfile.is_zipfile(target_path):
             if args.mode == 'zip':
-                rename_images_in_zip(target_path)
+                rename_images_in_zip(target_path, input_base_path)
             else:
                 print(f"警告: 当前为图片处理模式，跳过压缩包 {target_path}")
         else:
