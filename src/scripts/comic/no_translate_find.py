@@ -644,7 +644,7 @@ def process_file_with_count(file_path: str) -> Tuple[str, str, int, float]:
     if clarity_score > 0:
         # 清晰度使用整数百分比格式
         clarity_score=int(clarity_score)
-        width_str = shorten_number_cn(clarity_score, use_w=True)
+        clarity_score = shorten_number_cn(clarity_score, use_w=True)
         name = f"{name}{{{clarity_score}@DE}}"
     
     new_name = f"{name}{ext}"
@@ -729,7 +729,7 @@ def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, re
             name = f"{name}{{{width_str}@WD}}"
         if clarity_score > 0:
             clarity_score=int(clarity_score)
-            width_str = shorten_number_cn(clarity_score, use_w=True)
+            clarity_score = shorten_number_cn(clarity_score, use_w=True)
             name = f"{name}{{{clarity_score}@DE}}"
         
         new_name = f"{name}{ext}"
