@@ -728,6 +728,8 @@ def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, re
             width_str = shorten_number_cn(width, use_w=False)  # 使用k单位
             name = f"{name}{{{width_str}@WD}}"
         if clarity_score > 0:
+            clarity_score=int(clarity_score)
+            width_str = shorten_number_cn(clarity_score, use_w=False)
             name = f"{name}{{{clarity_score}@DE}}"
         
         new_name = f"{name}{ext}"
