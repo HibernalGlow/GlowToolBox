@@ -210,6 +210,8 @@ def rename_images_in_zip(zip_path, input_base_path):
         print(f"❌ 处理压缩包时出错: {str(e)}")
         if new_zip_path and os.path.exists(new_zip_path):
             os.remove(new_zip_path)
+        print("继续处理下一个文件...")
+        return  # 返回继续处理下一个文件
 if __name__ == "__main__":
     # 获取输入路径
     args = InputHandler.parse_arguments()

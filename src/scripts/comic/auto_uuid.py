@@ -169,49 +169,49 @@ class ArchiveHandler:
     
     @staticmethod
     def check_archive_integrity(archive_path: str) -> bool:
-        """检查压缩包完整性
+        """检查压缩包完整性（已弃用）
         
         Args:
             archive_path: 压缩包路径
             
         Returns:
-            bool: 压缩包是否完整
+            bool: 始终返回True
         """
-        try:
-            # 尝试使用zipfile
-            try:
-                with zipfile.ZipFile(archive_path, 'r') as zf:
-                    # 测试压缩包完整性
-                    if zf.testzip() is not None:
-                        logger.warning(f"[#process]压缩包损坏: {os.path.basename(archive_path)}")
-                        return False
-                    return True
-            except zipfile.BadZipFile:
-                # 如果不是zip文件，使用7z测试
-                startupinfo = None
-                if os.name == 'nt':
-                    startupinfo = subprocess.STARTUPINFO()
-                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        # try:
+        #     # 尝试使用zipfile
+        #     try:
+        #         with zipfile.ZipFile(archive_path, 'r') as zf:
+        #             # 测试压缩包完整性
+        #             if zf.testzip() is not None:
+        #                 logger.warning(f"[#process]压缩包损坏: {os.path.basename(archive_path)}")
+        #                 return False
+        #             return True
+        #     except zipfile.BadZipFile:
+        #         # 如果不是zip文件，使用7z测试
+        #         startupinfo = None
+        #         if os.name == 'nt':
+        #             startupinfo = subprocess.STARTUPINFO()
+        #             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 
-                result = subprocess.run(
-                    ['7z', 't', archive_path],
-                    capture_output=True,
-                    text=True,
-                    encoding='gbk',
-                    errors='ignore',
-                    startupinfo=startupinfo,
-                    check=False
-                )
+        #         result = subprocess.run(
+        #             ['7z', 't', archive_path],
+        #             capture_output=True,
+        #             text=True,
+        #             encoding='gbk',
+        #             errors='ignore',
+        #             startupinfo=startupinfo,
+        #             check=False
+        #         )
                 
-                if result.returncode != 0:
-                    logger.warning(f"[#process]压缩包损坏: {os.path.basename(archive_path)}")
-                    return False
-                return True
+        #         if result.returncode != 0:
+        #             logger.warning(f"[#process]压缩包损坏: {os.path.basename(archive_path)}")
+        #             return False
+        #         return True
                 
-        except Exception as e:
-            logger.error(f"[#process]检查压缩包完整性失败: {str(e)}")
-            return False
-    
+        # except Exception as e:
+        #     logger.error(f"[#process]检查压缩包完整性失败: {str(e)}")
+        #     return False
+        return True    
     @staticmethod
     def delete_files_from_archive(archive_path: str, files_to_delete: List[str]) -> bool:
         """使用BandZip命令行删除文件"""
@@ -455,9 +455,9 @@ class ArchiveHandler:
         """转换压缩包中的YAML文件为JSON格式"""
         try:
             # 首先检查压缩包完整性
-            if not ArchiveHandler.check_archive_integrity(archive_path):
-                logger.warning(f"[#process]跳过损坏的压缩包: {os.path.basename(archive_path)}")
-                return None
+            # if not ArchiveHandler.check_archive_integrity(archive_path):
+            #     logger.warning(f"[#process]跳过损坏的压缩包: {os.path.basename(archive_path)}")
+            #     return None
             
             # 检查是否存在YAML文件
             yaml_uuid = ArchiveHandler.load_yaml_uuid_from_archive(archive_path)
@@ -1575,7 +1575,7 @@ class TaskExecutor:
     def __init__(self, args, target_directory: str):
         self.args = args
         self.target_directory = target_directory
-        self.max_workers = min(32, (multiprocessing.cpu_count() * 4) + 1)
+        self.max_workers = 16
         self.confirmed_artists = set()
         self.uuid_directory = r'E:\1BACKUP\ehv\uuid'
         self.archive_processor = ArchiveProcessor(
