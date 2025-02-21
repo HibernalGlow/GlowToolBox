@@ -10,6 +10,10 @@ import requests
 import base64
 from io import BytesIO
 
+# 添加PathURIGenerator导入
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from nodes.pics.calculate_hash_custom import PathURIGenerator
+
 # 设置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -17,19 +21,44 @@ logger = logging.getLogger(__name__)
 class WatermarkDetector:
     """水印检测器类"""
     
-    def __init__(self, api_url: str = "http://127.0.0.1:1224/api/ocr"):
+    def __init__(self, api_url: str = "http://127.0.0.1:1224/api/ocr", cache_file: str = None):
         """
         初始化水印检测器
         
         Args:
             api_url: UmiOCR HTTP API地址，默认为本地1224端口
+            cache_file: OCR结果缓存文件路径，默认为脚本所在目录下的ocr_cache.json
         """
         self.api_url = api_url
+        self.cache_file = cache_file or os.path.join(os.path.dirname(__file__), 'ocr_cache.json')
+        self.ocr_cache = self._load_cache()
         self.watermark_keywords = [
             "汉化", "翻译", "扫描", "嵌字", "翻译", "组", "漢化",
             "扫图", "嵌字", "校对", "翻译", "润色"
         ]
         
+    def _load_cache(self) -> Dict:
+        """加载OCR缓存"""
+        try:
+            if os.path.exists(self.cache_file):
+                with open(self.cache_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.error(f"加载缓存文件失败: {e}")
+        return {}
+
+    def _save_cache(self):
+        """保存OCR缓存"""
+        try:
+            with open(self.cache_file, 'w', encoding='utf-8') as f:
+                json.dump(self.ocr_cache, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"保存缓存文件失败: {e}")
+
+    def _get_image_uri(self, image_path: str) -> str:
+        """生成图片的URI"""
+        return PathURIGenerator.generate(image_path)
+
     def detect_watermark(self, image_path: str) -> Tuple[bool, List[str]]:
         """
         检测图片中是否存在水印
@@ -41,11 +70,22 @@ class WatermarkDetector:
             Tuple[bool, List[str]]: (是否存在水印, 检测到的水印文字列表)
         """
         try:
-            # 调用UmiOCR进行文字识别
-            ocr_result = self._run_ocr(image_path)
+            # 生成图片URI
+            image_uri = self._get_image_uri(image_path)
             
-            # 解析OCR结果
-            detected_texts = self._parse_ocr_result(ocr_result)
+            # 检查缓存
+            if image_uri in self.ocr_cache:
+                logger.info(f"使用缓存的OCR结果: {image_uri}")
+                detected_texts = self.ocr_cache[image_uri]
+            else:
+                # 调用UmiOCR进行文字识别
+                ocr_result = self._run_ocr(image_path)
+                detected_texts = self._parse_ocr_result(ocr_result)
+                
+                # 保存到缓存
+                self.ocr_cache[image_uri] = detected_texts
+                self._save_cache()
+                logger.info(f"已缓存OCR结果: {image_uri}")
             
             # 检查是否包含水印关键词
             watermark_texts = []
@@ -104,32 +144,71 @@ class WatermarkDetector:
             
     def _parse_ocr_result(self, ocr_output: str) -> List[str]:
         """
-        解析OCR输出结果
+        解析OCR输出结果，将相近位置的文字合并成句子
         
         Args:
             ocr_output: OCR输出的JSON字符串
             
         Returns:
-            List[str]: 识别出的文本列表
+            List[str]: 识别出的文本列表，相近位置的文字会被合并
         """
         try:
             result = json.loads(ocr_output)
             texts = []
             
-            # 解析UmiOCR的返回格式
-            if isinstance(result, dict):
-                if "code" in result and result["code"] == 100:
-                    # 成功的情况
-                    for item in result.get("data", []):
-                        if isinstance(item, dict) and "text" in item:
-                            texts.append(item["text"])
-                else:
-                    logger.error(f"OCR识别失败: {result.get('message', '未知错误')}")
+            if isinstance(result, dict) and "code" in result and result["code"] == 100:
+                # 获取所有文本块
+                text_blocks = []
+                for item in result.get("data", []):
+                    if isinstance(item, dict):
+                        # UmiOCR的返回格式中包含了文本位置信息
+                        text = item.get("text", "").strip()
+                        if text:
+                            # 如果有位置信息，记录下来
+                            pos = item.get("pos", [])  # pos格式: [[x1,y1], [x2,y1], [x2,y2], [x1,y2]]
+                            if pos:
+                                # 使用中心点y坐标作为合并依据
+                                y_center = (pos[0][1] + pos[2][1]) / 2
+                                text_blocks.append((text, y_center))
+                            else:
+                                text_blocks.append((text, -1))  # 没有位置信息的放在最后
+                
+                # 按y坐标排序
+                text_blocks.sort(key=lambda x: x[1])
+                
+                # 合并相近位置的文本
+                current_group = []
+                current_y = None
+                Y_THRESHOLD = 10  # 垂直距离阈值，可以根据实际情况调整
+                
+                for text, y in text_blocks:
+                    if current_y is None:
+                        current_group.append(text)
+                        current_y = y
+                    elif y == -1 or abs(y - current_y) <= Y_THRESHOLD:
+                        # 同一行或没有位置信息的文本
+                        current_group.append(text)
+                    else:
+                        # 新的一行
+                        if current_group:
+                            texts.append(" ".join(current_group))
+                        current_group = [text]
+                        current_y = y
+                
+                # 添加最后一组
+                if current_group:
+                    texts.append(" ".join(current_group))
+            else:
+                logger.error(f"OCR识别失败: {result.get('message', '未知错误')}")
             
             return texts
             
         except json.JSONDecodeError:
             logger.error("解析OCR结果失败")
+            return []
+            
+        except Exception as e:
+            logger.error(f"解析OCR结果时出错: {e}")
             return []
             
     def compare_images(self, image1_path: str, image2_path: str) -> Dict:
@@ -217,11 +296,17 @@ def run_demo():
     # 创建检测器实例
     detector = WatermarkDetector()
     
+    # 首先对所有图片进行OCR识别
+    logger.info("开始对所有图片进行OCR识别...")
+    for img_path in image_files:
+        logger.info(f"处理图片: {img_path.name}")
+        detector.detect_watermark(str(img_path))
+    
     # 对所有图片进行两两比较
     total_comparisons = 0
     watermark_pairs = []
     
-    logger.info(f"找到 {len(image_files)} 个图片文件，开始进行比较...")
+    logger.info(f"\n开始比较图片，共 {len(image_files)} 个文件...")
     
     for i, img1 in enumerate(image_files):
         for j, img2 in enumerate(image_files[i+1:], i+1):

@@ -1,11 +1,10 @@
 import os
 import shutil
 from send2trash import send2trash
-from src.services.logging_service import LoggingService
 import logging
 
 
-class BackupService:
+class BackupHandler:
     """
     类描述
     """
@@ -111,3 +110,4 @@ class BackupService:
             
         except Exception as e:
             logging.info( f"❌ 备份删除文件时出错: {e}")
+
