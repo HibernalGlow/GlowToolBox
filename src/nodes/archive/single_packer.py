@@ -94,3 +94,26 @@ class SinglePacker:
                 
         except Exception as e:
             logging.error(f"❌ 创建压缩包时出现错误: {str(e)}")
+            
+if "__main__" == __name__:
+    import argparse
+    
+    # 创建命令行参数解析器
+    parser = argparse.ArgumentParser(
+        description="单层目录打包工具 - 将指定目录下的一级子文件夹和散图分别打包",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
+    
+    # 添加参数
+    parser.add_argument(
+        'directories',
+        nargs='+',
+        help="要处理的目录路径，支持输入多个路径"
+    )
+    
+    # 解析命令行参数
+    args = parser.parse_args()
+    
+    # 处理每个输入的目录
+    for directory in args.directories:
+        SinglePacker.pack_directory(directory)

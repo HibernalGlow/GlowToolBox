@@ -20,6 +20,7 @@ from nodes.tui.textual_logger import TextualLoggerManager
 from nodes.tui.textual_preset import create_config_app
 from nodes.record.logger_config import setup_logger
 import sys
+from nodes.archive.single_packer import SinglePacker
 
 # 配置日志面板布局
 TEXTUAL_LAYOUT = {
