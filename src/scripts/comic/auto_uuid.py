@@ -744,11 +744,13 @@ def add_uuid_to_file(uuid, timestamp, archive_name, artist_name, relative_path=N
     # 使用缓存代替直接写入
     if cache is not None:
         cache[uuid] = {
-            "timestamps": {
-                timestamp: {
-                    "archive_name": archive_name,
-                    "artist_name": artist_name,
-                    "relative_path": relative_path
+            "record": {  # 新增统一记录键
+                "timestamps": {
+                    timestamp: {
+                        "archive_name": archive_name,
+                        "artist_name": artist_name,
+                        "relative_path": relative_path
+                    }
                 }
             }
         }
@@ -879,11 +881,8 @@ class UuidHandler:
         try:
             with open(json_record_path, 'r', encoding='utf-8') as f:
                 records = json.load(f)
-            uuids = set(records.keys())
-            
-            elapsed = time.time() - start_time
-            logger.info(f"[#current_stats]✅ 加载完成！共加载 {len(uuids)} 个UUID，耗时 {elapsed:.2f} 秒")
-            return uuids
+            # 从record键获取数据
+            return set(records.get("record", {}).keys())
             
         except Exception as e:
             logger.error(f"[#process]加载UUID记录失败: {e}")
@@ -1044,98 +1043,29 @@ class ArchiveProcessor:
     
     def process_archives(self) -> bool:
         """处理所有压缩文件（SSD优化版）"""
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        os.makedirs(self.uuid_directory, exist_ok=True)
-
-        logger.info("[#current_stats]🔍 开始扫描压缩文件")
-        scan_task = logger.info("[#current_progress]扫描文件")
-        
-        archive_files = []
-        file_count = 0
-        for root, _, files in os.walk(self.target_directory):
-            for file in files:
-                if file.endswith(('.zip', '.rar', '.7z')):
-                    full_path = os.path.join(root, file)
-                    archive_files.append((full_path, os.path.getmtime(full_path)))
-                    file_count += 1
-                    logger.info(f"[@current_progress]扫描进度 ({file_count}) {(file_count/len(files)*100):.1f}%")
-        
-        # 修改排序方式
-        if self.order == 'path':
-            archive_files.sort(key=lambda x: x[0])  # 按路径升序
-        else:  # mtime
-            archive_files.sort(key=lambda x: x[1], reverse=True)  # 按修改时间倒序
-        
-        archive_files = [file_path for file_path, _ in archive_files]
-        
-        logger.info(f"[#current_stats]📊 共发现 {file_count} 个压缩文件")
-        
-        # 加载现有UUID
-        logger.info("[#current_stats]💾 正在加载现有UUID...")
-        existing_uuids = UuidHandler.load_existing_uuids()
-        logger.info(f"[#current_stats]📝 已加载 {len(existing_uuids)} 个现有UUID")
-        
-        process_task = logger.info("[#current_progress]处理压缩文件")
-        
-        # 添加跳过计数器
-        skip_count = 0
-        
-        def process_with_progress(archive_path):
-            nonlocal skip_count
-            try:
-                start_time = time.time()
-                result = self.process_single_archive(archive_path, timestamp)
-                
-                # 记录处理时长
-                duration = time.time() - start_time
-                if duration > 30:
-                    logger.warning(f"[#process]⏱️ 处理时间过长: {os.path.basename(archive_path)} 耗时{duration:.1f}秒")
-                
-                return result
-            except Exception as e:
-                logger.error(f"[#process]🔥 严重错误: {str(e)}")
-                raise
-        
-        # 修改任务分发方式
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # 使用批量提交任务
-            batch_size = 100
-            futures = []
+        try:
+            # 移除预热相关代码
+            logger.info("[#current_stats]🔍 开始扫描压缩文件")
             
-            for i in range(0, len(archive_files), batch_size):
-                batch = archive_files[i:i+batch_size]
-                futures.extend(executor.submit(process_with_progress, path) for path in batch)
+            # 直接快速扫描SSD
+            archive_files = []
+            for root, _, files in os.walk(self.target_directory):
+                for file in files:
+                    if file.endswith(('.zip', '.rar', '.7z')):
+                        archive_files.append(os.path.join(root, file))
+            
+            # 使用内存缓存处理
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                futures = [executor.submit(self.process_single_archive, path, timestamp) 
+                         for path in archive_files]
                 
-                # 实时显示提交进度
-                submitted = min(i + batch_size, len(archive_files))
-                total_files = len(archive_files)
-                logger.info(f"[@current_progress]提交进度 ({submitted}/{total_files}) {(submitted/total_files*100):.1f}%")
-
-            # 添加超时机制
-            completed = 0
-            for future in as_completed(futures, timeout=300):
-                try:
-                    result = future.result(timeout=60)  # 每个任务最多60秒
-                    completed += 1
-                    logger.info(f"[@current_progress]处理进度 ({completed}/{total_files}) {(completed/total_files*100):.1f}%")
-                    if result == "SKIP_LIMIT_REACHED":
-                        logger.info("[#process]⏩ 达到跳过限制，取消剩余任务...")
-                        for f in futures:
-                            f.cancel()
-                        break
-                except TimeoutError:
-                    logger.warning("[#process]⌛ 任务超时，已跳过")
-                    skip_count += 1
-                except Exception as e:
-                    logger.error(f"[#process]任务失败: {str(e)}")
-                    skip_count = 0
-
-        if skip_count >= 100:
-            logger.info("[#current_stats]🔄 由于连续跳过次数达到100，提前结束当前阶段")
-        else:
-            logger.info("[#current_stats]✨ 所有文件处理完成")
-        
-        return skip_count >= 100
+                for future in tqdm(as_completed(futures), total=len(futures), desc="处理进度"):
+                    future.result()
+            
+            return True
+        finally:
+            # 确保最后强制更新
+            self._batch_update_records(force=True)
     
     def process_single_archive(self, archive_path: str, timestamp: str) -> bool:
         """处理单个压缩文件
@@ -1356,17 +1286,29 @@ class ArchiveProcessor:
         return False
 
     def _batch_update_records(self, force=False):
-        """批量更新记录到JSON"""
+        """批量更新记录到JSON（优化版）"""
         if len(self.uuid_cache) >= self.batch_size or force:
             json_record_path = r'E:\1BACKUP\ehv\uuid\uuid_records.json'
-            existing_records = JsonHandler.load(json_record_path) or {}
             
-            # 批量合并记录
-            existing_records.update(self.uuid_cache)
+            # 加载现有记录
+            existing_records = JsonHandler.load(json_record_path) or {"record": {}}
             
-            if JsonHandler.save(json_record_path, existing_records):
-                logger.info(f"[#process]✅ 批量更新 {len(self.uuid_cache)} 条记录")
-                self.uuid_cache.clear()
+            # 合并到record键下
+            existing_records["record"].update(self.uuid_cache)
+            
+            # 使用原子操作保存
+            temp_path = f"{json_record_path}.tmp"
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                json.dump(existing_records, f, ensure_ascii=False, indent=2)
+            
+            # 文件替换操作
+            if os.path.exists(json_record_path):
+                os.replace(temp_path, json_record_path)
+            else:
+                os.rename(temp_path, json_record_path)
+            
+            logger.info(f"[#process]✅ 批量更新 {len(self.uuid_cache)} 条记录")
+            self.uuid_cache.clear()
 
 def main():
     """主函数"""
@@ -1744,22 +1686,13 @@ class TaskExecutor:
         self.uuid_record_manager.update_json_records()
 
     def _execute_auto_sequence(self) -> None:
-        """执行自动序列任务"""
-        logger.info("[#current_stats]🔄 开始执行完整序列...")
-        
-        # 第1步：UUID-JSON处理
-        logger.info("[#current_stats]📝 第1步：执行UUID-JSON处理...")
-        self._process_uuid_json()
-        
-        # 第2步：自动文件名处理
-        logger.info("[#current_stats]📝 第2步：执行自动文件名处理...")
+        """优化后的自动序列执行"""
+        # 直接开始处理，不进行预热
+        logger.info("[#current_stats]🔄 开始合并处理流程...")
+        self.archive_processor.process_archives()
         self._run_auto_filename_script()
         
-        # 第3步：再次UUID-JSON处理
-        logger.info("[#current_stats]📝 第3步：再次执行UUID-JSON处理...")
-        self._process_uuid_json()
-        
-        logger.info("[#current_stats]✨ 完整序列执行完成！")
+        logger.info("[#current_stats]✨ 优化后的处理流程完成！")
 
     def _execute_normal_process(self) -> None:
         """执行普通处理流程"""
