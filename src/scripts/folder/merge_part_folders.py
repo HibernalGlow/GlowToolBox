@@ -123,16 +123,6 @@ def merge_part_folders(base_path):
             target_folder = new_path  # 更新target_folder为新的路径
         except Exception as e:
             print(f"重命名文件夹失败: {e}")
-            continue  # 如果重命名失败，跳过后续的解散操作
-        
-        # 调用organize_folder.py解散文件夹
-        script_path = Path(__file__).parent / 'organize_folder.py'
-        if script_path.exists():
-            print(f"\n调用organize_folder.py解散文件夹: {target_folder}")
-            try:
-                subprocess.run(['python', str(script_path), str(target_folder), '--dissolve'], check=True)
-            except subprocess.CalledProcessError as e:
-                print(f"调用organize_folder.py失败: {e}")
 
 def get_multiple_paths(use_clipboard=False):
     """获取多个路径输入，支持剪贴板和手动输入"""
