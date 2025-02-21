@@ -67,7 +67,7 @@ class SinglePacker:
             
             # 处理散图文件
             if images:
-                images_archive_name = f"{base_name}_images.zip"
+                images_archive_name = f"{base_name}.zip"
                 images_archive_path = os.path.join(directory_path, images_archive_name)
                 
                 # 创建临时目录存放图片
