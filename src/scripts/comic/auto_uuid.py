@@ -1044,7 +1044,7 @@ class ArchiveProcessor:
     def process_archives(self) -> bool:
         """处理所有压缩文件（SSD优化版）"""
         try:
-            # 移除预热相关代码
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())  # 添加时间戳定义
             logger.info("[#current_stats]🔍 开始扫描压缩文件")
             
             # 直接快速扫描SSD
