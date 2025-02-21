@@ -23,16 +23,79 @@ from urllib.parse import quote, unquote, urlparse
 from dataclasses import dataclass
 from typing import Dict, Tuple, Union, List, Optional
 import re
+from functools import lru_cache
+import time
 
 # 全局配置
-GLOBAL_HASH_CACHE = os.path.expanduser(r"E:\1EHV\image_hashes_global.json")
-HASH_FILES_LIST = os.path.expanduser(r"E:\1EHV\hash_files_list.txt")
-
+GLOBAL_HASH_FILES = [
+    os.path.expanduser(r"E:\1EHV\image_hashes_collection.json"),
+    os.path.expanduser(r"E:\1EHV\image_hashes_global.json")
+]
+CACHE_TIMEOUT = 1800  # 缓存超时时间(秒)
+HASH_FILES_LIST=os.path.expanduser(r"E:\1EHV\hash_files_list.txt")
 # 哈希计算参数
 HASH_PARAMS = {
     'hash_size': 10,  # 默认哈希大小
     'hash_version': 1  # 哈希版本号，用于后续兼容性处理
 }
+
+# 添加新的缓存类
+class HashCache:
+    """哈希值缓存管理类（单例模式）"""
+    _instance = None
+    _cache = {}
+    _initialized = False
+
+    def __new__(cls):
+        if not cls._instance:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    @classmethod
+    def get_cache(cls):
+        """获取内存中的缓存数据"""
+        if not cls._initialized:
+            cls.refresh_cache()
+        return cls._cache
+    
+    @classmethod
+    def refresh_cache(cls):
+        """刷新缓存并保持内存驻留"""
+        new_cache = {}
+        for hash_file in GLOBAL_HASH_FILES:
+            try:
+                if os.path.exists(hash_file):
+                    with open(hash_file, 'rb') as f:
+                        data = orjson.loads(f.read())
+                        
+                        # 处理新格式 (image_hashes_collection.json)
+                        if "hashes" in data:
+                            hashes = data["hashes"]
+                            for uri, hash_data in hashes.items():
+                                if isinstance(hash_data, dict):
+                                    new_cache[uri] = hash_data.get('hash', '')
+                                else:
+                                    new_cache[uri] = hash_data
+                                    
+                        # 处理旧格式 (image_hashes_global.json)
+                        else:
+                            # 排除特殊键
+                            special_keys = {'_hash_params', 'dry_run', 'input_paths'}
+                            hashes = {
+                                k: v['hash'] if isinstance(v, dict) else v
+                                for k, v in data.items()
+                                if k not in special_keys
+                            }
+                            new_cache.update(hashes)
+                            
+                    logging.debug(f"从 {hash_file} 加载了 {len(hashes)} 个哈希值")
+            except Exception as e:
+                logging.error(f"加载哈希文件失败 {hash_file}: {e}")
+                
+        cls._cache = new_cache  # 直接替换引用保证原子性
+        cls._initialized = True
+        logging.info(f"哈希缓存已更新，共 {len(cls._cache)} 个条目")
+
 class ImgUtils:
     
     def get_img_files(directory):
@@ -155,6 +218,22 @@ class ImageHashCalculator:
                 }
         """
         try:
+            # 生成标准化的URI
+            if url is None and isinstance(image_path_or_data, (str, Path)):
+                path_str = str(image_path_or_data)
+                url = PathURIGenerator.generate(path_str)
+            
+            # 检查内存缓存
+            cached_hashes = HashCache.get_cache()
+            if url in cached_hashes:
+                return {
+                    'hash': cached_hashes[url],
+                    'size': HASH_PARAMS['hash_size'],
+                    'url': url,
+                    'from_cache': True  # 新增缓存标记
+                }
+            
+            # 如果缓存中没有，则计算新的哈希值
             # 如果没有提供URL且输入是路径，则生成标准化的URI
             if url is None and isinstance(image_path_or_data, (str, Path)):
                 path_str = str(image_path_or_data)
@@ -186,15 +265,17 @@ class ImageHashCalculator:
             if not hash_str:
                 raise ValueError("生成的哈希值为空")
                 
-            # 返回包含哈希值和元数据的字典
+            # 将新结果存入内存缓存
+            HashCache._cache[url] = hash_str
             return {
                 'hash': hash_str,
                 'size': hash_size,
-                'url': url if url else ImageHashCalculator.normalize_path(image_path_or_data) if isinstance(image_path_or_data, (str, Path)) else ''
+                'url': url,
+                'from_cache': False
             }
             
         except Exception as e:
-            logging.error(f"计算失败: {url if url else '未知文件'} - {str(e)}")
+            logging.error(f"计算失败: {e}")
             return None
 
 
@@ -400,14 +481,14 @@ class ImageHashCalculator:
                 "hashes": hash_dict  # 直接存储字符串字典，跳过中间转换
             }
             
-            os.makedirs(os.path.dirname(GLOBAL_HASH_CACHE), exist_ok=True)
-            with open(GLOBAL_HASH_CACHE, 'wb') as f:
+            os.makedirs(os.path.dirname(GLOBAL_HASH_FILES[-1]), exist_ok=True)
+            with open(GLOBAL_HASH_FILES[-1], 'wb') as f:
                 # 使用orjson的OPT_SERIALIZE_NUMPY选项提升数值处理性能
                 f.write(orjson.dumps(output_dict, 
                     option=orjson.OPT_INDENT_2 | 
                     orjson.OPT_SERIALIZE_NUMPY |
                     orjson.OPT_APPEND_NEWLINE))
-            logging.debug(f"已保存哈希缓存到: {GLOBAL_HASH_CACHE}")  # 改为debug级别减少日志量
+            logging.debug(f"已保存哈希缓存到: {GLOBAL_HASH_FILES[-1]}")  # 改为debug级别减少日志量
         except Exception as e:
             logging.error(f"保存全局哈希缓存失败: {e}", exc_info=True)
 
@@ -415,8 +496,8 @@ class ImageHashCalculator:
     def load_global_hashes() -> Dict[str, str]:
         """从全局缓存文件加载所有哈希值（性能优化版）"""
         try:
-            if os.path.exists(GLOBAL_HASH_CACHE):
-                with open(GLOBAL_HASH_CACHE, 'rb') as f:
+            if os.path.exists(GLOBAL_HASH_FILES[-1]):
+                with open(GLOBAL_HASH_FILES[-1], 'rb') as f:
                     data = orjson.loads(f.read())
                     return {
                         uri: entry["hash"] if isinstance(entry, dict) else entry
@@ -559,6 +640,30 @@ class ImageHashCalculator:
             )
             logging.info(f"已迁移哈希文件格式: {file_path}")
 
+    @staticmethod
+    def test_hash_cache():
+        """缓存功能测试demo"""
+        console = Console()
+        test_file = r"D:\1VSCODE\1ehv\pics\test\0.jpg"  # 替换为实际测试文件路径
+        url=ImageHashCalculator.normalize_path(test_file)
+        # 第一次计算（应加载缓存）
+        console.print("\n[bold cyan]=== 第一次计算（加载缓存）===[/]")
+        start_time = time.time()
+        hash1 = ImageHashCalculator.calculate_phash(test_file)
+        load_hashes=ImageHashCalculator.load_hashes(test_file)
+        console.print(f"耗时: {time.time()-start_time:.2f}s")
+        
+        # 第二次计算（应使用缓存）
+        console.print("\n[bold cyan]=== 第二次计算（使用缓存）===[/]")
+        start_time = time.time()
+        hash2 = ImageHashCalculator.calculate_phash(test_file)
+        console.print(f"耗时: {time.time()-start_time:.2f}s")
+        
+        # 验证结果
+        console.print("\n[bold]测试结果:[/]")
+        console.print(f"哈希值是否一致: {hash1['hash'] == hash2['hash']}")
+        console.print(f"是否来自缓存: {hash1.get('from_cache', False)} | {hash2.get('from_cache', False)}")
+
 class LegacyHashLoader:
     """旧结构哈希文件加载器（后期可整体移除）"""
     
@@ -677,7 +782,9 @@ class ImageClarityEvaluator:
             return 0
 
 if __name__ == "__main__":
-    # 新增测试代码
+    # 执行缓存测试
+    ImageHashCalculator.test_hash_cache()
+    # 原有清晰度测试保持不变
     def test_image_clarity():
         """清晰度评估测试demo"""
         test_dir = Path(r"D:\1VSCODE\1ehv\pics\test")
@@ -704,5 +811,5 @@ if __name__ == "__main__":
             console.print(f"| {idx:2d} | {name} | {score:.2f} |")
             
     # 执行测试
-    test_image_clarity()
+    # test_image_clarity()
 
