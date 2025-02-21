@@ -88,14 +88,14 @@ class RangeControl:
         从范围列表获取所有索引的集合
         
         Args:
-            ranges: 范围列表，每个范围是(start, end)元组
+            ranges: 范围列表，每个范围是(start, end)元组，end是包含的
             
         Returns:
             Set[int]: 所有索引的集合
         """
         indices = set()
         for start, end in ranges:
-            indices.update(range(start, end))
+            indices.update(range(start, end + 1))  # 修改为包含 end
         return indices
     
     @staticmethod

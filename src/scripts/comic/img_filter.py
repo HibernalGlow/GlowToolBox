@@ -847,6 +847,7 @@ class ArchiveProcessor:
             
             # 如果启用了部分解压功能
             if "range_control" in params:
+                logger.info(f"[#archive_ops]🧩开始部分解压 范围: {params['range_control']}")
                 try:
                     success = PartialExtractor.partial_extract(file_path, temp_dir, params["range_control"])
                     if not success:
