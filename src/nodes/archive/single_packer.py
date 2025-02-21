@@ -55,7 +55,8 @@ class SinglePacker:
                 archive_path = os.path.join(directory_path, archive_name)
                 
                 logging.info(f"打包子文件夹: {subdir_name}")
-                SinglePacker._create_archive(subdir, archive_path)
+                if SinglePacker._create_archive(subdir, archive_path):
+                    SinglePacker._cleanup_source(subdir)
             
             # 处理散图文件
             if images:
@@ -68,7 +69,10 @@ class SinglePacker:
                         shutil.copy2(image, temp_dir)
                     
                     logging.info(f"打包散图文件: {len(images)}个文件")
-                    SinglePacker._create_archive(temp_dir, images_archive_path)
+                    if SinglePacker._create_archive(temp_dir, images_archive_path):
+                        # 删除原始图片文件
+                        for image in images:
+                            SinglePacker._cleanup_source(image)
             
             logging.info("✅ 打包完成")
             
@@ -89,11 +93,42 @@ class SinglePacker:
             
             if result.returncode != 0:
                 logging.error(f"❌ 创建压缩包失败: {archive_path}\n{result.stderr}")
+                return False
             else:
                 logging.info(f"✅ 创建压缩包成功: {os.path.basename(archive_path)}")
                 
+                # 验证压缩包完整性
+                logging.info(f"正在验证压缩包完整性: {os.path.basename(archive_path)}")
+                test_cmd = ['7z', 't', archive_path]
+                test_result = subprocess.run(test_cmd, capture_output=True, text=True)
+                
+                if test_result.returncode != 0:
+                    logging.error(f"❌ 压缩包验证失败: {archive_path}\n{test_result.stderr}")
+                    return False
+                else:
+                    logging.info(f"✅ 压缩包验证成功: {os.path.basename(archive_path)}")
+                    return True
+                
         except Exception as e:
             logging.error(f"❌ 创建压缩包时出现错误: {str(e)}")
+            return False
+            
+    @staticmethod
+    def _cleanup_source(source_path: str):
+        """清理源文件或文件夹
+        
+        Args:
+            source_path: 要清理的源路径
+        """
+        try:
+            if os.path.isdir(source_path):
+                shutil.rmtree(source_path)
+                logging.info(f"✅ 已删除源文件夹: {os.path.basename(source_path)}")
+            elif os.path.isfile(source_path):
+                os.remove(source_path)
+                logging.info(f"✅ 已删除源文件: {os.path.basename(source_path)}")
+        except Exception as e:
+            logging.error(f"❌ 清理源文件时出现错误: {str(e)}")
             
 if "__main__" == __name__:
     import argparse
