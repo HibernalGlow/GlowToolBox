@@ -97,6 +97,7 @@ class SinglePacker:
             
 if "__main__" == __name__:
     import argparse
+    import sys
     
     # 创建命令行参数解析器
     parser = argparse.ArgumentParser(
@@ -107,13 +108,29 @@ if "__main__" == __name__:
     # 添加参数
     parser.add_argument(
         'directories',
-        nargs='+',
+        nargs='*',  # 改为可选参数
         help="要处理的目录路径，支持输入多个路径"
     )
     
     # 解析命令行参数
     args = parser.parse_args()
     
+    directories = args.directories
+    
+    # 如果没有提供命令行参数，则进入交互式输入模式
+    if not directories:
+        print("请输入要处理的目录路径，每行一个，输入空行结束：")
+        while True:
+            line = input().strip()
+            if not line:
+                break
+            directories.append(line)
+    
+    # 如果仍然没有输入任何路径，显示帮助信息并退出
+    if not directories:
+        parser.print_help()
+        sys.exit(1)
+    
     # 处理每个输入的目录
-    for directory in args.directories:
+    for directory in directories:
         SinglePacker.pack_directory(directory)
