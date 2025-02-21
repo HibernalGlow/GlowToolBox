@@ -283,8 +283,8 @@ class TextualLogHandler(logging.Handler):
             is_real_progress = '@' in msg and '%' in msg
             
             # 提取面板标签
-            progress_match = re.match(r'^\[@(\w+)\](.*)$', msg)
-            normal_match = re.match(r'^\[#(\w+)\](.*)$', msg)
+            progress_match = re.match(r'^\[@(\w{2,})\](.*)$', msg)
+            normal_match = re.match(r'^\[#(\w{2,})\](.*)$', msg)
             
             # 获取标签和内容
             panel_name = None
