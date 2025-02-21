@@ -33,15 +33,15 @@ class SinglePacker:
         try:
             directory_path = os.path.abspath(directory_path)
             if not os.path.exists(directory_path):
-                logging.error(f"❌ 目录不存在: {directory_path}")
+                logger.error(f"❌ 目录不存在: {directory_path}")
                 return
                 
             if not os.path.isdir(directory_path):
-                logging.error(f"❌ 指定路径不是目录: {directory_path}")
+                logger.error(f"❌ 指定路径不是目录: {directory_path}")
                 return
                 
             base_name = os.path.basename(directory_path)
-            logging.info(f"开始处理目录: {directory_path}")
+            logger.info(f"开始处理目录: {directory_path}")
             
             # 获取一级目录内容
             items = os.listdir(directory_path)
@@ -61,7 +61,7 @@ class SinglePacker:
                 archive_name = f"{subdir_name}.zip"
                 archive_path = os.path.join(directory_path, archive_name)
                 
-                logging.info(f"打包子文件夹: {subdir_name}")
+                logger.info(f"打包子文件夹: {subdir_name}")
                 if SinglePacker._create_archive(subdir, archive_path):
                     SinglePacker._cleanup_source(subdir)
             
@@ -75,16 +75,16 @@ class SinglePacker:
                     for image in images:
                         shutil.copy2(image, temp_dir)
                     
-                    logging.info(f"打包散图文件: {len(images)}个文件")
+                    logger.info(f"打包散图文件: {len(images)}个文件")
                     if SinglePacker._create_archive(temp_dir, images_archive_path):
                         # 删除原始图片文件
                         for image in images:
                             SinglePacker._cleanup_source(image)
             
-            logging.info("✅ 打包完成")
+            logger.info("✅ 打包完成")
             
         except Exception as e:
-            logging.error(f"❌ 处理过程中出现错误: {str(e)}")
+            logger.error(f"❌ 处理过程中出现错误: {str(e)}")
     
     @staticmethod
     def _create_archive(source_path: str, archive_path: str):
@@ -99,25 +99,25 @@ class SinglePacker:
             result = subprocess.run(cmd, capture_output=True, text=True)
             
             if result.returncode != 0:
-                logging.error(f"❌ 创建压缩包失败: {archive_path}\n{result.stderr}")
+                logger.error(f"❌ 创建压缩包失败: {archive_path}\n{result.stderr}")
                 return False
             else:
-                logging.info(f"✅ 创建压缩包成功: {os.path.basename(archive_path)}")
+                logger.info(f"✅ 创建压缩包成功: {os.path.basename(archive_path)}")
                 
                 # 验证压缩包完整性
-                logging.info(f"正在验证压缩包完整性: {os.path.basename(archive_path)}")
+                logger.info(f"正在验证压缩包完整性: {os.path.basename(archive_path)}")
                 test_cmd = ['7z', 't', archive_path]
                 test_result = subprocess.run(test_cmd, capture_output=True, text=True)
                 
                 if test_result.returncode != 0:
-                    logging.error(f"❌ 压缩包验证失败: {archive_path}\n{test_result.stderr}")
+                    logger.error(f"❌ 压缩包验证失败: {archive_path}\n{test_result.stderr}")
                     return False
                 else:
-                    logging.info(f"✅ 压缩包验证成功: {os.path.basename(archive_path)}")
+                    logger.info(f"✅ 压缩包验证成功: {os.path.basename(archive_path)}")
                     return True
                 
         except Exception as e:
-            logging.error(f"❌ 创建压缩包时出现错误: {str(e)}")
+            logger.error(f"❌ 创建压缩包时出现错误: {str(e)}")
             return False
             
     @staticmethod
@@ -130,12 +130,12 @@ class SinglePacker:
         try:
             if os.path.isdir(source_path):
                 shutil.rmtree(source_path)
-                logging.info(f"✅ 已删除源文件夹: {os.path.basename(source_path)}")
+                logger.info(f"✅ 已删除源文件夹: {os.path.basename(source_path)}")
             elif os.path.isfile(source_path):
                 os.remove(source_path)
-                logging.info(f"✅ 已删除源文件: {os.path.basename(source_path)}")
+                logger.info(f"✅ 已删除源文件: {os.path.basename(source_path)}")
         except Exception as e:
-            logging.error(f"❌ 清理源文件时出现错误: {str(e)}")
+            logger.error(f"❌ 清理源文件时出现错误: {str(e)}")
             
 if "__main__" == __name__:
     import argparse
