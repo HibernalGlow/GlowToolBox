@@ -103,7 +103,7 @@ class TextualLoggerManager:
         "process": {"ratio": 3, "title": "📝 处理日志", "style": "magenta"},
         "update": {"ratio": 2, "title": "ℹ️ 更新日志", "style": "blue"}
     }
-    
+        
     @classmethod
     def set_layout(cls, layout_config=None, log_file=None):
         """设置日志布局并启动应用

@@ -20,7 +20,6 @@ from nodes.tui.textual_logger import TextualLoggerManager
 from nodes.tui.textual_preset import create_config_app
 from nodes.record.logger_config import setup_logger
 import sys
-from nodes.archive.single_packer import SinglePacker
 
 # 配置日志面板布局
 TEXTUAL_LAYOUT = {
@@ -276,7 +275,7 @@ def find_min_folder_with_images(base_path: Path, exclude_keywords: List[str]) ->
     返回: (文件夹路径, 是否需要特殊处理, 图片数量)
     """
     # 检查路径是否包含黑名单关键词
-    if not args.no_blacklist and any(keyword in str(base_path) for keyword in BLACKLIST_KEYWORDS):
+    if any(keyword in str(base_path) for keyword in BLACKLIST_KEYWORDS):
         logger.info(f"跳过黑名单路径: {base_path}")
         return None
         
@@ -1203,8 +1202,7 @@ def run_with_args(args):
         "organize_media": args.all or args.organize_media,
         "move_unwanted": args.all or args.move_unwanted,
         "compress": args.all or args.compress,
-        "process_scattered": args.all or args.process_scattered,
-        "single_pack": args.single_pack
+        "process_scattered": args.all or args.process_scattered
     }
 
     # 如果没有指定任何选项，默认执行所有操作
@@ -1212,13 +1210,7 @@ def run_with_args(args):
         options = {k: True for k in options}
 
     # 处理目录
-    if options["single_pack"]:
-        # 单层打包模式
-        for directory in directories:
-            SinglePacker.pack_directory(directory)
-    else:
-        # 常规处理模式
-        process_with_prompt(directories, options)
+    process_with_prompt(directories, options)
 
 def main():
     """主函数"""
@@ -1232,9 +1224,13 @@ def main():
         parser.add_argument('--process-scattered', action='store_true', help='处理散图')
         parser.add_argument('--all', action='store_true', help='执行所有操作')
         parser.add_argument('--path', type=str, help='指定处理路径')
-        parser.add_argument('--no-blacklist', action='store_true', help='禁用黑名单过滤')
-        parser.add_argument('--single-pack', action='store_true', help='单层打包模式')
-
+        
+        try:
+            args = parser.parse_args()
+            run_with_args(args)
+        except Exception as e:
+            logger.info(f"[#process]❌ 处理命令行参数时出错: {str(e)}")
+            return
     else:
         # 没有命令行参数时启动TUI界面
         # 定义复选框选项
@@ -1245,7 +1241,6 @@ def main():
             ("压缩文件夹", "compress", "--compress", True),
             ("处理散图", "process_scattered", "--process-scattered", True),
             ("执行所有操作", "all", "--all", False),
-            ("单层打包模式", "single_pack", "--single-pack", False),
         ]
 
         # 定义输入框选项
@@ -1268,11 +1263,6 @@ def main():
             "仅压缩": {
                 "description": "只压缩文件夹和处理散图",
                 "checkbox_options": ["clipboard", "compress", "process_scattered"],
-                "input_values": {}
-            },
-            "单层打包": {
-                "description": "使用单层打包模式处理文件夹",
-                "checkbox_options": ["clipboard", "single_pack"],
                 "input_values": {}
             }
         }

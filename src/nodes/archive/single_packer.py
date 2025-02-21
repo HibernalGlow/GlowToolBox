@@ -30,14 +30,17 @@ TEXTUAL_LAYOUT = {
         "style": "lightblue"
     }
 }
-
+def init_TextualLogger():
+    TextualLoggerManager.set_layout(TEXTUAL_LAYOUT, config_info['log_file'])
+    
 config = {
     'script_name': 'single_packer',
     'console_enabled': False
 }
 logger, config_info = setup_logger(config)
 
-
+def init_TextualLogger():
+    TextualLoggerManager.set_layout(TEXTUAL_LAYOUT, config_info['log_file'])
 
 class SinglePacker:
     """单层目录打包工具
@@ -57,6 +60,7 @@ class SinglePacker:
         Args:
             directory_path: 要处理的目录路径
         """
+        init_TextualLogger()
         try:
             directory_path = os.path.abspath(directory_path)
             if not os.path.exists(directory_path):
@@ -203,7 +207,7 @@ if "__main__" == __name__:
     if not directories:
         print("请输入要处理的目录路径，每行一个，输入空行结束：")
         while True:
-            line = input().strip()
+            line = input().strip().strip('"').strip("'")
             if not line:
                 break
             directories.append(line)
