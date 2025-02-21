@@ -6,6 +6,7 @@ import shutil
 import argparse
 import pyperclip
 import sys
+import subprocess
 
 class InputHandler:
     """输入处理类"""
@@ -111,8 +112,23 @@ def rename_images_in_directory(dir_path):
                     backup_file(old_path, old_path)
                     # 直接重命名
                     os.rename(old_path, new_path)
+def has_hash_files_in_zip(zip_path):
+    """使用7z检查压缩包中是否有包含[hash-]的文件"""
+    try:
+        # 使用7z列出文件列表
+        result = subprocess.run(['7z', 'l', zip_path], capture_output=True, text=True)
+        # 检查输出中是否包含[hash-]
+        return '[hash-' in result.stdout
+    except Exception as e:
+        print(f"检查压缩包失败 {zip_path}: {e}")
+        return False
 
 def rename_images_in_zip(zip_path):
+    # 先检查压缩包中是否有需要处理的文件
+    if not has_hash_files_in_zip(zip_path):
+        print(f"跳过处理：{zip_path} (没有需要处理的文件)")
+        return
+
     # 创建临时目录
     temp_dir = tempfile.mkdtemp()
     
