@@ -411,48 +411,44 @@ class ArchiveHandler:
         return None
 
     @staticmethod
+    @staticmethod
     def add_json_to_archive(archive_path: str, json_path: str, json_name: str) -> bool:
-        """优化后的快速添加方法"""
+        """添加JSON文件到压缩包
+        
+        Args:
+            archive_path: 压缩包路径
+            json_path: JSON文件路径
+            json_name: 要保存在压缩包中的文件名
+            
+        Returns:
+            bool: 是否添加成功
+        """
         try:
-            # 使用Bandizip的多线程快速添加模式
-            startupinfo = None
-            if os.name == 'nt':
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-            # 使用内存映射减少IO操作
-            with open(json_path, 'rb') as f:
-                mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+            # 尝试使用zipfile
+            with zipfile.ZipFile(archive_path, 'a') as zf:
+                # 如果存在同名文件，先删除
                 try:
-                    # Bandizip命令行参数优化
-                    result = subprocess.run(
-                        [
-                            'bz', 'a',          # 添加命令
-                            archive_path, 
-                            '-aoa',# 目标压缩包
-                            '-',                # 从标准输入读取
-                            '-o' + json_name,   # 指定压缩包内路径
-                            '-y',               # 全部确认
-                            '-x',               # 最大压缩速度
-                            '-t:16',             # 8线程
-                            '-l:fast'           # 快速压缩模式
-                        ],
-                        input=mm.read(),
-                        check=True,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        startupinfo=startupinfo
-                    )
-                    return True
-                finally:
-                    mm.close()
-                    
-        except subprocess.CalledProcessError as e:
-            logger.error(f"[#process]Bandizip添加失败: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"[#process]非常规错误: {e}")
-            return False
+                    zf.remove(json_name)
+                except KeyError:
+                    pass
+                zf.write(json_path, json_name)
+                logger.info(f"[#process]添加JSON文件: {json_name}")
+                return True
+        except Exception:
+            # 如果zipfile失败，使用7z
+            try:
+                # 使用7z u命令更新文件
+                subprocess.run(
+                    ['7z', 'u', archive_path, json_path, f"-w{os.path.dirname(json_path)}"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=True
+                )
+                logger.info(f"[#process]添加JSON文件: {json_name}")
+                return True
+            except subprocess.CalledProcessError:
+                logger.error(f"[#process]添加JSON文件失败: {json_name}")
+                return False
 
     @staticmethod
     def convert_yaml_archive_to_json(archive_path: str) -> Optional[Dict[str, Any]]:
