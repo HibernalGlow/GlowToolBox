@@ -133,10 +133,8 @@ def rename_images_in_zip(zip_path):
     temp_dir = tempfile.mkdtemp()
     
     try:
-        # 打开压缩包
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            # 解压到临时目录
-            zip_ref.extractall(temp_dir)
+        # 使用7z解压到临时目录
+        subprocess.run(['7z', 'x', zip_path, f'-o{temp_dir}', '-y'], capture_output=True)
         
         # 处理临时目录中的文件
         rename_images_in_directory(temp_dir)
@@ -144,7 +142,14 @@ def rename_images_in_zip(zip_path):
         # 备份原始zip文件
         backup_file(zip_path, zip_path)
         
-        # 直接覆盖原始zip文件
+        # 使用7z重新打包
+        subprocess.run(['7z', 'a', '-tzip', zip_path, f'{temp_dir}\\*'], capture_output=True)
+        
+        print(f"压缩包处理完成：{zip_path}")
+        
+    finally:
+        # 清理临时目录
+        shutil.rmtree(temp_dir)
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as new_zip:
             # 将处理后的文件添加到zip中
             for root, dirs, files in os.walk(temp_dir):
