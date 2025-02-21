@@ -55,15 +55,20 @@ def merge_part_folders(base_path):
         for folder in other_folders:
             try:
                 print(f"\n合并 {folder.name} 到 {target_folder.name}")
+                # 创建临时文件夹用于解散操作
+                temp_folder = target_folder / f"temp_{folder.name}"
+                temp_folder.mkdir(exist_ok=True)
+                
+                # 先将文件移动到临时文件夹
                 for item in folder.iterdir():
-                    dest_path = target_folder / item.name
+                    dest_path = temp_folder / item.name
                     if dest_path.exists():
                         print(f"目标路径已存在，重命名: {item.name}")
                         base, ext = os.path.splitext(item.name)
                         counter = 1
                         while dest_path.exists():
                             new_name = f"{base}_{counter}{ext}"
-                            dest_path = target_folder / new_name
+                            dest_path = temp_folder / new_name
                             counter += 1
                     
                     print(f"移动: {item.name} -> {dest_path}")
@@ -72,17 +77,35 @@ def merge_part_folders(base_path):
                 # 删除空文件夹
                 folder.rmdir()
                 print(f"删除空文件夹: {folder}")
+                
+                # 对临时文件夹进行解散操作
+                script_path = Path(__file__).parent / 'organize_folder.py'
+                if script_path.exists():
+                    print(f"\n解散文件夹内容: {temp_folder}")
+                    try:
+                        subprocess.run(['python', str(script_path), str(temp_folder), '--dissolve'], check=True)
+                    except subprocess.CalledProcessError as e:
+                        print(f"调用organize_folder.py失败: {e}")
+                
+                # 将解散后的文件移动到目标文件夹
+                for item in temp_folder.iterdir():
+                    final_dest = target_folder / item.name
+                    if final_dest.exists():
+                        base, ext = os.path.splitext(item.name)
+                        counter = 1
+                        while final_dest.exists():
+                            new_name = f"{base}_{counter}{ext}"
+                            final_dest = target_folder / new_name
+                            counter += 1
+                    shutil.move(str(item), str(final_dest))
+                
+                # 删除临时文件夹
+                temp_folder.rmdir()
+                
             except Exception as e:
                 print(f"处理文件夹 {folder} 时出错: {e}")
-        
-        # 调用organize_folder.py解散文件夹
-        script_path = Path(__file__).parent / 'organize_folder.py'
-        if script_path.exists():
-            print(f"\n调用organize_folder.py解散文件夹: {target_folder}")
-            try:
-                subprocess.run(['python', str(script_path), str(target_folder), '--dissolve'], check=True)
-            except subprocess.CalledProcessError as e:
-                print(f"调用organize_folder.py失败: {e}")
+                if temp_folder.exists():
+                    shutil.rmtree(str(temp_folder))
         
         # 重命名文件夹（去掉part 1）
         try:
@@ -97,8 +120,19 @@ def merge_part_folders(base_path):
             
             target_folder.rename(new_path)
             print(f"重命名文件夹: {target_folder.name} -> {new_path.name}")
+            target_folder = new_path  # 更新target_folder为新的路径
         except Exception as e:
             print(f"重命名文件夹失败: {e}")
+            continue  # 如果重命名失败，跳过后续的解散操作
+        
+        # 调用organize_folder.py解散文件夹
+        script_path = Path(__file__).parent / 'organize_folder.py'
+        if script_path.exists():
+            print(f"\n调用organize_folder.py解散文件夹: {target_folder}")
+            try:
+                subprocess.run(['python', str(script_path), str(target_folder), '--dissolve'], check=True)
+            except subprocess.CalledProcessError as e:
+                print(f"调用organize_folder.py失败: {e}")
 
 def get_multiple_paths(use_clipboard=False):
     """获取多个路径输入，支持剪贴板和手动输入"""
