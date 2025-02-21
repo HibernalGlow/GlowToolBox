@@ -1407,7 +1407,16 @@ def update_json_records(uuid_directory=r'E:\1BACKUP\ehv\uuid'):
     
     json_record_path = os.path.join(uuid_directory, 'uuid_records.json')
     
-    existing_records = JsonHandler.load(json_record_path)
+    # 加载现有记录，确保基础结构正确
+    try:
+        existing_records = JsonHandler.load(json_record_path)
+        if not isinstance(existing_records, dict):
+            existing_records = {"record": {}}
+        if "record" not in existing_records:
+            existing_records["record"] = {}
+    except Exception as e:
+        logger.error(f"[#process]加载记录文件失败，将创建新记录: {e}")
+        existing_records = {"record": {}}
     
     total_files = 0
     processed = 0
@@ -1424,12 +1433,20 @@ def update_json_records(uuid_directory=r'E:\1BACKUP\ehv\uuid'):
                 json_path = os.path.join(root, file)
                 try:
                     file_data = JsonHandler.load(json_path)
-                    if uuid not in existing_records:
-                        existing_records[uuid] = file_data
+                    if not file_data:
+                        logger.warning(f"[#process]跳过空文件: {file}")
+                        continue
+                        
+                    if uuid not in existing_records["record"]:
+                        existing_records["record"][uuid] = file_data
                         logger.info(f"[#process]✅ 添加新记录: {uuid}")
                     else:
-                        existing_records[uuid]["timestamps"].update(file_data.get("timestamps", {}))
-                        logger.info(f"[#process]✅ 更新记录: {uuid}")
+                        # 确保timestamps字段存在
+                        if "timestamps" not in existing_records["record"][uuid]:
+                            existing_records["record"][uuid]["timestamps"] = {}
+                        if "timestamps" in file_data:
+                            existing_records["record"][uuid]["timestamps"].update(file_data["timestamps"])
+                            logger.info(f"[#process]✅ 更新记录: {uuid}")
                         
                 except Exception as e:
                     logger.error(f"[#process]处理JSON文件失败 {json_path}: {e}")
@@ -1437,10 +1454,26 @@ def update_json_records(uuid_directory=r'E:\1BACKUP\ehv\uuid'):
                 processed += 1
                 logger.info(f"[@current_progress]更新进度 {processed}/{total_files} ({(processed/total_files*100):.1f}%)")
     
-    if JsonHandler.save(json_record_path, existing_records):
+    # 使用临时文件保证写入安全性
+    temp_path = f"{json_record_path}.tmp"
+    try:
+        with open(temp_path, 'w', encoding='utf-8') as f:
+            json.dump(existing_records, f, ensure_ascii=False, indent=2)
+        
+        # 原子性替换
+        if os.path.exists(json_record_path):
+            os.replace(temp_path, json_record_path)
+        else:
+            os.rename(temp_path, json_record_path)
         logger.info("[#current_stats]✅ JSON记录更新完成")
-    else:
-        logger.error("[#process]❌ JSON记录更新失败")
+        
+    except Exception as e:
+        logger.error(f"[#process]❌ JSON记录更新失败: {e}")
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except:
+                pass
 
 def convert_yaml_to_json_structure():
     """将现有的YAML文件结构转换为JSON结构"""
@@ -1791,7 +1824,16 @@ class UuidRecordManager:
         
         json_record_path = os.path.join(self.uuid_directory, 'uuid_records.json')
         
-        existing_records = JsonHandler.load(json_record_path)
+        # 加载现有记录，确保基础结构正确
+        try:
+            existing_records = JsonHandler.load(json_record_path)
+            if not isinstance(existing_records, dict):
+                existing_records = {"record": {}}
+            if "record" not in existing_records:
+                existing_records["record"] = {}
+        except Exception as e:
+            logger.error(f"[#process]加载记录文件失败，将创建新记录: {e}")
+            existing_records = {"record": {}}
         
         total_files = 0
         processed = 0
@@ -1808,23 +1850,61 @@ class UuidRecordManager:
                     json_path = os.path.join(root, file)
                     try:
                         file_data = JsonHandler.load(json_path)
-                        if uuid not in existing_records:
-                            existing_records[uuid] = file_data
+                        if not file_data:
+                            logger.warning(f"[#process]跳过空文件: {file}")
+                            continue
+                            
+                        # 无论是否需要更新，都确保记录存在于缓存中
+                        if uuid not in existing_records["record"]:
+                            # 新记录，直接添加
+                            existing_records["record"][uuid] = file_data
                             logger.info(f"[#process]✅ 添加新记录: {uuid}")
                         else:
-                            existing_records[uuid]["timestamps"].update(file_data.get("timestamps", {}))
-                            logger.info(f"[#process]✅ 更新记录: {uuid}")
+                            # 已存在的记录，合并时间戳
+                            if "timestamps" not in existing_records["record"][uuid]:
+                                existing_records["record"][uuid]["timestamps"] = {}
+                            
+                            if "timestamps" in file_data:
+                                # 检查是否有新的时间戳需要更新
+                                has_new_timestamps = False
+                                for timestamp, data in file_data["timestamps"].items():
+                                    if timestamp not in existing_records["record"][uuid]["timestamps"]:
+                                        has_new_timestamps = True
+                                        existing_records["record"][uuid]["timestamps"][timestamp] = data
+                                
+                                if has_new_timestamps:
+                                    logger.info(f"[#process]✅ 更新记录: {uuid}")
+                                else:
+                                    logger.info(f"[#process]✓ 记录已存在且无需更新: {uuid}")
+                            else:
+                                logger.info(f"[#process]✓ 记录已存在且无需更新: {uuid}")
                             
                     except Exception as e:
                         logger.error(f"[#process]处理JSON文件失败 {json_path}: {e}")
-                
-                processed += 1
-                logger.info(f"[@current_progress]更新进度 {processed}/{total_files} ({(processed/total_files*100):.1f}%)")
+                    
+                    processed += 1
+                    logger.info(f"[@current_progress]更新进度 {processed}/{total_files} ({(processed/total_files*100):.1f}%)")
         
-        if JsonHandler.save(json_record_path, existing_records):
+        # 使用临时文件保证写入安全性
+        temp_path = f"{json_record_path}.tmp"
+        try:
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                json.dump(existing_records, f, ensure_ascii=False, indent=2)
+            
+            # 原子性替换
+            if os.path.exists(json_record_path):
+                os.replace(temp_path, json_record_path)
+            else:
+                os.rename(temp_path, json_record_path)
             logger.info("[#current_stats]✅ JSON记录更新完成")
-        else:
-            logger.error("[#process]❌ JSON记录更新失败")
+            
+        except Exception as e:
+            logger.error(f"[#process]❌ JSON记录更新失败: {e}")
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except:
+                    pass
     
     def convert_yaml_to_json_structure(self) -> None:
         """将现有的YAML文件结构转换为JSON结构"""
