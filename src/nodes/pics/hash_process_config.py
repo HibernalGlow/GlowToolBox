@@ -117,9 +117,7 @@ def process_duplicates(hash_file: str, target_paths: list[str], params: dict = N
             if params.get('exclude-paths'):
                 cmd += " --exclude-paths"
                 cmd += " " + " ".join(f'"{path}"' for path in params['exclude-paths'])
-        
-        
-
+                
             if params.get('remove_duplicates', True):
                 cmd += " --remove-duplicates"
                 
