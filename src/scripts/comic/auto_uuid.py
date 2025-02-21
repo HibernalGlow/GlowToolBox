@@ -27,6 +27,7 @@ from nodes.tui.textual_logger import TextualLoggerManager
 import orjson  # 使用orjson进行更快的JSON处理
 import zipfile
 from typing import Dict, Any, Optional, List
+import mmap
 
 # 定义日志布局配置
 TEXTUAL_LAYOUT = {
@@ -411,42 +412,47 @@ class ArchiveHandler:
 
     @staticmethod
     def add_json_to_archive(archive_path: str, json_path: str, json_name: str) -> bool:
-        """添加JSON文件到压缩包
-        
-        Args:
-            archive_path: 压缩包路径
-            json_path: JSON文件路径
-            json_name: 要保存在压缩包中的文件名
-            
-        Returns:
-            bool: 是否添加成功
-        """
+        """优化后的快速添加方法"""
         try:
-            # 尝试使用zipfile
-            with zipfile.ZipFile(archive_path, 'a') as zf:
-                # 如果存在同名文件，先删除
+            # 使用Bandizip的多线程快速添加模式
+            startupinfo = None
+            if os.name == 'nt':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+            # 使用内存映射减少IO操作
+            with open(json_path, 'rb') as f:
+                mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
                 try:
-                    zf.remove(json_name)
-                except KeyError:
-                    pass
-                zf.write(json_path, json_name)
-                logger.info(f"[#process]添加JSON文件: {json_name}")
-                return True
-        except Exception:
-            # 如果zipfile失败，使用7z
-            try:
-                # 使用7z u命令更新文件
-                subprocess.run(
-                    ['7z', 'u', archive_path, json_path, f"-w{os.path.dirname(json_path)}"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=True
-                )
-                logger.info(f"[#process]添加JSON文件: {json_name}")
-                return True
-            except subprocess.CalledProcessError:
-                logger.error(f"[#process]添加JSON文件失败: {json_name}")
-                return False
+                    # Bandizip命令行参数优化
+                    result = subprocess.run(
+                        [
+                            'bz', 'a',          # 添加命令
+                            archive_path, 
+                            '-aoa',# 目标压缩包
+                            '-',                # 从标准输入读取
+                            '-o' + json_name,   # 指定压缩包内路径
+                            '-y',               # 全部确认
+                            '-x',               # 最大压缩速度
+                            '-t:8',             # 8线程
+                            '-l:fast'           # 快速压缩模式
+                        ],
+                        input=mm.read(),
+                        check=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        startupinfo=startupinfo
+                    )
+                    return True
+                finally:
+                    mm.close()
+                    
+        except subprocess.CalledProcessError as e:
+            logger.error(f"[#process]Bandizip添加失败: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"[#process]非常规错误: {e}")
+            return False
 
     @staticmethod
     def convert_yaml_archive_to_json(archive_path: str) -> Optional[Dict[str, Any]]:
@@ -724,22 +730,8 @@ def load_existing_uuids():
         logger.error(f"[#process]加载UUID记录失败: {e}")
         return set()
 
-def add_uuid_to_file(uuid, timestamp, archive_name, artist_name, relative_path=None):
-    """将生成的 UUID 添加到记录文件中。"""
-    uuid_record_path = r'E:\1BACKUP\ehv\uuid\uuid_records.yaml'
-    os.makedirs(os.path.dirname(uuid_record_path), exist_ok=True)
-    
-    # 读取现有记录
-    records = []
-    if os.path.exists(uuid_record_path):
-        try:
-            with open(uuid_record_path, 'r', encoding='utf-8') as file:
-                records = yaml.safe_load(file) or []
-        except Exception as e:
-            print(f"读取记录文件失败，尝试修复: {e}")
-            records = repair_uuid_records(uuid_record_path) or []
-    
-    # 添加新记录
+def add_uuid_to_file(uuid, timestamp, archive_name, artist_name, relative_path=None, cache=None):
+    """将生成的 UUID 添加到缓存"""
     record = {
         'UUID': uuid,
         'CreatedAt': timestamp,
@@ -749,50 +741,18 @@ def add_uuid_to_file(uuid, timestamp, archive_name, artist_name, relative_path=N
         'LastPath': relative_path or os.path.join(artist_name, archive_name) if artist_name else archive_name
     }
     
-    # 检查是否已存在该UUID的记录
-    for existing_record in records:
-        if existing_record.get('UUID') == uuid:  # 使用get()避免KeyError
-            existing_record.update({
-                'LastModified': timestamp,
-                'ArchiveName': archive_name,
-                'ArtistName': artist_name,
-                'LastPath': relative_path or os.path.join(artist_name, archive_name) if artist_name else archive_name
-            })
-            break
-    else:
-        records.append(record)
-    
-    # 写入记录（使用线程锁确保并发安全）
-    with uuid_lock:
-        try:
-            # 先写入临时文件
-            temp_path = f"{uuid_record_path}.tmp"
-            with open(temp_path, 'w', encoding='utf-8') as file:
-                yaml.dump(records, file, allow_unicode=True, sort_keys=False)
-            
-            # 验证临时文件
-            with open(temp_path, 'r', encoding='utf-8') as file:
-                yaml.safe_load(file)
-            
-            # 创建备份
-            if os.path.exists(uuid_record_path):
-                backup_path = f"{uuid_record_path}.bak"
-                shutil.copy2(uuid_record_path, backup_path)
-            
-            # 替换原文件
-            os.replace(temp_path, uuid_record_path)
-            
-        except Exception as e:
-            print(f"写入UUID记录文件时出错: {e}")
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-
-def generate_uuid(existing_uuids):
-    """生成一个唯一的 16 位 UUID。"""
-    while True:
-        new_uuid = generate(size=16)  # 生成 16 位的 UUID
-        if new_uuid not in existing_uuids:
-            return new_uuid
+    # 使用缓存代替直接写入
+    if cache is not None:
+        cache[uuid] = {
+            "timestamps": {
+                timestamp: {
+                    "archive_name": archive_name,
+                    "artist_name": artist_name,
+                    "relative_path": relative_path
+                }
+            }
+        }
+        return
 
 class PathHandler:
     """路径处理类"""
@@ -1079,9 +1039,11 @@ class ArchiveProcessor:
         self.uuid_directory = uuid_directory
         self.max_workers = max_workers
         self.order = order  # 保存排序方式
+        self.uuid_cache = {}  # 新增UUID缓存
+        self.batch_size = 1000  # 批量更新阈值
     
     def process_archives(self) -> bool:
-        """处理所有压缩文件"""
+        """处理所有压缩文件（SSD优化版）"""
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         os.makedirs(self.uuid_directory, exist_ok=True)
 
@@ -1187,8 +1149,8 @@ class ArchiveProcessor:
         """
         try:
             # 保存原始时间戳
-            original_mtime = os.path.getmtime(archive_path)
-            original_atime = os.path.getatime(archive_path)
+            # original_mtime = os.path.getmtime(archive_path)
+            # original_atime = os.path.getatime(archive_path)
             
             # 获取文件信息
             artist_name = PathHandler.get_artist_name(self.target_directory, archive_path, args.mode if hasattr(args, 'mode') else 'multi')
@@ -1392,6 +1354,19 @@ class ArchiveProcessor:
             logger.error(f"[#process]JSON文件保存失败: {archive_name}")
             
         return False
+
+    def _batch_update_records(self, force=False):
+        """批量更新记录到JSON"""
+        if len(self.uuid_cache) >= self.batch_size or force:
+            json_record_path = r'E:\1BACKUP\ehv\uuid\uuid_records.json'
+            existing_records = JsonHandler.load(json_record_path) or {}
+            
+            # 批量合并记录
+            existing_records.update(self.uuid_cache)
+            
+            if JsonHandler.save(json_record_path, existing_records):
+                logger.info(f"[#process]✅ 批量更新 {len(self.uuid_cache)} 条记录")
+                self.uuid_cache.clear()
 
 def main():
     """主函数"""
