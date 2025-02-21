@@ -274,7 +274,7 @@ def find_min_folder_with_images(base_path: Path, exclude_keywords: List[str]) ->
     查找需要打包的文件夹（最小的只包含图片和忽略文件的子文件夹）
     返回: (文件夹路径, 是否需要特殊处理, 图片数量)
     """
-    # 检查路径是否包含黑名单关键词
+    # 检查路径是否包含黑名单关键词no_blacklist
     if not args.no_blacklist and any(keyword in str(base_path) for keyword in BLACKLIST_KEYWORDS):
         logger.info(f"跳过黑名单路径: {base_path}")
         return None
