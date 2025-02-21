@@ -83,8 +83,16 @@ class SinglePacker:
                 elif os.path.isfile(item_path) and item_path.lower().endswith(SinglePacker.SUPPORTED_IMAGE_EXTENSIONS):
                     images.append(item_path)
             
+            # 计算总任务数
+            total_tasks = len(subdirs) + (1 if images else 0)
+            current_task = 0
+            
             # 处理子文件夹
             for subdir in subdirs:
+                current_task += 1
+                progress = (current_task / total_tasks) * 100
+                logger.info(f"[#cur_stats]总进度: ({current_task}/{total_tasks}) {progress:.1f}%")
+                
                 subdir_name = os.path.basename(subdir)
                 archive_name = f"{subdir_name}.zip"
                 archive_path = os.path.join(directory_path, archive_name)
@@ -95,6 +103,10 @@ class SinglePacker:
             
             # 处理散图文件
             if images:
+                current_task += 1
+                progress = (current_task / total_tasks) * 100
+                logger.info(f"[#cur_stats]总进度: ({current_task}/{total_tasks}) {progress:.1f}%")
+                
                 images_archive_name = f"{base_name}.zip"
                 images_archive_path = os.path.join(directory_path, images_archive_name)
                 
