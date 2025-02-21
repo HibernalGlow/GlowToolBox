@@ -35,10 +35,10 @@ TEXTUAL_LAYOUT = {
 
 config = {
     'script_name': 'upscale_bus',
-    "console_log": False,
+    "console_enabled": False,
 }
 logger, config_info = setup_logger(config)
-TextualLoggerManager.set_layout(TEXTUAL_LAYOUT)
+TextualLoggerManager.set_layout(TEXTUAL_LAYOUT,log_file=config_info['log_file'])
 
 
 def remove_empty_directories(directory):
@@ -247,10 +247,6 @@ def save_check_history(history_file, new_entry):
         logger.info(f"[#process_log]保存检查记录失败: {str(e)}")
 
 def process_corrupted_archives(directory, skip_checked=True, max_workers=4):
-    # 新增：进度统计
-    total = len(files_to_process)
-    processed = 0
-    
     archive_extensions = ('.zip', '.rar', '.7z', '.cbz')
     history_file = os.path.join(directory, 'archive_check_history.json')
     
@@ -280,6 +276,14 @@ def process_corrupted_archives(directory, skip_checked=True, max_workers=4):
                     logger.info(f"[#process_log]跳过已检查且完好的文件: {file_path}")
                     continue
                 files_to_process.append(file_path)
+
+    # 初始化进度统计（移到文件收集之后）
+    total = len(files_to_process)
+    processed = 0
+    
+    if total == 0:
+        logger.info("[#process_log]没有需要处理的文件")
+        return
 
     def process_single_file(file_path):
         nonlocal processed
