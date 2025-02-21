@@ -2,6 +2,7 @@ from nodes.config.import_bundles import *
 
 # 导入日志配置
 from nodes.record.logger_config import setup_logger
+from nodes.archive.partial_extractor import PartialExtractor
 
 config = {
     'script_name': 'comic_img_filter',
@@ -834,260 +835,181 @@ class ArchiveProcessor:
         temp_dir = None
         backup_file_path = None
         new_zip_path = None
+        
         try:
             logger.info(f"[#file_ops]开始处理压缩包: {file_path}")
-
+            
+            # 准备环境
             temp_dir, backup_file_path, new_zip_path = ArchiveExtractor.prepare_archive(file_path)
             if not temp_dir:
                 logger.info(f"[#file_ops]❌ 准备环境失败: {file_path}")
                 return []
-                
-            logger.info(f"[#file_ops]环境准备完成")
-
             
+            # 如果启用了部分解压功能
+            if "range_control" in params:
+                try:
+                    success = PartialExtractor.partial_extract(file_path, temp_dir, params["range_control"])
+                    if not success:
+                        logger.info(f"[#file_ops]❌ 部分解压失败: {file_path}")
+                        return []
+                except Exception as e:
+                    logger.info(f"[#file_ops]❌ 部分解压出错: {str(e)}")
+                    return []
+            else:
+                # 完整解压
+                cmd = ['7z', 'x', file_path, f'-o{temp_dir}', '-y']
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    logger.info(f"[#file_ops]❌ 解压失败: {result.stderr}")
+                    return []
+            
+            logger.info(f"[#file_ops]环境准备完成")
+            
+            # 获取图片文件列表
             image_files = ArchiveExtractor.get_image_files(temp_dir)
             if not image_files:
                 logger.info(f"[#file_ops]⚠️ 未找到图片文件")
                 PathManager.cleanup_temp_files(temp_dir, new_zip_path, backup_file_path)
                 return []
-            else:
-                logger.info(f"[#file_ops]找到图片文件")
-                
             
-            removed_files = set()
-            duplicate_files = set()
-            removal_reasons = {}  # 初始化removal_reasons
-            lock = threading.Lock()
-            existing_file_names = set()
-            image_processor = ImageProcessor()
-            # image_processor.set_global_hashes(global_hashes)  # 设置全局哈希
+            # 处理图片
+            removed_files, duplicate_files, removal_reasons = ArchiveProcessor._process_images(
+                image_files, params, file_path
+            )
             
-            # 添加zip_path到params
-            params['zip_path'] = file_path
+            # 清理和压缩
+            if not ArchiveProcessor.cleanup_and_compress(
+                temp_dir, removed_files, duplicate_files, new_zip_path, params, removal_reasons
+            ):
+                logger.info(f"[#file_ops]❌ 清理和压缩失败: {file_path}")
+                if os.path.exists(backup_file_path):
+                    os.replace(backup_file_path, file_path)
+                return []
             
-            # 在处理图片时显示进度
-            with ThreadPoolExecutor(max_workers=params['max_workers']) as executor:
-                futures = []
-                total_files = len(image_files)
-                logger.info(f"[#file_ops]开始处理图片，总数: {total_files}")
-                processed_files = 0
-                
-                for img_path in image_files:
-                    rel_path = os.path.relpath(img_path, temp_dir)
-                    future = executor.submit(
-                        image_processor.process_single_image, 
-                        img_path, 
-                        rel_path, 
-                        existing_file_names, 
-                        params, 
-                        lock
-                    )
-                    futures.append((future, img_path))
-                    logger.info(f"[#file_ops]提交处理任务: {os.path.basename(img_path)}")
-                    
-                image_hashes = []
-                for future, img_path in futures:
-                    try:
-                        img_hash, img_data, _, reason = future.result()
-                        processed_files += 1
-                        percentage = (processed_files / total_files) * 100
-                        logger.info(f"[@cur_progress]处理进度 ({processed_files}/{total_files}) {percentage:.1f}%")
-                        logger.info(f"[#file_ops]完成处理: {os.path.basename(img_path)}")
-                        
-                        if reason in ['small_image', 'white_image']:
-                            removed_files.add(img_path)
-                            removal_reasons[img_path] = reason
-                            logger.info(f"[#file_ops]标记删除文件: {os.path.basename(img_path)} (原因: {reason})")
-                        elif img_hash is not None and params['remove_duplicates']:
-                            image_hashes.append((img_hash, img_data, img_path, reason))
-                            logger.info(f"[#file_ops]添加到哈希比较列表: {os.path.basename(img_path)}")
-                            
-                    except Exception as e:
-                        logger.info(f"[#file_ops]处理失败: {os.path.basename(img_path)} - {str(e)}")
-                        processed_files += 1
-                        percentage = (processed_files / total_files) * 100
-                        logger.info(f"[@cur_progress]处理进度 ({processed_files}/{total_files}) {percentage:.1f}%")
+            # 处理结果
+            result = ArchiveProcessor._handle_processing_result(
+                file_path, new_zip_path, backup_file_path, removed_files, 
+                duplicate_files, removal_reasons, params
+            )
+            
+            if result:
+                processed_archives.append(result)
+            
+        except Exception as e:
+            logger.info(f"[#file_ops]❌ 处理压缩包时出错: {str(e)}")
+            if backup_file_path and os.path.exists(backup_file_path):
+                os.replace(backup_file_path, file_path)
+            return []
+            
+        finally:
+            PathManager.cleanup_temp_files(temp_dir, new_zip_path, backup_file_path)
+            
+        return processed_archives
 
+    @staticmethod
+    def _process_images(image_files, params, file_path):
+        """处理图片文件"""
+        removed_files = set()
+        duplicate_files = set()
+        removal_reasons = {}
+        
+        # 创建图片处理器
+        image_processor = ImageProcessor()
+        
+        # 处理图片
+        with ThreadPoolExecutor(max_workers=params['max_workers']) as executor:
+            futures = []
+            total_files = len(image_files)
+            logger.info(f"[#file_ops]开始处理图片，总数: {total_files}")
+            
+            for img_path in image_files:
+                rel_path = os.path.relpath(img_path, os.path.dirname(img_path))
+                future = executor.submit(
+                    image_processor.process_single_image,
+                    img_path,
+                    rel_path,
+                    set(),  # existing_file_names
+                    params,
+                    threading.Lock()
+                )
+                futures.append((future, img_path))
+                
+            # 处理结果
+            image_hashes = []
+            for future, img_path in futures:
+                try:
+                    img_hash, img_data, _, reason = future.result()
+                    
+                    if reason in ['small_image', 'white_image']:
+                        removed_files.add(img_path)
+                        removal_reasons[img_path] = reason
+                    elif img_hash is not None and params['remove_duplicates']:
+                        image_hashes.append((img_hash, img_data, img_path, reason))
+                        
+                except Exception as e:
+                    logger.info(f"[#file_ops]处理失败: {os.path.basename(img_path)} - {str(e)}")
+                    
+            # 处理重复图片
             if params['remove_duplicates'] and image_hashes:
-                unique_images, _, dup_removal_reasons = DuplicateDetector.remove_duplicates_in_memory(image_hashes, params)
-                removal_reasons.update(dup_removal_reasons)  # 合并删除原因
+                unique_images, _, dup_removal_reasons = DuplicateDetector.remove_duplicates_in_memory(
+                    image_hashes, params
+                )
+                removal_reasons.update(dup_removal_reasons)
+                
                 processed_files = {img[2] for img in unique_images}
                 for img_hash, _, img_path, _ in image_hashes:
                     if img_path not in processed_files:
                         duplicate_files.add(img_path)
-                        
-                # 处理完成后，将临时哈希更新到全局哈希
-                # if image_processor.temp_hashes:
-                #     with lock:
-                #         global_hashes.update(image_processor.temp_hashes)
-                #         logger.info(f"[#hash_calc]已批量添加 {len(image_processor.temp_hashes)} 个哈希到全局缓存")
-                #         # 清空临时存储
-                #         image_processor.temp_hashes.clear()
+        
+        return removed_files, duplicate_files, removal_reasons
 
-            # 保存更新后的缓存
-            # ImageHashCalculator.save_global_hashes(global_hashes)  # 注释掉原来的全局保存
-            
-            # 为当前压缩包保存哈希文件
-            zip_path = params.get('zip_path')
-            if zip_path:
-                zip_dir = os.path.dirname(zip_path)
-                zip_name = os.path.splitext(os.path.basename(zip_path))[0]                
-                # 构建压缩包特定的哈希字典
-                zip_hashes = {}
-                for img_hash, _, img_path, _ in image_hashes:
-                    if img_hash:
-                        rel_path = os.path.relpath(img_path, temp_dir)
-                        img_uri = PathURIGenerator.generate(f"{zip_path}!{rel_path}")
-                        # 统一哈希值格式：如果是字典则提取hash字段
-                        hash_value = img_hash['hash'] if isinstance(img_hash, dict) else img_hash
-                        zip_hashes[img_uri] = {"hash": hash_value}  # 直接存储为新格式
-                
-                # 保存到collection文件
-                try:
-                    # 确保目录存在
-                    os.makedirs(os.path.dirname(HASH_COLLECTION_FILE), exist_ok=True)
-                    
-                    # 读取现有collection
-                    collection_data = {
-                        "_hash_params": "hash_size=10;hash_version=1",
-                        "dry_run": False,
-                        "hashes": {}
-                    }
-                    
-                    if os.path.exists(HASH_COLLECTION_FILE):
-                        try:
-                            with open(HASH_COLLECTION_FILE, 'r', encoding='utf-8') as f:
-                                file_content = f.read().strip()
-                                if not file_content:  # 文件为空
-                                    logger.info(f"[#hash_calc]Collection文件为空，将创建新文件")
-                                    collection_data = {
-                                        "_hash_params": "hash_size=10;hash_version=1",
-                                        "dry_run": False,
-                                        "hashes": {}
-                                    }
-                                else:
-                                    try:
-                                        loaded_data = json.loads(file_content)
-                                        if not isinstance(loaded_data, dict):
-                                            raise ValueError("JSON数据格式不正确，不是字典格式")
-                                            
-                                        # 保留原有的元数据
-                                        collection_data = {
-                                            "_hash_params": loaded_data.get("_hash_params", "hash_size=10;hash_version=1"),
-                                            "dry_run": loaded_data.get("dry_run", False),
-                                            "hashes": {}
-                                        }
-                                        
-                                        # 处理哈希数据
-                                        if "hashes" in loaded_data and isinstance(loaded_data["hashes"], dict):
-                                            collection_data["hashes"] = loaded_data["hashes"]
-                                        else:
-                                            # 尝试处理旧格式
-                                            for uri, hash_value in loaded_data.items():
-                                                if uri not in ["_hash_params", "dry_run"]:
-                                                    if isinstance(hash_value, str):
-                                                        collection_data["hashes"][uri] = {"hash": hash_value}
-                                                    elif isinstance(hash_value, dict) and "hash" in hash_value:
-                                                        collection_data["hashes"][uri] = hash_value
-                                                        
-                                        logger.info(f"[#hash_calc]成功读取Collection文件，包含 {len(collection_data['hashes'])} 个哈希值")
-                                        
-                                    except json.JSONDecodeError as je:
-                                        # 检查文件内容，输出更详细的错误信息
-                                        logger.error(f"[#hash_calc]JSON解析错误: {str(je)}")
-                                        logger.error(f"[#hash_calc]文件内容预览: {file_content[:200]}...")
-                                        raise  # 重新抛出异常，让外层处理
-                                        
-                        except (json.JSONDecodeError, ValueError) as e:
-                            # 只有在确实是JSON格式错误时才创建备份
-                            error_time = int(time.time())
-                            backup_path = f"{HASH_COLLECTION_FILE}.error_{error_time}"
-                            shutil.copy2(HASH_COLLECTION_FILE, backup_path)
-                            logger.error(f"[#hash_calc]Collection文件格式错误，已备份到: {backup_path}")
-                            logger.error(f"[#hash_calc]错误详情: {str(e)}")
-                            # 创建新的collection数据结构
-                            collection_data = {
-                                "_hash_params": "hash_size=10;hash_version=1",
-                                "dry_run": False,
-                                "hashes": {}
-                            }
-                        except Exception as e:
-                            logger.error(f"[#hash_calc]读取Collection文件时发生未知错误: {str(e)}")
-                            raise  # 对于其他类型的错误，向上抛出
-                    else:
-                        logger.info(f"[#hash_calc]Collection文件不存在，将创建新文件")
-                    
-                    # 更新collection（合并新的哈希值）
-                    collection_data["hashes"].update(zip_hashes)
-                    
-                    # 在写入之前验证数据结构
-                    if not isinstance(collection_data, dict) or "hashes" not in collection_data:
-                        raise ValueError("Collection数据结构无效")
-                    
-                    # 保存更新后的collection
-                    temp_file = f"{HASH_COLLECTION_FILE}.temp"
-                    try:
-                        with open(temp_file, 'w', encoding='utf-8') as f:
-                            json.dump(collection_data, f, ensure_ascii=False, indent=2)
-                        # 如果写入成功，替换原文件
-                        os.replace(temp_file, HASH_COLLECTION_FILE)
-                        logger.info(f"[#hash_calc]已更新 {len(zip_hashes)} 个哈希到collection文件")
-                    except Exception as e:
-                        if os.path.exists(temp_file):
-                            os.remove(temp_file)
-                        raise
-                except Exception as e:
-                    logger.error(f"[#file_ops]保存collection文件失败: {str(e)}")
-                    # 尝试备份损坏的文件
-                    if os.path.exists(HASH_COLLECTION_FILE):
-                        backup_path = HASH_COLLECTION_FILE + '.bak'
-                        try:
-                            shutil.copy2(HASH_COLLECTION_FILE, backup_path)
-                            logger.info(f"[#hash_calc]已备份可能损坏的collection文件到: {backup_path}")
-                        except Exception as backup_error:
-                            logger.error(f"[#hash_calc]备份collection文件失败: {str(backup_error)}")
-            
-            if not ArchiveProcessor.cleanup_and_compress(temp_dir, removed_files, duplicate_files, new_zip_path, params, removal_reasons):
-                logger.info( f"❌ 清理和压缩失败: {file_path}")
-                if os.path.exists(backup_file_path):
-                    os.replace(backup_file_path, file_path)
-                return []
+    @staticmethod
+    def _handle_processing_result(file_path, new_zip_path, backup_file_path, 
+                                removed_files, duplicate_files, removal_reasons, params):
+        """处理处理结果"""
+        try:
             if not os.path.exists(new_zip_path):
-                logger.info( f"❌ 新压缩包不存在: {new_zip_path}")
+                logger.info(f"[#file_ops]❌ 新压缩包不存在: {new_zip_path}")
                 if os.path.exists(backup_file_path):
                     os.replace(backup_file_path, file_path)
-                return []
+                return None
+                
+            # 比较文件大小
             original_size = os.path.getsize(file_path)
             new_size = os.path.getsize(new_zip_path)
-            REDUNDANCY_SIZE = 1 * 1024 * 1024
-            if new_size >= original_size + REDUNDANCY_SIZE:
-                logger.info( f"⚠️ 新压缩包 ({new_size / 1024 / 1024:.2f}MB) 不小于原始文件 ({original_size / 1024 / 1024:.2f}MB)，还原备份")
+            
+            if new_size >= original_size + (1 * 1024 * 1024):  # 1MB冗余
+                logger.info(f"[#file_ops]⚠️ 新压缩包未减小，还原备份")
                 os.remove(new_zip_path)
                 if os.path.exists(backup_file_path):
                     os.replace(backup_file_path, file_path)
-                return []
+                return None
+                
             # 替换原始文件
             os.replace(new_zip_path, file_path)
-            # 让 BackupHandler.handle_bak_file 来处理备份文件，不在这里直接删除
+            
+            # 处理备份文件
             BackupHandler.handle_bak_file(backup_file_path, params)
             
-            result = {
+            # 返回处理结果
+            return {
                 'file_path': file_path,
-                'hash_duplicates_removed': len([f for f in duplicate_files if removal_reasons.get(f) == 'hash_duplicate']),
-                'normal_duplicates_removed': len([f for f in duplicate_files if removal_reasons.get(f) == 'normal_duplicate']),
-                'small_images_removed': len([f for f in removed_files if removal_reasons.get(f) == 'small_image']),
-                'white_images_removed': len([f for f in removed_files if removal_reasons.get(f) == 'white_image']),
+                'hash_duplicates_removed': len([f for f in duplicate_files 
+                                              if removal_reasons.get(f) == 'hash_duplicate']),
+                'normal_duplicates_removed': len([f for f in duplicate_files 
+                                                if removal_reasons.get(f) == 'normal_duplicate']),
+                'small_images_removed': len([f for f in removed_files 
+                                           if removal_reasons.get(f) == 'small_image']),
+                'white_images_removed': len([f for f in removed_files 
+                                           if removal_reasons.get(f) == 'white_image']),
                 'size_reduction_mb': (original_size - new_size) / (1024 * 1024)
             }
-            processed_archives.append(result)
+            
         except Exception as e:
-            logger.info( f"❌ 处理压缩包时出错 {file_path}: {e}")
-            if backup_file_path and os.path.exists(backup_file_path):
+            logger.info(f"[#file_ops]❌ 处理结果时出错: {str(e)}")
+            if os.path.exists(backup_file_path):
                 os.replace(backup_file_path, file_path)
-            return []
-        finally:
-            PathManager.cleanup_temp_files(temp_dir, new_zip_path, backup_file_path)
-        return processed_archives
+            return None
 
     @staticmethod
     def cleanup_and_compress(temp_dir, removed_files, duplicate_files, new_zip_path, params, removal_reasons):
