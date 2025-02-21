@@ -142,45 +142,62 @@ def has_hash_files_in_zip(zip_path):
         return False
 
 def rename_images_in_zip(zip_path):
+    """直接重命名压缩包内的文件，不解压"""
     # 先检查压缩包中是否有需要处理的文件
-    print(f"\n开始检查压缩包: {zip_path}")
     if not has_hash_files_in_zip(zip_path):
-        # print(f"➖ 跳过处理：{zip_path} (未发现需要处理的文件)")
         return
 
-    print(f"✅ 发现需要处理的文件，开始处理压缩包...")
-    # 创建临时目录
-    temp_dir = tempfile.mkdtemp()
-    print(f"📂 创建临时目录: {temp_dir}")
-    
     try:
-        # 使用7z解压到临时目录
-        print("📤 正在解压文件...")
-        result = subprocess.run(['7z', 'x', zip_path, f'-o{temp_dir}', '-y'], capture_output=True, text=True)
-        if result.returncode != 0:
-            print(f"❌ 解压失败: {result.stderr}")
+        # 创建新的压缩包路径
+        original_dir = os.path.dirname(zip_path)
+        file_name = os.path.splitext(os.path.basename(zip_path))[0]
+        timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+        new_zip_path = os.path.join(original_dir, f'{file_name}.new.zip')
+        
+        # 备份原始文件
+        backup_file_path = zip_path + '.bak'
+        if not os.path.exists(backup_file_path):
+            shutil.copy2(zip_path, backup_file_path)
+            print(f"已备份: {backup_file_path}")
+
+        # 使用7z重命名文件
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            with zipfile.ZipFile(new_zip_path, 'w', zipfile.ZIP_DEFLATED) as new_zip:
+                for item in zip_ref.infolist():
+                    # 读取原始文件内容
+                    with zip_ref.open(item.filename) as source:
+                        data = source.read()
+                        
+                    # 处理文件名
+                    new_filename = re.sub(r'\[hash-[0-9a-fA-F]+\]', '', item.filename)
+                    
+                    # 如果文件名没有变化，直接写入
+                    if new_filename == item.filename:
+                        new_zip.writestr(item, data)
+                    else:
+                        # 创建新的ZipInfo对象以保留原始文件属性
+                        new_info = zipfile.ZipInfo(new_filename)
+                        new_info.date_time = item.date_time
+                        new_info.compress_type = item.compress_type
+                        new_info.create_system = item.create_system
+                        new_info.external_attr = item.external_attr
+                        new_zip.writestr(new_info, data)
+                        print(f"重命名: {item.filename} -> {new_filename}")
+
+        # 检查新压缩包大小
+        if os.path.getsize(new_zip_path) > os.path.getsize(zip_path) + 1024*1024:
+            print(f"警告: 新压缩包大小增加超过1MB，还原备份")
+            os.remove(new_zip_path)
             return
-        print("✅ 解压完成")
-        
-        # 处理临时目录中的文件
-        print("🔄 开始重命名文件...")
-        rename_images_in_directory(temp_dir)
-        
-        # 备份原始zip文件
-        print("💾 正在备份原始压缩包...")
-        backup_file(zip_path, zip_path)
-        
-        # 使用7z重新打包
-        print("📥 正在重新打包文件...")
-        result = subprocess.run(['7z', 'a', '-tzip', zip_path, f'{temp_dir}\\*'], capture_output=True, text=True)
-        if result.returncode != 0:
-            print(f"❌ 打包失败: {result.stderr}")
-            return
-        
-        print(f"✅ 压缩包处理完成: {zip_path}")
+
+        # 替换原始文件
+        os.replace(new_zip_path, zip_path)
+        print(f"压缩包处理完成：{zip_path}")
         
     except Exception as e:
-        print(f"❌ 处理过程中出错: {str(e)}")
+        print(f"❌ 处理压缩包时出错: {str(e)}")
+        if os.path.exists(new_zip_path):
+            os.remove(new_zip_path)
     finally:
         # 清理临时目录
         print(f"🧹 清理临时目录: {temp_dir}")
@@ -236,7 +253,7 @@ if __name__ == "__main__":
                     for file in files:
                         if file.lower().endswith('.zip'):
                             zip_path = os.path.join(root, file)
-                            print(f"\n处理压缩包: {zip_path}")
+                            # print(f"\n处理压缩包: {zip_path}")
                             rename_images_in_zip(zip_path)
         elif zipfile.is_zipfile(target_path):
             if args.mode == 'zip':
