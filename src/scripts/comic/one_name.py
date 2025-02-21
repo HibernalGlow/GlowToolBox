@@ -214,6 +214,7 @@ def get_unique_filename(directory, filename, artist_name, is_excluded=False):
         (r'\{\d+w\}', r''),
         (r'\{\d+p\}', r''),
         (r'\{\d+px\}', r''),
+        (r'\(\d+px\)', r''),
         (r'\{\d+de\}', r''),
         (r'\{\d+\.?\d*[kKwW]?@PX\}', r''),  # 匹配如 {1.8k@PX}、{215@PX}
         (r'\{\d+\.?\d*[kKwW]?@WD\}', r''),  # 匹配如 {1800w@WD}、{1.8k@WD}
