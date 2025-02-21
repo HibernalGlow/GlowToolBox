@@ -8,6 +8,7 @@ import pyperclip
 import sys
 import subprocess
 import time  # 添加time模块导入
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
 class InputHandler:
     """输入处理类"""
@@ -89,44 +90,58 @@ def rename_images_in_directory(dir_path):
     processed_count = 0
     skipped_count = 0
     
-    # 遍历目录中的所有文件
-    print(f"\n开始处理目录: {dir_path}")
-    for root, dirs, files in os.walk(dir_path):
-        for filename in files:
-            if filename.lower().endswith(('.jpg', '.png', '.avif', '.jxl', 'webp')):
-                # 匹配文件名中的 [hash-xxxxxx] 模式
-                new_filename = re.sub(r'\[hash-[0-9a-fA-F]+\]', '', filename)
-                
-                # 如果文件名发生了变化
-                if new_filename != filename:
-                    old_path = os.path.join(root, filename)
-                    new_path = os.path.join(root, new_filename)
-                    print(f"\n📝 处理文件: {filename}")
-                    print(f"   新文件名: {new_filename}")
+    # 获取总文件数
+    total_files = sum(1 for root, _, files in os.walk(dir_path) 
+                     for f in files if f.lower().endswith(('.jpg', '.png', '.avif', '.jxl', 'webp')))
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+    ) as progress:
+        task = progress.add_task("处理图片文件...", total=total_files)
+        
+        # 遍历目录中的所有文件
+        for root, dirs, files in os.walk(dir_path):
+            for filename in files:
+                if filename.lower().endswith(('.jpg', '.png', '.avif', '.jxl', 'webp')):
+                    progress.update(task, description=f"处理: {filename}")
                     
-                    # 如果目标文件已存在，先删除它
-                    if os.path.exists(new_path):
+                    # 匹配文件名中的 [hash-xxxxxx] 模式
+                    new_filename = re.sub(r'\[hash-[0-9a-fA-F]+\]', '', filename)
+                    
+                    # 如果文件名发生了变化
+                    if new_filename != filename:
+                        old_path = os.path.join(root, filename)
+                        new_path = os.path.join(root, new_filename)
+                        print(f"\n📝 处理文件: {filename}")
+                        print(f"   新文件名: {new_filename}")
+                        
+                        # 如果目标文件已存在，先删除它
+                        if os.path.exists(new_path):
+                            try:
+                                print(f"⚠️ 目标文件已存在，进行备份...")
+                                backup_file(new_path, new_path)
+                                os.remove(new_path)
+                            except Exception as e:
+                                print(f"❌ 处理已存在的文件失败: {str(e)}")
+                                skipped_count += 1
+                                continue
+                        
                         try:
-                            print(f"⚠️ 目标文件已存在，进行备份...")
-                            backup_file(new_path, new_path)
-                            os.remove(new_path)
+                            # 备份原文件
+                            backup_file(old_path, old_path)
+                            # 直接重命名
+                            os.rename(old_path, new_path)
+                            processed_count += 1
+                            print(f"✅ 重命名成功")
                         except Exception as e:
-                            print(f"❌ 处理已存在的文件失败: {str(e)}")
+                            print(f"❌ 重命名失败: {str(e)}")
                             skipped_count += 1
-                            continue
-                    
-                    try:
-                        # 备份原文件
-                        backup_file(old_path, old_path)
-                        # 直接重命名
-                        os.rename(old_path, new_path)
-                        processed_count += 1
-                        print(f"✅ 重命名成功")
-                    except Exception as e:
-                        print(f"❌ 重命名失败: {str(e)}")
+                    else:
                         skipped_count += 1
-                else:
-                    skipped_count += 1
+                    progress.advance(task)
     
     print(f"\n📊 处理完成:")
     print(f"   - 成功处理: {processed_count} 个文件")
@@ -143,8 +158,6 @@ def has_hash_files_in_zip(zip_path):
         return False
 
 def rename_images_in_zip(zip_path, input_base_path):
-    """直接重命名压缩包内的文件，不解压"""
-    # 先检查压缩包中是否有需要处理的文件
     if not has_hash_files_in_zip(zip_path):
         return
 
