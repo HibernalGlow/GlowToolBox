@@ -706,26 +706,19 @@ def repair_uuid_records(uuid_record_path):
 
 def load_existing_uuids():
     """从JSON记录中加载现有UUID"""
-    logger.info("[#current_stats]🔍 开始加载现有UUID...")
-    start_time = time.time()
-    
-    json_record_path = r'E:\1BACKUP\ehv\uuid\uuid_records.json'
-    if not os.path.exists(json_record_path):
-        return set()
-        
-    try:
-        with open(json_record_path, 'r', encoding='utf-8') as f:
-            records = json.load(f)
-        # 从record键中获取UUID
-        uuids = set(records.get("record", {}).keys())
-        
-        elapsed = time.time() - start_time
-        logger.info(f"[#current_stats]✅ 加载完成！共加载 {len(uuids)} 个UUID，耗时 {elapsed:.2f} 秒")
-        return uuids
-        
-    except Exception as e:
-        logger.error(f"[#process]加载UUID记录失败: {e}")
-        return set()
+    # 仅从当前目录加载UUID
+    uuids = set()
+    for root, _, files in os.walk(os.path.dirname(args.path or r"E:\1EHV")):
+        for file in files:
+            if file.endswith('.json'):
+                try:
+                    with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        if 'uuid' in data:
+                            uuids.add(data['uuid'])
+                except Exception:
+                    continue
+    return uuids
 
 def add_uuid_to_file(uuid, timestamp, archive_name, artist_name, relative_path=None, cache=None):
     """将生成的 UUID 添加到缓存"""
@@ -984,8 +977,6 @@ class ArchiveProcessor:
         self.uuid_directory = uuid_directory
         self.max_workers = max_workers
         self.order = order  # 保存排序方式
-        self.uuid_cache = {}  # 新增UUID缓存
-        self.batch_size = 1000  # 批量更新阈值
         self.total_archives = 0  # 总文件数
         self.processed_archives = 0  # 已处理文件数
     
@@ -1019,8 +1010,6 @@ class ArchiveProcessor:
             
             return True
         finally:
-            # 确保最后强制更新
-            self._batch_update_records(force=True)
             logger.info("[#current_stats]✨ 所有文件处理完成！")
     
     def process_single_archive(self, archive_path: str, timestamp: str) -> bool:
@@ -1643,9 +1632,6 @@ class TaskExecutor:
         init_TextualLogger()
         
         logger.info(f"[#current_stats]当前模式: {'多人模式' if self.args.mode == 'multi' else '单人模式'}")
-        # if self.confirmed_artists:
-        #     logger.info(f"[#current_stats]已确认画师: {', '.join(sorted(self.confirmed_artists))}")
-        #     logger.info(f"[#current_stats]开始下一步")
 
         if self.args.convert:
             self._execute_convert_task()
@@ -1661,8 +1647,6 @@ class TaskExecutor:
             self._execute_auto_sequence()
         elif not self.args.reorganize and not self.args.update_records:
             self._execute_normal_process()
-
-        self._validate_json_records()
 
     def _execute_convert_task(self) -> None:
         """执行YAML转JSON任务"""
@@ -1690,7 +1674,6 @@ class TaskExecutor:
 
     def _execute_normal_process(self) -> None:
         """执行普通处理流程"""
-        # 移除预热调用
         self.archive_processor.process_archives()
 
     def _process_uuid_json(self) -> None:
