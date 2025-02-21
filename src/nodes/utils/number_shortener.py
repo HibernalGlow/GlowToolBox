@@ -27,6 +27,7 @@ def shorten_number_cn(
         >>> shorten_number_cn(3_5000_0000)
         '3.5亿'
     """
+    number=round(number)
     if number < 1000:
         return str(number)
         
@@ -67,9 +68,9 @@ def shorten_number_cn(
 def demo():
     """演示数字缩写功能"""
     test_cases = [
-        (999, "999"),
+        (999.99, "999"),
         (1850, "1.8k"),
-        (21500, "2.1w"),
+        (21500.24566, "2.1w"),
         (3_5000_0000, "3.5亿"),
         (123_4567, "123.5w"),
         (9999, "9999"),

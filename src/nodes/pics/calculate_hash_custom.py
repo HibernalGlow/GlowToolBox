@@ -850,5 +850,5 @@ if __name__ == "__main__":
             console.print(f"| {idx:2d} | {name} | {score:.2f} |")
             
     # 执行测试
-    # test_image_clarity()
+    test_image_clarity()
 
