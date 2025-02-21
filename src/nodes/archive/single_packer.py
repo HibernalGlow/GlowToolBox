@@ -4,6 +4,13 @@ import shutil
 import tempfile
 import subprocess
 from pathlib import Path
+from nodes.record import logger_config
+config = {
+    'script_name': 'single_packer',
+}
+logger, config_info = setup_logger(config)
+
+
 
 class SinglePacker:
     """单层目录打包工具
