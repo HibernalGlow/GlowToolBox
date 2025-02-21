@@ -630,6 +630,7 @@ def process_file_with_count(file_path: str) -> Tuple[str, str, int, float]:
                         img_data = f.read()
                         scores.append(ImageClarityEvaluator.calculate_definition(img_data))
                 clarity_score = sum(scores) / len(scores) if scores else 0.0
+                
     except Exception as e:
         logger.error("[#error_log] 清晰度计算失败 %s: %s", file_path, str(e))
     
@@ -642,6 +643,8 @@ def process_file_with_count(file_path: str) -> Tuple[str, str, int, float]:
         name = f"{name}{{{width_str}@WD}}"
     if clarity_score > 0:
         # 清晰度使用整数百分比格式
+        clarity_score=int(clarity_score)
+        width_str = shorten_number_cn(clarity_score, use_w=False)
         name = f"{name}{{{clarity_score}@DE}}"
     
     new_name = f"{name}{ext}"
