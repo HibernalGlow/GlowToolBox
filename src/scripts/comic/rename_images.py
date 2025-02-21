@@ -197,20 +197,6 @@ def rename_images_in_zip(zip_path, input_base_path):
         print(f"❌ 处理压缩包时出错: {str(e)}")
         if new_zip_path and os.path.exists(new_zip_path):
             os.remove(new_zip_path)
-    finally:
-        # 清理临时目录
-        print(f"🧹 清理临时目录: {temp_dir}")
-        shutil.rmtree(temp_dir)
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as new_zip:
-            # 将处理后的文件添加到zip中
-            for root, dirs, files in os.walk(temp_dir):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    arcname = os.path.relpath(file_path, temp_dir)
-                    new_zip.write(file_path, arcname)
-        
-        print(f"压缩包处理完成：{zip_path}")
-        
 if __name__ == "__main__":
     # 获取输入路径
     args = InputHandler.parse_arguments()
