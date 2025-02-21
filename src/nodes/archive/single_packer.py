@@ -4,9 +4,36 @@ import shutil
 import tempfile
 import subprocess
 from pathlib import Path
-from nodes.record import logger_config
+from nodes.record.logger_config import setup_logger
+from nodes.tui.textual_logger import TextualLoggerManager
+
+# 配置日志面板布局
+TEXTUAL_LAYOUT = {
+    "cur_stats": {
+        "ratio": 2,
+        "title": "📊 总体进度",
+        "style": "lightyellow"
+    },
+    "cur_progress": {
+        "ratio": 2,
+        "title": "🔄 当前进度",
+        "style": "lightcyan"
+    },
+    "file_ops": {
+        "ratio": 3,
+        "title": "📂 文件操作",
+        "style": "lightpink"
+    },
+    "process": {
+        "ratio": 3,
+        "title": "📝 处理日志",
+        "style": "lightblue"
+    }
+}
+
 config = {
     'script_name': 'single_packer',
+    'console_enabled': False
 }
 logger, config_info = setup_logger(config)
 
@@ -41,7 +68,8 @@ class SinglePacker:
                 return
                 
             base_name = os.path.basename(directory_path)
-            logger.info(f"开始处理目录: {directory_path}")
+            logger.info(f"[#process]🔄 开始处理目录: {directory_path}"
+            )
             
             # 获取一级目录内容
             items = os.listdir(directory_path)
@@ -61,7 +89,7 @@ class SinglePacker:
                 archive_name = f"{subdir_name}.zip"
                 archive_path = os.path.join(directory_path, archive_name)
                 
-                logger.info(f"打包子文件夹: {subdir_name}")
+                logger.info(f"[#cur_progress]🔄 打包子文件夹: {subdir_name}")
                 if SinglePacker._create_archive(subdir, archive_path):
                     SinglePacker._cleanup_source(subdir)
             
@@ -75,13 +103,13 @@ class SinglePacker:
                     for image in images:
                         shutil.copy2(image, temp_dir)
                     
-                    logger.info(f"打包散图文件: {len(images)}个文件")
+                    logger.info(f"[#cur_progress]🔄 打包散图文件: {len(images)}个文件")
                     if SinglePacker._create_archive(temp_dir, images_archive_path):
                         # 删除原始图片文件
                         for image in images:
                             SinglePacker._cleanup_source(image)
             
-            logger.info("✅ 打包完成")
+            logger.info("[#process]✅ 打包完成")
             
         except Exception as e:
             logger.error(f"❌ 处理过程中出现错误: {str(e)}")
@@ -102,10 +130,10 @@ class SinglePacker:
                 logger.error(f"❌ 创建压缩包失败: {archive_path}\n{result.stderr}")
                 return False
             else:
-                logger.info(f"✅ 创建压缩包成功: {os.path.basename(archive_path)}")
+                logger.info(f"[#file_ops]✅ 创建压缩包成功: {os.path.basename(archive_path)}")
                 
                 # 验证压缩包完整性
-                logger.info(f"正在验证压缩包完整性: {os.path.basename(archive_path)}")
+                logger.info(f"[#file_ops]🔄 正在验证压缩包完整性: {os.path.basename(archive_path)}")
                 test_cmd = ['7z', 't', archive_path]
                 test_result = subprocess.run(test_cmd, capture_output=True, text=True)
                 
@@ -113,7 +141,7 @@ class SinglePacker:
                     logger.error(f"❌ 压缩包验证失败: {archive_path}\n{test_result.stderr}")
                     return False
                 else:
-                    logger.info(f"✅ 压缩包验证成功: {os.path.basename(archive_path)}")
+                    logger.info(f"[#file_ops]✅ 压缩包验证成功: {os.path.basename(archive_path)}")
                     return True
                 
         except Exception as e:
@@ -130,10 +158,10 @@ class SinglePacker:
         try:
             if os.path.isdir(source_path):
                 shutil.rmtree(source_path)
-                logger.info(f"✅ 已删除源文件夹: {os.path.basename(source_path)}")
+                logger.info(f"[#file_ops]✅ 已删除源文件夹: {os.path.basename(source_path)}")
             elif os.path.isfile(source_path):
                 os.remove(source_path)
-                logger.info(f"✅ 已删除源文件: {os.path.basename(source_path)}")
+                logger.info(f"[#file_ops]✅ 已删除源文件: {os.path.basename(source_path)}")
         except Exception as e:
             logger.error(f"❌ 清理源文件时出现错误: {str(e)}")
             
