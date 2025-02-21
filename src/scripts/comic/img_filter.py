@@ -1938,7 +1938,7 @@ class InputHandler:
         # 添加排除路径参数
         parser.add_argument('--exclude-paths', '-ep',
                           nargs='*',
-                          default=[],
+                          default=["画集", "cg", "动画", "图集"],
                           help='要排除的路径关键词列表')
         feature_group = parser.add_argument_group('功能开关')
         feature_group.add_argument('--remove-small', '-rs', action='store_true', help='启用小图过滤')
