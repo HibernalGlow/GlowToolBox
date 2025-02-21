@@ -10,7 +10,7 @@ config = {
 logger, config_info = setup_logger(config)
 # 初始化 TextualLoggerManager
 HAS_TUI = True
-USE_DEBUGGER = True
+USE_DEBUGGER = False
 
 TEXTUAL_LAYOUT = {
     "cur_stats": {

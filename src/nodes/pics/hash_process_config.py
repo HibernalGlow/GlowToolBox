@@ -114,6 +114,12 @@ def process_duplicates(hash_file: str, target_paths: list[str], params: dict = N
         
         # 添加参数
         if params:
+            if params.get('exclude-paths'):
+                cmd += " --exclude-paths"
+                cmd += " " + " ".join(f'"{path}"' for path in params['exclude-paths'])
+        
+        
+
             if params.get('remove_duplicates', True):
                 cmd += " --remove-duplicates"
                 
@@ -123,7 +129,8 @@ def process_duplicates(hash_file: str, target_paths: list[str], params: dict = N
             if params.get('self_redup', False):
                 cmd += " --self-redup"
                 cmd += f" --hamming_distance {params['hamming_distance']}"
-        
+                
+            # 修改 exclude-paths 参数传递方式
         for path in target_paths:
             cmd += f' "{path}"'
             
@@ -146,4 +153,4 @@ def process_duplicates(hash_file: str, target_paths: list[str], params: dict = N
     except subprocess.TimeoutExpired:
         logging.info("[#process_log]❌ 去重复处理超时（1小时）")
     except Exception as e:
-        logging.info(f"[#process_log]❌ 处理重复文件时出错: {e}") 
+        logging.info(f"[#process_log]❌ 处理重复文件时出错: {e}")

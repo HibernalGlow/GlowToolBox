@@ -31,6 +31,7 @@ DEFAULT_PARAMS = {
     'hash_size': 10,  # 哈希值大小
     'filter_white_enabled': False,  # 是否启用白图过滤
     'recruit_folder': r'E:\1EHV\[01杂]\zzz去图',  # 画师文件夹
+    'exclude-paths': ['画集', 'cg', '动画', '图集'],  # 已经存在，无需修改
 }
 
 # TextualLogger布局配置
