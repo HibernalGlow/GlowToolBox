@@ -434,7 +434,7 @@ class ArchiveHandler:
                             '-o' + json_name,   # 指定压缩包内路径
                             '-y',               # 全部确认
                             '-x',               # 最大压缩速度
-                            '-t:8',             # 8线程
+                            '-t:16',             # 8线程
                             '-l:fast'           # 快速压缩模式
                         ],
                         input=mm.read(),
@@ -720,7 +720,8 @@ def load_existing_uuids():
     try:
         with open(json_record_path, 'r', encoding='utf-8') as f:
             records = json.load(f)
-        uuids = set(records.keys())
+        # 从record键中获取UUID
+        uuids = set(records.get("record", {}).keys())
         
         elapsed = time.time() - start_time
         logger.info(f"[#current_stats]✅ 加载完成！共加载 {len(uuids)} 个UUID，耗时 {elapsed:.2f} 秒")
@@ -880,7 +881,11 @@ class UuidHandler:
             with open(json_record_path, 'r', encoding='utf-8') as f:
                 records = json.load(f)
             # 从record键获取数据
-            return set(records.get("record", {}).keys())
+            uuids = set(records.get("record", {}).keys())
+            
+            elapsed = time.time() - start_time
+            logger.info(f"[#current_stats]✅ 加载完成！共加载 {len(uuids)} 个UUID，耗时 {elapsed:.2f} 秒")
+            return uuids
             
         except Exception as e:
             logger.error(f"[#process]加载UUID记录失败: {e}")
