@@ -275,7 +275,7 @@ def find_min_folder_with_images(base_path: Path, exclude_keywords: List[str]) ->
     返回: (文件夹路径, 是否需要特殊处理, 图片数量)
     """
     # 检查路径是否包含黑名单关键词
-    if any(keyword in str(base_path) for keyword in BLACKLIST_KEYWORDS):
+    if not args.no_blacklist and any(keyword in str(base_path) for keyword in BLACKLIST_KEYWORDS):
         logger.info(f"跳过黑名单路径: {base_path}")
         return None
         
@@ -1224,13 +1224,8 @@ def main():
         parser.add_argument('--process-scattered', action='store_true', help='处理散图')
         parser.add_argument('--all', action='store_true', help='执行所有操作')
         parser.add_argument('--path', type=str, help='指定处理路径')
-        
-        try:
-            args = parser.parse_args()
-            run_with_args(args)
-        except Exception as e:
-            logger.info(f"[#process]❌ 处理命令行参数时出错: {str(e)}")
-            return
+        parser.add_argument('--no-blacklist', action='store_true', help='禁用黑名单过滤')
+
     else:
         # 没有命令行参数时启动TUI界面
         # 定义复选框选项

@@ -1685,7 +1685,7 @@ class TaskExecutor:
 
     def _run_auto_filename_script(self) -> None:
         """运行自动文件名脚本"""
-        auto_filename_script = os.path.join(os.path.dirname(__file__), '011-自动唯一文件名.py')
+        auto_filename_script = os.path.join(os.path.dirname(__file__), 'one_name.py')
         if not os.path.exists(auto_filename_script):
             logger.error(f"[#process]找不到自动文件名脚本: {auto_filename_script}")
             return
