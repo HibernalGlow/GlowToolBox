@@ -976,59 +976,6 @@ class YamlHandler:
             logger.error(f"修复YAML文件时出错 {yaml_path}: {e}")
             return []
 
-class FileSystemHandler:
-    """文件系统操作类"""
-    
-    @staticmethod
-    def warm_up_cache(target_directory: str, max_workers: int = 32) -> None:
-        """并行预热系统缓存"""
-        logger.info("[#current_stats]🔄 开始预热系统缓存")
-        
-        # 首先计算总文件数
-        total_files = 0
-        for root, _, files in os.walk(target_directory):
-            total_files += sum(1 for file in files if file.endswith(('.zip', '.rar', '.7z')))
-        
-        logger.info("[#current_progress]扫描文件中...")
-        archive_files = []
-        current_count = 0
-        for root, _, files in os.walk(target_directory):
-            for file in files:
-                if file.endswith(('.zip', '.rar', '.7z')):
-                    archive_files.append(os.path.join(root, file))
-                    current_count += 1
-                    logger.info(f"[@current_progress]已扫描 {current_count}/{total_files} 个文件 ({(current_count/total_files*100):.1f}%)")
-        
-        logger.info(f"[#current_stats]📊 找到 {total_files} 个文件待预热")
-        
-        def read_file_header_with_progress(file_path):
-            try:
-                handle = win32file.CreateFile(
-                    file_path,
-                    win32con.GENERIC_READ,
-                    win32con.FILE_SHARE_READ | win32con.FILE_SHARE_WRITE,
-                    None,
-                    win32con.OPEN_EXISTING,
-                    win32con.FILE_FLAG_SEQUENTIAL_SCAN,
-                    None
-                )
-                try:
-                    win32file.ReadFile(handle, 32)
-                finally:
-                    handle.Close()
-                logger.info(f"[#process]✅ 已预热: {os.path.basename(file_path)}")
-            except Exception as e:
-                logger.error(f"[#process]预热失败: {os.path.basename(file_path)} - {str(e)}")
-
-        with ThreadPoolExecutor(max_workers=128) as executor:
-            futures = [executor.submit(read_file_header_with_progress, file) for file in archive_files]
-            completed = 0
-            for future in as_completed(futures):
-                completed += 1
-                logger.info(f"[@current_progress]预热进度 {completed}/{total_files} ({(completed/total_files*100):.1f}%)")
-        
-        logger.info("[#current_stats]✨ 缓存预热完成")
-
 class ArchiveProcessor:
     """压缩文件处理类"""
     
@@ -1696,16 +1643,13 @@ class TaskExecutor:
 
     def _execute_normal_process(self) -> None:
         """执行普通处理流程"""
-        if self.args.mode == 'multi':
-            FileSystemHandler.warm_up_cache(self.target_directory, self.max_workers)
+        # 移除预热调用
         self.archive_processor.process_archives()
 
     def _process_uuid_json(self) -> None:
         """处理UUID-JSON相关任务"""
-        if self.args.mode == 'multi':
-            FileSystemHandler.warm_up_cache(self.target_directory, self.max_workers)
+        # 移除预热调用
         skip_limit_reached = self.archive_processor.process_archives()
-        
         if skip_limit_reached:
             logger.info("[#current_stats]⏩ 由于连续跳过次数达到限制，提前进入下一阶段")
 
