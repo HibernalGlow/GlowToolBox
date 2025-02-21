@@ -81,7 +81,92 @@ class PathManager:
         os.makedirs(temp_dir, exist_ok=True)
         logging.info( f'创建临时目录: {temp_dir}')
         return temp_dir
+    @staticmethod
+    def rename_file_in_filesystem(file_path, new_name):
+        """
+        重命名文件系统中的普通文件
+        
+        Args:
+            file_path (str): 源文件路径
+            new_name (str): 新的文件名（不包含路径，仅文件名部分）
+        
+        Returns:
+            str: 重命名后的文件路径
+            
+        Raises:
+            FileNotFoundError: 当源文件不存在时
+            OSError: 当重命名操作失败时
+        """
+        try:
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"源文件不存在: {file_path}")
+            
+            # 获取文件所在目录和扩展名
+            dir_path = os.path.dirname(file_path)
+            _, ext = os.path.splitext(file_path)
+            
+            # 构建新的文件路径
+            new_file_path = os.path.join(dir_path, f"{new_name}{ext}")
+            
+            # 如果目标文件已存在，添加数字后缀
+            counter = 1
+            while os.path.exists(new_file_path):
+                new_file_path = os.path.join(dir_path, f"{new_name}_{counter}{ext}")
+                counter += 1
+            
+            # 执行重命名操作
+            os.rename(file_path, new_file_path)
+            logging.info(f"[#file_ops]已重命名文件: {file_path} -> {new_file_path}")
+            
+            return new_file_path
+            
+        except FileNotFoundError as e:
+            logging.error(f"[#file_ops]文件不存在: {file_path}")
+            raise e
+        except OSError as e:
+            logging.error(f"[#file_ops]重命名文件失败: {file_path} -> {new_name}, 错误: {str(e)}")
+            raise e
+        except Exception as e:
+            logging.error(f"[#file_ops]重命名文件时发生未知错误: {str(e)}")
+            raise e
 
+    @staticmethod
+    def rename_file_in_archive(file_path, new_name):
+        """
+        重命名压缩包内的文件
+        
+        Args:
+            file_path (str): 压缩包内的文件路径
+            new_name (str): 新的文件名（不包含路径，仅文件名部分）
+        
+        Returns:
+            str: 重命名后的文件路径
+            
+        Raises:
+            FileNotFoundError: 当源文件不存在时
+            OSError: 当重命名操作失败时
+        """
+        try:
+            # 获取文件所在目录和扩展名
+            dir_path = os.path.dirname(file_path)
+            _, ext = os.path.splitext(file_path)
+            
+            # 构建新的文件路径
+            new_file_path = os.path.join(dir_path, f"{new_name}{ext}")
+            
+            # 如果目标文件已存在，添加数字后缀
+            counter = 1
+            while os.path.exists(new_file_path):
+                new_file_path = os.path.join(dir_path, f"{new_name}_{counter}{ext}")
+                counter += 1
+            
+            # 返回新的文件路径，实际的重命名操作由压缩包处理器执行
+            logging.info(f"[#file_ops]压缩包内文件重命名路径: {file_path} -> {new_file_path}")
+            return new_file_path
+            
+        except Exception as e:
+            logging.error(f"[#file_ops]压缩包内文件重命名路径生成失败: {str(e)}")
+            raise e
     @staticmethod
     def cleanup_temp_files(temp_dir, new_zip_path, backup_file_path):
         """清理临时文件和目录，但不处理备份文件"""
