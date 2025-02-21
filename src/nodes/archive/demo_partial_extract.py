@@ -72,8 +72,12 @@ def main():
                       help='使用手动模式（需要指定压缩包路径和范围配置）')
     parser.add_argument('--test_files', type=int, default=20,
                       help='自动化测试生成的文件数量（默认：20）')
-    parser.add_argument('--test_mode', choices=['index','selection','step'], default='index',
-                      help='自动化测试模式（默认：index）')
+    parser.add_argument('--test_mode', choices=['index','selection','step','slice'], default='slice',
+                      help='自动化测试模式（默认：slice）')
+    parser.add_argument('--slice_type', choices=['head','tail'], default='head',
+                      help='切片类型：head=前N张，tail=后N张（默认：head）')
+    parser.add_argument('--slice_count', type=int, default=5,
+                      help='切片数量（默认：5）')
     
     # 手动模式参数
     parser.add_argument('--archive_path', help='压缩包路径（支持ZIP/7Z格式）')
@@ -99,7 +103,32 @@ def main():
                 print(f"{i}: {name}")
             
             # 根据测试模式生成范围配置
-            if args.test_mode == 'index':
+            if args.test_mode == 'slice':
+                count = min(args.slice_count, args.test_files)
+                if args.slice_type == 'head':
+                    # 提取前N张
+                    range_config = {
+                        'ranges': [(0, count - 1)],
+                        'combine': 'union'
+                    }
+                    print(f"\n提取前{count}张图片")
+                else:
+                    # 提取后N张
+                    range_config = {
+                        'ranges': [(args.test_files - count, args.test_files - 1)],
+                        'combine': 'union'
+                    }
+                    print(f"\n提取后{count}张图片")
+                
+                print("预期选择的文件:")
+                if args.slice_type == 'head':
+                    for i in range(count):
+                        print(f"{i}: {file_names[i]}")
+                else:
+                    for i in range(args.test_files - count, args.test_files):
+                        print(f"{i}: {file_names[i]}")
+            
+            elif args.test_mode == 'index':
                 start = random.randint(0, min(5, args.test_files-1))
                 end = random.randint(start+5, args.test_files-1)
                 range_config = {
@@ -158,7 +187,12 @@ def main():
             
             # 计算预期的文件列表
             expected_files = []
-            if args.test_mode == 'index':
+            if args.test_mode == 'slice':
+                if args.slice_type == 'head':
+                    expected_files = file_names[:args.slice_count]
+                else:
+                    expected_files = file_names[-args.slice_count:]
+            elif args.test_mode == 'index':
                 expected_files = file_names[range_config['ranges'][0][0]:range_config['ranges'][0][1] + 1]
             elif args.test_mode == 'selection':
                 indices = [r[0] for r in range_config['ranges']]
