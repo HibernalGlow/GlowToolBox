@@ -311,8 +311,13 @@ def find_min_folder_with_images(base_path: Path, exclude_keywords: List[str]) ->
     # 检查文件类型
     image_files = [f for f in files if f.suffix.lower() in IMAGE_EXTENSIONS]
     unwanted_files = [f for f in files if f.suffix.lower() in UNWANTED_EXTENSIONS]
-    other_files = [f for f in files if f not in image_files and f not in unwanted_files]
+    zip_files = [f for f in files if f.suffix.lower() == '.zip']
+    other_files = [f for f in files if f not in image_files and f not in unwanted_files and f not in zip_files]
     
+    # 如果当前文件夹包含zip文件，跳过处理
+    if zip_files:
+        return None
+        
     # 如果当前文件夹只包含图片和忽略文件，且没有其他文件
     if image_files and not other_files:
         # 如果有子文件夹，递归检查子文件夹
