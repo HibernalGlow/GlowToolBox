@@ -85,10 +85,14 @@ def backup_file(file_path, original_path):
         print(f"备份失败 {original_path}: {e}")
 
 def rename_images_in_directory(dir_path):
+    processed_count = 0
+    skipped_count = 0
+    
     # 遍历目录中的所有文件
+    print(f"\n开始处理目录: {dir_path}")
     for root, dirs, files in os.walk(dir_path):
         for filename in files:
-            if filename.lower().endswith(('.jpg', '.png', '.avif', '.jxl','webp')):
+            if filename.lower().endswith(('.jpg', '.png', '.avif', '.jxl', 'webp')):
                 # 匹配文件名中的 [hash-xxxxxx] 模式
                 new_filename = re.sub(r'\[hash-[0-9a-fA-F]+\]', '', filename)
                 
@@ -96,22 +100,36 @@ def rename_images_in_directory(dir_path):
                 if new_filename != filename:
                     old_path = os.path.join(root, filename)
                     new_path = os.path.join(root, new_filename)
+                    print(f"\n📝 处理文件: {filename}")
+                    print(f"   新文件名: {new_filename}")
                     
                     # 如果目标文件已存在，先删除它
                     if os.path.exists(new_path):
                         try:
-                            # 备份已存在的文件
+                            print(f"⚠️ 目标文件已存在，进行备份...")
                             backup_file(new_path, new_path)
-                            # 删除已存在的文件
                             os.remove(new_path)
                         except Exception as e:
-                            print(f"处理已存在的文件失败 {new_path}: {e}")
+                            print(f"❌ 处理已存在的文件失败: {str(e)}")
+                            skipped_count += 1
                             continue
                     
-                    # 备份原文件
-                    backup_file(old_path, old_path)
-                    # 直接重命名
-                    os.rename(old_path, new_path)
+                    try:
+                        # 备份原文件
+                        backup_file(old_path, old_path)
+                        # 直接重命名
+                        os.rename(old_path, new_path)
+                        processed_count += 1
+                        print(f"✅ 重命名成功")
+                    except Exception as e:
+                        print(f"❌ 重命名失败: {str(e)}")
+                        skipped_count += 1
+                else:
+                    skipped_count += 1
+    
+    print(f"\n📊 处理完成:")
+    print(f"   - 成功处理: {processed_count} 个文件")
+    print(f"   - 跳过处理: {skipped_count} 个文件")
 def has_hash_files_in_zip(zip_path):
     """使用7z检查压缩包中是否有包含[hash-]的文件"""
     try:
@@ -125,30 +143,47 @@ def has_hash_files_in_zip(zip_path):
 
 def rename_images_in_zip(zip_path):
     # 先检查压缩包中是否有需要处理的文件
+    print(f"\n开始检查压缩包: {zip_path}")
     if not has_hash_files_in_zip(zip_path):
-        print(f"跳过处理：{zip_path} (没有需要处理的文件)")
+        # print(f"➖ 跳过处理：{zip_path} (未发现需要处理的文件)")
         return
 
+    print(f"✅ 发现需要处理的文件，开始处理压缩包...")
     # 创建临时目录
     temp_dir = tempfile.mkdtemp()
+    print(f"📂 创建临时目录: {temp_dir}")
     
     try:
         # 使用7z解压到临时目录
-        subprocess.run(['7z', 'x', zip_path, f'-o{temp_dir}', '-y'], capture_output=True)
+        print("📤 正在解压文件...")
+        result = subprocess.run(['7z', 'x', zip_path, f'-o{temp_dir}', '-y'], capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"❌ 解压失败: {result.stderr}")
+            return
+        print("✅ 解压完成")
         
         # 处理临时目录中的文件
+        print("🔄 开始重命名文件...")
         rename_images_in_directory(temp_dir)
         
         # 备份原始zip文件
+        print("💾 正在备份原始压缩包...")
         backup_file(zip_path, zip_path)
         
         # 使用7z重新打包
-        subprocess.run(['7z', 'a', '-tzip', zip_path, f'{temp_dir}\\*'], capture_output=True)
+        print("📥 正在重新打包文件...")
+        result = subprocess.run(['7z', 'a', '-tzip', zip_path, f'{temp_dir}\\*'], capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"❌ 打包失败: {result.stderr}")
+            return
         
-        print(f"压缩包处理完成：{zip_path}")
+        print(f"✅ 压缩包处理完成: {zip_path}")
         
+    except Exception as e:
+        print(f"❌ 处理过程中出错: {str(e)}")
     finally:
         # 清理临时目录
+        print(f"🧹 清理临时目录: {temp_dir}")
         shutil.rmtree(temp_dir)
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as new_zip:
             # 将处理后的文件添加到zip中
@@ -160,10 +195,6 @@ def rename_images_in_zip(zip_path):
         
         print(f"压缩包处理完成：{zip_path}")
         
-    finally:
-        # 清理临时目录
-        shutil.rmtree(temp_dir)
-
 if __name__ == "__main__":
     # 获取输入路径
     args = InputHandler.parse_arguments()
