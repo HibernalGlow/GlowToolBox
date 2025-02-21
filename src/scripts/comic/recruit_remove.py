@@ -5,7 +5,7 @@ import hashlib
 import argparse
 import subprocess
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import logging
 from datetime import datetime
 # 添加TextualLogger导入
@@ -14,6 +14,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from nodes.tui.textual_logger import TextualLoggerManager
 from nodes.pics.hash_process_config import get_latest_hash_file_path, process_artist_folder, process_duplicates
 from nodes.record.logger_config import setup_logger
+from nodes.archive.partial_extractor import PartialExtractor
 
 # 在全局配置部分添加以下内容
 # ================= 日志配置 =================
@@ -31,6 +32,13 @@ DEFAULT_PARAMS = {
     'hash_size': 10,  # 哈希值大小
     'filter_white_enabled': False,  # 是否启用白图过滤
     'recruit_folder': r'E:\1EHV\[01杂]\zzz去图',  # 画师文件夹
+    'range_control': {  # 新增范围控制参数
+        "ranges": [
+            (3, None),     # 前3张
+            (None, 5),     # 后5张
+        ],
+        "combine": "union"  # 使用并集模式
+    }
 }
 
 # TextualLogger布局配置
@@ -98,8 +106,29 @@ def process_single_path(path: Path, workers: int = 4, force_update: bool = False
         logging.info(f"[#process_log]❌ 处理路径时出错: {path}: {e}")
         return False
 
+def parse_args() -> argparse.Namespace:
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(description='处理重复图片')
+    parser.add_argument('--front', type=int, default=3, help='处理前N张图片')
+    parser.add_argument('--back', type=int, default=5, help='处理后N张图片')
+    parser.add_argument('--combine', choices=['union', 'intersection'], default='union',
+                      help='范围组合方式：union(并集)或intersection(交集)')
+    return parser.parse_args()
+
 def main():
     """主函数"""
+    # 解析命令行参数
+    args = parse_args()
+    
+    # 更新范围控制参数
+    DEFAULT_PARAMS['range_control'] = {
+        "ranges": [
+            (args.front, None),  # 前N张
+            (None, args.back),   # 后N张
+        ],
+        "combine": args.combine
+    }
+    
     # 获取路径列表
     print("请输入要处理的路径（每行一个，输入空行结束）:")
     paths = []
@@ -112,7 +141,7 @@ def main():
         print("[#process_log]❌ 未输入任何路径")
         return
         
-    print("[#process_log]\n🚀 开始处理...")
+    print(f"[#process_log]\n🚀 开始处理... (前{args.front}张, 后{args.back}张, 模式: {args.combine})")
     
     # 准备参数
     params = DEFAULT_PARAMS.copy()

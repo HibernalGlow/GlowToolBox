@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 import dotenv
+import sys
 
 dotenv.load_dotenv()
 # 常量配置
@@ -129,11 +130,11 @@ def process_duplicates(hash_file: str, target_paths: list[str], params: dict = N
             
         logging.info(f"[#process_log]执行去重复命令: {cmd}")
         
-        # 执行命令
+        # 执行命令，传递完整的参数字典
         process = subprocess.run(
-            cmd,
-            check=False,  # 不要在失败时抛出异常
-            shell=True,
+            [sys.executable, DEDUP_SCRIPT] + cmd.split()[2:],  # 分割命令并保留参数
+            check=False,
+            env={**os.environ, 'PYTHONPATH': os.pathsep.join(sys.path)},
             timeout=3600  # 1小时超时
         )
         
