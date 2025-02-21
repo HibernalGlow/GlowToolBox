@@ -2,7 +2,6 @@ from nodes.config.import_bundles import *
 
 # 导入日志配置
 from nodes.record.logger_config import setup_logger
-from nodes.archive.partial_extractor import PartialExtractor
 
 config = {
     'script_name': 'comic_img_filter',
@@ -845,23 +844,12 @@ class ArchiveProcessor:
                 logger.info(f"[#file_ops]❌ 准备环境失败: {file_path}")
                 return []
             
-            # 如果启用了部分解压功能
-            if "range_control" in params:
-                try:
-                    success = PartialExtractor.partial_extract(file_path, temp_dir, params["range_control"])
-                    if not success:
-                        logger.info(f"[#file_ops]❌ 部分解压失败: {file_path}")
-                        return []
-                except Exception as e:
-                    logger.info(f"[#file_ops]❌ 部分解压出错: {str(e)}")
-                    return []
-            else:
-                # 完整解压
-                cmd = ['7z', 'x', file_path, f'-o{temp_dir}', '-y']
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                if result.returncode != 0:
-                    logger.info(f"[#file_ops]❌ 解压失败: {result.stderr}")
-                    return []
+            # 完整解压
+            cmd = ['7z', 'x', file_path, f'-o{temp_dir}', '-y']
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                logger.info(f"[#file_ops]❌ 解压失败: {result.stderr}")
+                return []
             
             logger.info(f"[#file_ops]环境准备完成")
             
