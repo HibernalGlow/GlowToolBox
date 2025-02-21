@@ -281,22 +281,35 @@ class ImageProcessor:
             return None, 'grayscale_detection_error'
 
     def handle_duplicate_detection(self, file_path, rel_path, params, lock, image_data):
-        """处理重复检测 - 只计算哈希"""
+        """处理重复检测 - 先查询缓存"""
         try:
-            # 计算新的哈希值
+            zip_path = params.get('zip_path')
+            if zip_path:
+                # 生成标准URI
+                img_uri = PathURIGenerator.generate(f"{zip_path}!{rel_path}")
+                
+                # 先尝试获取缓存哈希
+                cached_hash = ImageHashCalculator.get_hash_from_url(img_uri)
+                if cached_hash:
+                    logger.info(f"[#hash_calc]使用缓存的哈希值: {img_uri}")
+                    return {
+                        'hash': cached_hash,
+                        # 'size': HASH_PARAMS['hash_size'],
+                        'url': img_uri,
+                        'from_cache': True
+                    }
+            
+            # 没有缓存时计算新哈希
             img_hash = ImageHashCalculator.calculate_phash(image_data)
-            if img_hash:
-                # 获取压缩包路径并构建URI
-                zip_path = params.get('zip_path')
-                if zip_path:
-                    img_uri = PathURIGenerator.generate(f"{zip_path}!{rel_path}")
-                    # 添加哈希操作面板标识
-                    logger.info(f"[#hash_calc]计算哈希值: {img_uri} -> {img_hash['hash']}")  
+            # if img_hash:
+            #     # 将新哈希存入全局缓存
+            #     if zip_path and img_hash.get('url'):
+            #         HashCache.get_cache()[img_hash['url']] = img_hash['hash']
+            #         logger.info(f"[#hash_calc]新增哈希到缓存: {img_hash['url']}")
             return img_hash
             
         except Exception as e:
-            # 错误日志也指向哈希操作面板
-            logger.info(f"[#hash_calc]❌ 计算哈希值失败: {str(e)}")  
+            logger.info(f"[#hash_calc]❌ 处理重复检测失败: {str(e)}")
             return None
 
 class DuplicateDetector:

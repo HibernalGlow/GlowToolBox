@@ -201,6 +201,45 @@ class ImageHashCalculator:
         return PathURIGenerator.generate(path)
 
     @staticmethod
+    def get_hash_from_url(url: str) -> Optional[str]:
+        """
+        根据URL查询全局哈希值
+        Args:
+            url: 标准化的URI
+        Returns:
+            str: 哈希值字符串，未找到返回None
+        """
+        try:
+            # 标准化URL格式
+            normalized_url = PathURIGenerator.generate(url) if '://' not in url else url
+            
+            # 检查内存缓存
+            cached_hashes = HashCache.get_cache()
+            if hash_value := cached_hashes.get(normalized_url):
+                logging.debug(f"从缓存找到哈希值: {normalized_url}")
+                return hash_value
+                
+            # 未命中缓存时主动扫描全局文件
+            for hash_file in GLOBAL_HASH_FILES:
+                if not os.path.exists(hash_file):
+                    continue
+                    
+                with open(hash_file, 'rb') as f:
+                    data = orjson.loads(f.read())
+                    # 处理新旧格式
+                    hashes = data.get('hashes', data) if 'hashes' in data else data
+                    if hash_value := hashes.get(normalized_url):
+                        if isinstance(hash_value, dict):
+                            return hash_value.get('hash')
+                        return hash_value
+                        
+            return None
+            
+        except Exception as e:
+            logging.error(f"查询哈希失败 {url}: {e}")
+            return None
+
+    @staticmethod
     def calculate_phash(image_path_or_data, hash_size=10, url=None):
         """使用感知哈希算法计算图片哈希值
         
@@ -223,14 +262,13 @@ class ImageHashCalculator:
                 path_str = str(image_path_or_data)
                 url = PathURIGenerator.generate(path_str)
             
-            # 检查内存缓存
-            cached_hashes = HashCache.get_cache()
-            if url in cached_hashes:
+            # 使用独立函数查询
+            if cached_hash := ImageHashCalculator.get_hash_from_url(url):
                 return {
-                    'hash': cached_hashes[url],
+                    'hash': cached_hash,
                     'size': HASH_PARAMS['hash_size'],
                     'url': url,
-                    'from_cache': True  # 新增缓存标记
+                    'from_cache': True
                 }
             
             # 如果缓存中没有，则计算新的哈希值
