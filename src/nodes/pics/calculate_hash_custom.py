@@ -231,6 +231,7 @@ class ImageHashCalculator:
                     if hash_value := hashes.get(normalized_url):
                         if isinstance(hash_value, dict):
                             return hash_value.get('hash')
+                        logging.debug(f"从全局文件找到哈希值: {normalized_url}")
                         return hash_value
                         
             return None
