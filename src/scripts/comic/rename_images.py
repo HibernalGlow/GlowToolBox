@@ -146,13 +146,16 @@ def rename_images_in_directory(dir_path):
     print(f"\n📊 处理完成:")
     print(f"   - 成功处理: {processed_count} 个文件")
     print(f"   - 跳过处理: {skipped_count} 个文件")
+
 def has_hash_files_in_zip(zip_path):
-    """使用7z检查压缩包中是否有包含[hash-]的文件"""
+    """快速检查压缩包中是否有包含[hash-]的文件"""
     try:
-        # 使用7z列出文件列表
-        result = subprocess.run(['7z', 'l', zip_path], capture_output=True, text=True)
-        # 检查输出中是否包含[hash-]
-        return '[hash-' in result.stdout
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            # 只获取文件名列表并检查，不读取文件内容
+            for name in zip_ref.namelist():
+                if '[hash-' in name:
+                    return True
+        return False
     except Exception as e:
         print(f"检查压缩包失败 {zip_path}: {e}")
         return False
@@ -212,6 +215,7 @@ def rename_images_in_zip(zip_path, input_base_path):
             os.remove(new_zip_path)
         print("继续处理下一个文件...")
         return  # 返回继续处理下一个文件
+
 if __name__ == "__main__":
     # 获取输入路径
     args = InputHandler.parse_arguments()
