@@ -181,7 +181,7 @@ class RecruitCoverFilter:
             
         # 解压选定文件
         selected_files = [files[i] for i in selected_indices]
-        logger.info(f"[#file_ops]准备解压文件: {[os.path.basename(f) for f in selected_files]}")
+        logger.info(f"[#update_log]准备解压文件: {[os.path.basename(f) for f in selected_files]}")
         
         # 更新解压进度
         logger.info(f"[#path_progress]解压文件: {os.path.basename(zip_path)}")
@@ -212,7 +212,7 @@ class RecruitCoverFilter:
             )
             
             if not to_delete:
-                logger.info("[#file_ops]没有需要删除的图片")
+                logger.info("[#update_log]没有需要删除的图片")
                 self._robust_cleanup(extract_dir)
                 logger.info(f"[#path_progress]处理文件: {os.path.basename(zip_path)}")
                 logger.info(f"[@path_progress]当前进度: 100%")
@@ -234,9 +234,9 @@ class RecruitCoverFilter:
             # 在执行删除操作前备份原始压缩包
             backup_success, backup_path = BackupHandler.backup_source_file(zip_path)
             if backup_success:
-                logger.info(f"[#file_ops]✅ 源文件备份成功: {backup_path}")
+                logger.info(f"[#update_log]✅ 源文件备份成功: {backup_path}")
             else:
-                logger.warning(f"[#file_ops]⚠️ 源文件备份失败: {backup_path}")
+                logger.warning(f"[#update_log]⚠️ 源文件备份失败: {backup_path}")
                 return False, "源文件备份失败"
 
             # 使用7z删除文件
@@ -245,7 +245,7 @@ class RecruitCoverFilter:
             os.remove(delete_list_file)
             
             if result.returncode != 0:
-                logger.error(f"[#file_ops]从压缩包删除文件失败: {result.stderr}")
+                logger.error(f"[#update_log]从压缩包删除文件失败: {result.stderr}")
                 self._robust_cleanup(extract_dir)
                 logger.info(f"[#path_progress]处理文件: {os.path.basename(zip_path)} (失败)")
                 return False, f"从压缩包删除文件失败: {result.stderr}"
@@ -257,7 +257,7 @@ class RecruitCoverFilter:
             return True, ""
             
         except Exception as e:
-            logger.error(f"[#file_ops]处理压缩包失败 {zip_path}: {e}")
+            logger.error(f"[#update_log]处理压缩包失败 {zip_path}: {e}")
             self._robust_cleanup(extract_dir)
             logger.info(f"[#path_progress]处理文件: {os.path.basename(zip_path)} (错误)")
             return False, f"处理过程出错: {str(e)}"
@@ -304,7 +304,7 @@ class Application:
                     # 检查当前目录路径是否包含黑名单关键词
                     root_lower = root.lower()
                     if any(kw in root_lower for kw in blacklist_keywords):
-                        logger.info(f"[#file_ops]跳过黑名单目录: {root}")
+                        logger.info(f"[#update_log]跳过黑名单目录: {root}")
                         continue
                         
                     for file in files:
@@ -312,12 +312,12 @@ class Application:
                             zip_path = os.path.join(root, file)
                             # 检查文件名是否包含黑名单关键词
                             if any(kw in file.lower() for kw in blacklist_keywords):
-                                logger.info(f"[#file_ops]跳过黑名单文件: {file}")
+                                logger.info(f"[#update_log]跳过黑名单文件: {file}")
                                 continue
                                 
                             try:
                                 if not zipfile.is_zipfile(zip_path):
-                                    logger.warning(f"[#file_ops]跳过无效的ZIP文件: {zip_path}")
+                                    logger.warning(f"[#update_log]跳过无效的ZIP文件: {zip_path}")
                                     continue
                                     
                                 # 处理单个zip文件
