@@ -109,6 +109,42 @@ class ImageFilter:
             
         return to_delete, removal_reasons
 
+    def _process_hash_images(self, group: List[str], ref_hamming_threshold: int = None) -> Tuple[Set[str], Dict[str, Dict]]:
+        """处理哈希文件过滤"""
+        to_delete = set()
+        removal_reasons = {}
+        
+        # 使用传入的阈值或默认值
+        threshold = ref_hamming_threshold if ref_hamming_threshold is not None else self.ref_hamming_threshold
+        
+        for img_path in group:
+            hash_value = self._get_image_hash(img_path)
+            if not hash_value:
+                continue
+                
+            # 检查是否与哈希文件中的值相似
+            for uri, hash_data in self.hash_cache.items():
+                ref_hash = hash_data.get('hash') if isinstance(hash_data, dict) else str(hash_data)
+                if not ref_hash:
+                    continue
+                    
+                try:
+                    distance = ImageHashCalculator.calculate_hamming_distance(hash_value, ref_hash)
+                    if distance <= threshold:
+                        to_delete.add(img_path)
+                        removal_reasons[img_path] = {
+                            'reason': 'hash_duplicate',
+                            'ref_uri': uri,
+                            'distance': distance
+                        }
+                        logger.info(f"标记删除重复图片: {os.path.basename(img_path)} (参考URI: {uri}, 距离: {distance})")
+                        break
+                except Exception as e:
+                    logger.error(f"计算汉明距离失败 {img_path} vs {uri}: {str(e)}")
+                    continue
+                    
+        return to_delete, removal_reasons
+
     def process_images(
         self, 
         image_files: List[str],
@@ -116,7 +152,7 @@ class ImageFilter:
         enable_grayscale_filter: bool = None,
         enable_duplicate_filter: bool = None,
         min_size: int = 631,
-        duplicate_filter_mode: str = 'quality',  # 'quality' or 'watermark'
+        duplicate_filter_mode: str = 'quality',  # 'quality', 'watermark' or 'hash'
         watermark_keywords: List[str] = None,  # 水印关键词列表
         ref_hamming_threshold: int = None,  # 哈希文件过滤的汉明距离阈值
         **kwargs
@@ -180,6 +216,11 @@ class ImageFilter:
                         watermark_to_delete, watermark_reasons = self._process_watermark_images(group, watermark_keywords)
                         to_delete.update(watermark_to_delete)
                         removal_reasons.update(watermark_reasons)
+                    elif duplicate_filter_mode == 'hash':
+                        # 哈希文件过滤模式
+                        hash_to_delete, hash_reasons = self._process_hash_images(group, ref_hamming_threshold)
+                        to_delete.update(hash_to_delete)
+                        removal_reasons.update(hash_reasons)
                     else:
                         # 质量过滤模式（默认）
                         quality_to_delete, quality_reasons = self._process_quality_images(group)
