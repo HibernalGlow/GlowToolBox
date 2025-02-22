@@ -1,7 +1,7 @@
 import os
 import shutil
 import logging
-from typing import Set, Dict
+from typing import Set, Dict, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -79,3 +79,33 @@ class BackupHandler:
                 logger.error(f"删除文件失败 {file_path}: {e}")
                 results[file_path] = False
         return results 
+
+    @staticmethod
+    def backup_source_file(source_path: str, max_backups: int = 5) -> Tuple[bool, str]:
+        """
+        在原始路径下创建带序号的备份文件（保留原始文件）
+        例如：file.zip -> file.zip.bak, file.zip.bak1, ...
+        
+        Args:
+            source_path: 原始文件路径
+            max_backups: 最大备份数量
+        Returns:
+            (是否成功, 备份路径)
+        """
+        if not os.path.exists(source_path):
+            return False, "源文件不存在"
+
+        backup_path = source_path + ".bak"
+        counter = 1
+        
+        # 查找可用的备份文件名
+        while os.path.exists(backup_path) and counter <= max_backups:
+            backup_path = f"{source_path}.bak{counter}"
+            counter += 1
+
+        try:
+            shutil.copy2(source_path, backup_path)
+            return True, backup_path
+        except Exception as e:
+            logger.error(f"[#file_ops]源文件备份失败 {source_path}: {e}")
+            return False, str(e) 

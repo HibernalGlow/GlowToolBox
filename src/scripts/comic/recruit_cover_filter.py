@@ -136,6 +136,14 @@ class RecruitCoverFilter:
                 for file_path in files_to_delete:
                     f.write(file_path + '\n')
                     
+            # 在执行删除操作前备份原始压缩包
+            backup_success, backup_path = BackupHandler.backup_source_file(zip_path)
+            if backup_success:
+                logger.info(f"[#file_ops]✅ 源文件备份成功: {backup_path}")
+            else:
+                logger.warning(f"[#file_ops]⚠️ 源文件备份失败: {backup_path}")
+
+            # 使用7z删除文件
             cmd = ['7z', 'd', zip_path, f'@{delete_list_file}']
             result = subprocess.run(cmd, capture_output=True, text=True)
             os.remove(delete_list_file)
