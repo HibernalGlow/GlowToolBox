@@ -14,7 +14,14 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from nodes.tui.textual_logger import TextualLoggerManager
 from nodes.pics.hash_process_config import get_latest_hash_file_path, process_artist_folder, process_duplicates
 from nodes.record.logger_config import setup_logger
-
+from nodes.record.logger_config import setup_logger
+from nodes.tui.mode_manager import create_mode_manager
+from nodes.file_ops.backup_handler import BackupHandler
+from nodes.file_ops.archive_handler import ArchiveHandler
+from nodes.pics.image_filter import ImageFilter
+from nodes.io.input_handler import InputHandler
+from nodes.io.config_handler import ConfigHandler
+from nodes.io.path_handler import PathHandler, ExtractMode
 # 在全局配置部分添加以下内容
 # ================= 日志配置 =================
 config = {
@@ -102,6 +109,46 @@ class RecruitRemoveFilter:
     def process_archive(self, zip_path: str, extract_mode: str = ExtractMode.ALL, extract_params: dict = None) -> bool:
         """处理单个压缩包"""
         TextualLoggerManager.set_layout(TEXTUAL_LAYOUT, config_info['log_file'])
+        
+        # 检查输入路径是否为目录
+        if os.path.isdir(zip_path):
+            # 遍历目录查找zip文件
+            zip_files = []
+            for root, _, files in os.walk(zip_path):
+                for file in files:
+                    if file.lower().endswith('.zip'):
+                        # 检查是否在黑名单中
+                        skip = False
+                        for exclude_path in DEFAULT_PARAMS['exclude-paths']:
+                            if exclude_path.lower() in root.lower() or exclude_path.lower() in file.lower():
+                                logger.info(f"[#process_log]跳过黑名单路径: {os.path.join(root, file)}")
+                                skip = True
+                                break
+                        if not skip:
+                            zip_files.append(os.path.join(root, file))
+            
+            if not zip_files:
+                logger.info(f"[#process_log]在目录中未找到可处理的压缩包: {zip_path}")
+                return False
+                
+            # 处理找到的每个压缩包
+            success_count = 0
+            for zip_file in zip_files:
+                if self.process_archive(zip_file, extract_mode, extract_params):
+                    success_count += 1
+            return success_count > 0
+        
+        # 如果是单个文件，检查是否为zip文件
+        if not zip_path.lower().endswith('.zip'):
+            logger.info(f"[#process_log]不是有效的压缩包文件: {zip_path}")
+            return False
+            
+        # 检查是否在黑名单中
+        for exclude_path in DEFAULT_PARAMS['exclude-paths']:
+            if exclude_path.lower() in zip_path.lower():
+                logger.info(f"[#process_log]跳过黑名单路径: {zip_path}")
+                return False
+        
         logger.info(f"[#process_log]开始处理压缩包: {zip_path}")
         
         # 列出压缩包内容
@@ -135,8 +182,7 @@ class RecruitRemoveFilter:
             to_delete, removal_reasons = self.image_filter.process_images(
                 image_files,
                 enable_duplicate_filter=True,   # 启用重复图片过滤
-                duplicate_filter_mode='hash',  # 使用哈希模式进行去重
-                hash_file=hash_file  # 传入已生成的哈希文件
+                duplicate_filter_mode='quality'  # 使用质量过滤模式
             )
             
             if not to_delete:
@@ -282,8 +328,28 @@ def main():
         
         # 处理重复文件
         try:
-            process_duplicates(hash_file, [str(path)], params, WORKER_COUNT)
-            success_count += 1
+            # 创建过滤器实例并处理文件
+            filter_instance = RecruitRemoveFilter(
+                hash_file=hash_file,
+                cover_count=3,  # 默认处理前3张
+                hamming_threshold=params.get('ref_hamming_distance', 16)
+            )
+            
+            # 设置解压参数，默认处理前3张和后5张
+            extract_params = {
+                'first_n': 3,  # 前3张
+                'last_n': 5   # 后5张
+            }
+            
+            # 处理文件
+            success = filter_instance.process_archive(
+                str(path),
+                extract_mode=ExtractMode.RANGE,
+                extract_params=extract_params
+            )
+            
+            if success:
+                success_count += 1
         except Exception as e:
             logging.info(f"[#process_log]❌ 处理失败: {path}: {e}")
         
