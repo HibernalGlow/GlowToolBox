@@ -36,11 +36,11 @@ logger, config_info = setup_logger(config)
 DEBUG_MODE = False
 
 TEXTUAL_LAYOUT = {
-    "global_progress": {
-        "ratio": 1,
-        "title": "🌐 总体进度",
-        "style": "lightyellow"
-    },
+    # "global_progress": {
+    #     "ratio": 1,
+    #     "title": "🌐 总体进度",
+    #     "style": "lightyellow"
+    # },
     "path_progress": {
         "ratio": 1,
         "title": "🔄 当前进度",
@@ -405,7 +405,8 @@ def setup_cli_parser():
                       help='水印关键词列表，不指定则使用默认列表')
     parser.add_argument('--duplicate-filter-mode', '-dfm', type=str,
                       choices=['quality', 'watermark', 'hash'],
-                      help='重复过滤模式 (去汉化模式下默认为hash，去水印模式下默认为watermark)')
+                      default='watermark',
+                      help='重复过滤模式 (hash=去汉化模式, watermark=去水印模式, quality=质量模式)')
     parser.add_argument('--extract-mode', '-em', type=str, 
                       choices=[ExtractMode.ALL, ExtractMode.RANGE],
                       default=ExtractMode.ALL, help='解压模式 (默认: all)')
@@ -415,8 +416,6 @@ def setup_cli_parser():
                       help='处理前N张图片 (默认: 3)')
     parser.add_argument('--back-n', '-bn', type=int, default=5,
                       help='处理后N张图片 (默认: 5)')
-    parser.add_argument('--dehash-mode', '-dm', action='store_true',
-                      help='启用去汉化模式')
     parser.add_argument('--workers', '-w', type=int, default=16,
                       help='最大工作线程数，默认为CPU核心数')
     parser.add_argument('path', nargs='*', help='要处理的文件或目录路径')
@@ -425,8 +424,11 @@ def setup_cli_parser():
 def run_application(args):
     """运行应用程序"""
     try:
-        # 在开始处添加模式判断的日志
-        logger.info(f"[#sys_log]运行模式: {'去汉化模式' if args.dehash_mode else '去水印模式'}")
+        # 根据过滤模式判断是否为去汉化模式
+        is_dehash_mode = args.duplicate_filter_mode == 'hash'
+        
+        # 添加模式判断的日志
+        logger.info(f"[#sys_log]运行模式: {'去汉化模式' if is_dehash_mode else '去水印模式'}")
         logger.info(f"[#sys_log]过滤模式: {args.duplicate_filter_mode}")
 
         paths = InputHandler.get_input_paths(
@@ -444,12 +446,12 @@ def run_application(args):
             hash_file=args.hash_file,
             hamming_threshold=args.hamming_threshold,
             # 如果是去汉化模式，则不使用水印关键词
-            watermark_keywords=None if args.dehash_mode else args.watermark_keywords,
+            watermark_keywords=None if is_dehash_mode else args.watermark_keywords,
             max_workers=args.workers
         )
 
         # 如果是去汉化模式且没有指定哈希文件，自动准备哈希文件
-        if args.dehash_mode and not args.hash_file:
+        if is_dehash_mode and not args.hash_file:
             recruit_folder = r"E:\1EHV\[01杂]\zzz去图"
             hash_file = filter_instance.prepare_hash_file(recruit_folder)
             if not hash_file:
@@ -487,7 +489,7 @@ def run_application(args):
             future_to_archive = {
                 executor.submit(
                     app._process_single_archive, 
-                    (archive, filter_instance, extract_params, args.dehash_mode)
+                    (archive, filter_instance, extract_params, is_dehash_mode)
                 ): archive for archive in paths
             }
             
@@ -565,7 +567,7 @@ def get_mode_config():
                 "2": {
                     "name": "去汉化模式",
                     "description": "处理前后N张图片并使用哈希去重",
-                    "base_args": ["-dm", "-ht", "-fn", "-bn"],
+                    "base_args": ["-ht", "-fn", "-bn"],
                     "default_params": {
                         "ht": "16",
                         "front_n": "3",
@@ -584,7 +586,6 @@ def get_mode_config():
         'tui_config': {
             'checkbox_options': [
                 ("从剪贴板读取", "clipboard", "-c"),
-                ("去汉化模式", "dehash_mode", "-dm"),
             ],
             'input_options': [
                 ("汉明距离阈值", "hamming_threshold", "-ht", "16", "输入数字(默认16)"),
@@ -607,7 +608,7 @@ def get_mode_config():
                 },
                 "去汉化模式": {
                     "description": "处理前后N张图片并使用哈希去重",
-                    "checkbox_options": ["clipboard", "dehash_mode"],
+                    "checkbox_options": ["clipboard"],
                     "input_values": {
                         "hamming_threshold": "16",
                         "front_n": "3",
