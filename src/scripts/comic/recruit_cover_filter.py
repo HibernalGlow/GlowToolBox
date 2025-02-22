@@ -242,7 +242,7 @@ class RecruitCoverFilter:
             if result.returncode != 0:
                 logger.error(f"[#file_ops]从压缩包删除文件失败: {result.stderr}")
                 self._robust_cleanup(extract_dir)
-                logger.info(f"[@path_progress]处理文件: {os.path.basename(zip_path)} (失败)")
+                logger.info(f"[#path_progress]处理文件: {os.path.basename(zip_path)} (失败)")
                 return False, f"从压缩包删除文件失败: {result.stderr}"
                 
             logger.info(f"[#file_ops]成功处理压缩包: {zip_path}")
@@ -253,7 +253,7 @@ class RecruitCoverFilter:
         except Exception as e:
             logger.error(f"[#file_ops]处理压缩包失败 {zip_path}: {e}")
             self._robust_cleanup(extract_dir)
-            logger.info(f"[@path_progress]处理文件: {os.path.basename(zip_path)} (错误)")
+            logger.info(f"[#path_progress]处理文件: {os.path.basename(zip_path)} (错误)")
             return False, f"处理过程出错: {str(e)}"
 
 class Application:
@@ -490,7 +490,7 @@ def run_application(args):
                         error_details.append(error_msg)
                         logger.warning(f"[#file_ops]⚠️ {error_msg}")
                         # 更新当前文件进度为失败
-                        logger.info(f"[@path_progress]处理文件: {os.path.basename(archive)} (失败)")
+                        logger.info(f"[#path_progress]处理文件: {os.path.basename(archive)} (失败)")
                 except Exception as e:
                     error_count += 1
                     import traceback
