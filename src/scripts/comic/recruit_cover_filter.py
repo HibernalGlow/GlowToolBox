@@ -287,6 +287,9 @@ def setup_cli_parser():
                       help='从剪贴板读取路径')
     parser.add_argument('--watermark-keywords', '-wk', nargs='*',
                       help='水印关键词列表，不指定则使用默认列表')
+    parser.add_argument('--duplicate-filter-mode', '-dfm', type=str,
+                      choices=['quality', 'watermark', 'hash'],
+                      default='quality', help='重复过滤模式 (默认: quality)')
     parser.add_argument('--extract-mode', '-em', type=str, 
                       choices=[ExtractMode.ALL, ExtractMode.FIRST_N, ExtractMode.LAST_N, ExtractMode.RANGE],
                       default=ExtractMode.ALL, help='解压模式 (默认: all)')
@@ -366,7 +369,7 @@ def get_mode_config():
                 "1": {
                     "name": "去水印模式",
                     "description": "检测并删除带水印的图片",
-                    "base_args": ["-ht"],
+                    "base_args": ["-ht", "--duplicate-filter-mode", "watermark"],
                     "default_params": {
                         "ht": "16"
                     }
@@ -415,7 +418,8 @@ def get_mode_config():
                 "er": {"name": "解压范围", "arg": "-er", "default": "0:3", "type": str},
                 "fn": {"name": "前N张数量", "arg": "-fn", "default": "3", "type": int},
                 "bn": {"name": "后N张数量", "arg": "-bn", "default": "5", "type": int},
-                "c": {"name": "从剪贴板读取", "arg": "-c", "is_flag": True}
+                "c": {"name": "从剪贴板读取", "arg": "-c", "is_flag": True},
+                "dfm": {"name": "重复过滤模式", "arg": "--duplicate-filter-mode", "default": "quality", "type": str}
             }
         },
         'tui_config': {
@@ -430,13 +434,15 @@ def get_mode_config():
                 ("前N张数量", "front_n", "-fn", "3", "输入数字(默认3)"),
                 ("后N张数量", "back_n", "-bn", "5", "输入数字(默认5)"),
                 ("哈希文件路径", "hash_file", "-hf", "", "输入哈希文件路径(可选)"),
+                ("重复过滤模式", "duplicate_filter_mode", "--duplicate-filter-mode", "quality", "quality/watermark/hash"),
             ],
             'preset_configs': {
                 "去水印模式": {
                     "description": "检测并删除带水印的图片",
                     "checkbox_options": ["clipboard"],
                     "input_values": {
-                        "hamming_threshold": "16"
+                        "hamming_threshold": "16",
+                        "duplicate_filter_mode": "watermark"
                     }
                 },
                 "前N张模式": {
@@ -472,7 +478,8 @@ def get_mode_config():
                     "input_values": {
                         "hamming_threshold": "16",
                         "front_n": "3",
-                        "back_n": "5"
+                        "back_n": "5",
+                        "duplicate_filter_mode": "hash"
                     }
                 }
             }
