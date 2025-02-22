@@ -162,8 +162,18 @@ class RecruitCoverFilter:
         # 获取要解压的文件索引
         extract_params = extract_params or {}
         
+        # 如果指定了front_n或back_n，强制使用RANGE模式
+        if extract_params.get('front_n', 0) > 0 or extract_params.get('back_n', 0) > 0:
+            extract_mode = ExtractMode.RANGE
+            logger.info(f"[#file_ops]使用前后N张模式: front_n={extract_params.get('front_n', 0)}, back_n={extract_params.get('back_n', 0)}")
+        
         # 获取选中的文件索引
         selected_indices = ExtractMode.get_selected_indices(extract_mode, len(files), extract_params)
+        
+        # 记录选中的文件信息
+        logger.info(f"[#file_ops]总文件数: {len(files)}, 选中文件数: {len(selected_indices)}")
+        if len(selected_indices) > 0:
+            logger.info(f"[#file_ops]选中的文件索引: {sorted(selected_indices)}")
             
         if not selected_indices:
             logger.error("[#file_ops]未选择任何文件进行解压")
@@ -176,6 +186,7 @@ class RecruitCoverFilter:
             
         # 解压选定文件
         selected_files = [files[i] for i in selected_indices]
+        logger.info(f"[#file_ops]准备解压文件: {[os.path.basename(f) for f in selected_files]}")
         success, extract_dir = ArchiveHandler.extract_files(zip_path, selected_files, extract_dir)
         if not success:
             return False, "解压文件失败"
@@ -301,7 +312,7 @@ class Application:
                                 # 处理单个zip文件
                                 file_success, file_error = filter_instance.process_archive(
                                     zip_path,
-                                    extract_mode=ExtractMode.RANGE if extract_params.get('range_str') else ExtractMode.ALL,
+                                    extract_mode=ExtractMode.RANGE,  # 默认使用RANGE模式
                                     extract_params=extract_params,
                                     is_dehash_mode=is_dehash_mode
                                 )
@@ -335,7 +346,7 @@ class Application:
                 # 处理压缩包
                 return filter_instance.process_archive(
                     path,
-                    extract_mode=ExtractMode.RANGE if extract_params.get('range_str') else ExtractMode.ALL,
+                    extract_mode=ExtractMode.RANGE,  # 默认使用RANGE模式
                     extract_params=extract_params,
                     is_dehash_mode=is_dehash_mode
                 )
