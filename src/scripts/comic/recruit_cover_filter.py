@@ -87,7 +87,7 @@ class RecruitCoverFilter:
         # 初始化日志系统（只初始化一次）
         initialize_textual_logger(TEXTUAL_LAYOUT, config_info['log_file'])
         
-    def prepare_hash_file(self, recruit_folder: str, workers: int = 4, force_update: bool = False) -> str:
+    def prepare_hash_file(self, recruit_folder: str, workers: int = 16, force_update: bool = False) -> str:
         """
         准备哈希文件
         
@@ -347,7 +347,7 @@ def setup_cli_parser():
                       help='去汉化模式：处理前N张图片 (默认: 3)')
     parser.add_argument('--back-n', '-bn', type=int, default=5,
                       help='去汉化模式：处理后N张图片 (默认: 5)')
-    parser.add_argument('--workers', '-w', type=int,
+    parser.add_argument('--workers', '-w', type=int, default=16,
                       help='最大工作线程数，默认为CPU核心数')
     parser.add_argument('path', nargs='*', help='要处理的文件或目录路径')
     return parser
