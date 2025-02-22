@@ -23,6 +23,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from queue import Queue
 import multiprocessing
+import zipfile
 
 # 在文件开头添加常量
 SUPPORTED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif', '.heic', '.heif', '.jxl'}
@@ -247,14 +248,61 @@ class Application:
         self.archive_queue = Queue()
         
     def _process_single_archive(self, args):
-        """处理单个压缩包的包装函数"""
+        """处理单个压缩包的包装函数
+        
+        Args:
+            args: 包含处理参数的元组 (zip_path, filter_instance, extract_params, is_dehash_mode)
+            
+        Returns:
+            bool: 处理是否成功
+        """
         zip_path, filter_instance, extract_params, is_dehash_mode = args
         try:
-            return filter_instance.process_archive(zip_path, extract_params=extract_params, is_dehash_mode=is_dehash_mode)
+            # 检查文件是否存在
+            if not os.path.exists(zip_path):
+                raise FileNotFoundError(f"文件不存在: {zip_path}")
+                
+            # 检查文件是否可读
+            if not os.access(zip_path, os.R_OK):
+                raise PermissionError(f"文件无法读取: {zip_path}")
+                
+            # 检查是否为有效的压缩文件
+            if not zipfile.is_zipfile(zip_path):
+                raise ValueError(f"不是有效的ZIP文件: {zip_path}")
+                
+            # 去汉化模式特殊处理
+            if is_dehash_mode and not filter_instance.image_filter.hash_file:
+                recruit_folder = r"E:\1EHV\[01杂]\zzz去图"
+                hash_file = filter_instance.prepare_hash_file(recruit_folder)
+                if not hash_file:
+                    raise RuntimeError("去汉化模式需要哈希文件，但准备失败")
+                    
+            # 处理压缩包
+            success = filter_instance.process_archive(
+                zip_path,
+                extract_mode=ExtractMode.RANGE if extract_params.get('range_str') else ExtractMode.ALL,
+                extract_params=extract_params,
+                is_dehash_mode=is_dehash_mode
+            )
+            
+            if not success:
+                logger.warning(f"[#file_ops]处理返回失败: {os.path.basename(zip_path)}")
+                
+            return success
+            
+        except FileNotFoundError as e:
+            logger.error(f"[#file_ops]文件不存在: {zip_path}")
+            raise
+        except PermissionError as e:
+            logger.error(f"[#file_ops]文件访问权限错误: {zip_path}")
+            raise
+        except zipfile.BadZipFile as e:
+            logger.error(f"[#file_ops]损坏的ZIP文件: {zip_path}")
+            raise
         except Exception as e:
-            logger.error(f"[#update_log]处理压缩包失败 {zip_path}: {e}")
-            return False
-    
+            logger.error(f"[#file_ops]处理过程出错: {zip_path}: {str(e)}")
+            raise
+            
     def process_directory(self, directory: str, filter_instance: RecruitCoverFilter, is_dehash_mode: bool = False, extract_params: dict = None):
         """处理目录"""
         try:
@@ -372,24 +420,67 @@ def run_application(args):
         # 创建应用程序实例
         app = Application(max_workers=args.workers)
         
-        for path in paths:
-            if args.dehash_mode:
-                if not filter_instance.image_filter.hash_file:
-                    recruit_folder = r"E:\1EHV\[01杂]\zzz去图"
-                    hash_file = filter_instance.prepare_hash_file(recruit_folder)
-                    if not hash_file:
-                        logger.error(f"[#update_log]❌ 去汉化模式需要哈希文件，但准备失败")
-                        continue
-                
-                app.process_directory(path, filter_instance, is_dehash_mode=True, extract_params=extract_params)
-            else:
-                app.process_directory(path, filter_instance, extract_params=extract_params)
+        # 记录处理参数
+        logger.info(f"[#update_log]处理参数: front_n={args.front_n}, back_n={args.back_n}, mode={args.extract_mode}")
+        if args.extract_range:
+            logger.info(f"[#update_log]解压范围: {args.extract_range}")
+        
+        total_count = len(paths)
+        success_count = 0
+        error_count = 0
+        error_details = []
+        
+        # 使用线程池并行处理压缩包
+        with ThreadPoolExecutor(max_workers=args.workers) as executor:
+            # 创建任务列表
+            future_to_archive = {
+                executor.submit(
+                    app._process_single_archive, 
+                    (archive, filter_instance, extract_params, args.dehash_mode)
+                ): archive for archive in paths
+            }
             
-        logger.info("[#update_log]✅ 所有任务已完成")
+            # 等待所有任务完成
+            for future in as_completed(future_to_archive):
+                archive = future_to_archive[future]
+                try:
+                    success = future.result()
+                    if success:
+                        success_count += 1
+                        logger.info(f"[#file_ops]✅ 成功处理: {os.path.basename(archive)}")
+                    else:
+                        error_count += 1
+                        error_msg = f"处理返回失败: {os.path.basename(archive)}"
+                        error_details.append(error_msg)
+                        logger.warning(f"[#file_ops]⚠️ {error_msg}")
+                except Exception as e:
+                    error_count += 1
+                    # 获取详细的错误信息
+                    import traceback
+                    error_trace = traceback.format_exc()
+                    error_msg = f"处理出错 {os.path.basename(archive)}: {str(e)}\n{error_trace}"
+                    error_details.append(error_msg)
+                    logger.error(f"[#file_ops]❌ {error_msg}")
+                
+                # 更新进度
+                progress = ((success_count + error_count) / total_count) * 100
+                logger.info(f"[#current_stats]总数: {total_count} 成功: {success_count} 失败: {error_count} 进度: {progress:.1f}%")
+        
+        # 输出最终统计信息
+        logger.info(f"[#update_log]处理完成 ✅成功: {success_count} ❌失败: {error_count} 总数: {total_count}")
+        
+        # 如果有错误，输出详细信息
+        if error_details:
+            logger.info("[#update_log]错误详情:")
+            for i, error in enumerate(error_details, 1):
+                logger.info(f"[#update_log]{i}. {error}")
+        
         return True
         
     except Exception as e:
-        logger.error(f"[#update_log]程序执行失败: {e}")
+        import traceback
+        error_trace = traceback.format_exc()
+        logger.error(f"[#update_log]程序执行失败: {str(e)}\n{error_trace}")
         return False
 
 def get_mode_config():
