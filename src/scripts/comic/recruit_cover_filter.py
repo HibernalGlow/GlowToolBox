@@ -26,7 +26,7 @@ config = {
     'console_enabled': False,
 }
 logger, config_info = setup_logger(config)
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 TEXTUAL_LAYOUT = {
     "cur_stats": {
@@ -131,8 +131,15 @@ class RecruitCoverFilter:
                 logger.error(f"[#update_log]强制删除失败: {temp_dir}")
                 raise
 
-    def process_archive(self, zip_path: str, extract_mode: str = ExtractMode.ALL, extract_params: dict = None) -> bool:
-        """处理单个压缩包"""
+    def process_archive(self, zip_path: str, extract_mode: str = ExtractMode.ALL, extract_params: dict = None, is_dehash_mode: bool = False) -> bool:
+        """处理单个压缩包
+        
+        Args:
+            zip_path: 压缩包路径
+            extract_mode: 解压模式
+            extract_params: 解压参数
+            is_dehash_mode: 是否为去汉化模式
+        """
         initialize_textual_logger(TEXTUAL_LAYOUT, config_info['log_file'])
         logger.info(f"[#file_ops]开始处理压缩包: {zip_path}")
         
@@ -144,7 +151,22 @@ class RecruitCoverFilter:
             
         # 获取要解压的文件索引
         extract_params = extract_params or {}
-        selected_indices = ExtractMode.get_selected_indices(extract_mode, len(files), extract_params)
+        
+        # 去汉化模式特殊处理：合并前N张和后N张的索引
+        if is_dehash_mode:
+            front_n = extract_params.get('front_n', 3)  # 默认前3张
+            back_n = extract_params.get('back_n', 5)    # 默认后5张
+            
+            # 获取前N张的索引
+            front_indices = list(range(min(front_n, len(files))))
+            # 获取后N张的索引
+            back_indices = list(range(max(0, len(files) - back_n), len(files)))
+            # 合并并去重
+            selected_indices = sorted(set(front_indices + back_indices))
+            logger.info(f"[#file_ops]去汉化模式：选择前{front_n}张和后{back_n}张图片")
+        else:
+            selected_indices = ExtractMode.get_selected_indices(extract_mode, len(files), extract_params)
+            
         if not selected_indices:
             logger.error("[#file_ops]未选择任何文件进行解压")
             return False
@@ -168,7 +190,7 @@ class RecruitCoverFilter:
                 image_files,
                 enable_duplicate_filter=True,   # 启用重复图片过滤
                 duplicate_filter_mode='hash' if self.image_filter.hash_file else 'quality',  # 如果有哈希文件则使用哈希模式
-                watermark_keywords=self.watermark_keywords  # 传递水印关键词
+                watermark_keywords=None if is_dehash_mode else self.watermark_keywords  # 去汉化模式不启用水印检测
             )
             
             if not to_delete:
@@ -222,7 +244,7 @@ class RecruitCoverFilter:
 class Application:
     """应用程序类"""
     
-    def process_directory(self, directory: str, filter_instance: RecruitCoverFilter):
+    def process_directory(self, directory: str, filter_instance: RecruitCoverFilter, is_dehash_mode: bool = False, extract_params: dict = None):
         """处理目录"""
         try:
             # 定义黑名单关键词
@@ -236,7 +258,7 @@ class Application:
 
             if os.path.isfile(directory):
                 if directory.lower().endswith('.zip'):
-                    filter_instance.process_archive(directory)
+                    filter_instance.process_archive(directory, extract_params=extract_params, is_dehash_mode=is_dehash_mode)
             else:
                 for root, _, files in os.walk(directory):
                     # 检查当前目录路径是否包含黑名单关键词
@@ -248,7 +270,7 @@ class Application:
                     for file in files:
                         if file.lower().endswith('.zip'):
                             zip_path = os.path.join(root, file)
-                            filter_instance.process_archive(zip_path)
+                            filter_instance.process_archive(zip_path, extract_params=extract_params, is_dehash_mode=is_dehash_mode)
         except Exception as e:
             logger.error(f"[#update_log]处理目录失败 {directory}: {e}")
 
@@ -259,8 +281,6 @@ def setup_cli_parser():
                       help='启用调试模式')
     parser.add_argument('--hash-file', '-hf', type=str,
                       help='哈希文件路径（可选，默认使用全局配置）')
-    parser.add_argument('--cover-count', '-cc', type=int, default=3,
-                      help='处理的封面图片数量 (默认: 3)')
     parser.add_argument('--hamming-threshold', '-ht', type=int, default=16,
                       help='汉明距离阈值 (默认: 16)')
     parser.add_argument('--clipboard', '-c', action='store_true',
@@ -274,6 +294,12 @@ def setup_cli_parser():
                       help='解压数量 (用于 first_n 和 last_n 模式)')
     parser.add_argument('--extract-range', '-er', type=str,
                       help='解压范围 (用于 range 模式，格式: start:end)')
+    parser.add_argument('--dehash-mode', '-dm', action='store_true',
+                      help='启用去汉化模式')
+    parser.add_argument('--front-n', '-fn', type=int, default=3,
+                      help='去汉化模式：处理前N张图片 (默认: 3)')
+    parser.add_argument('--back-n', '-bn', type=int, default=5,
+                      help='去汉化模式：处理后N张图片 (默认: 5)')
     parser.add_argument('path', nargs='*', help='要处理的文件或目录路径')
     return parser
 
@@ -298,14 +324,30 @@ def run_application(args):
         
         # 准备解压参数
         extract_params = {}
-        if args.extract_mode in [ExtractMode.FIRST_N, ExtractMode.LAST_N]:
+        if args.dehash_mode:
+            # 去汉化模式参数
+            extract_params['front_n'] = args.front_n
+            extract_params['back_n'] = args.back_n
+        elif args.extract_mode in [ExtractMode.FIRST_N, ExtractMode.LAST_N]:
             extract_params['n'] = args.extract_n
         elif args.extract_mode == ExtractMode.RANGE:
             extract_params['range_str'] = args.extract_range
             
         app = Application()
         for path in paths:
-            app.process_directory(path, filter_instance)
+            if args.dehash_mode:
+                # 去汉化模式处理
+                if not filter_instance.image_filter.hash_file:
+                    # 如果没有提供哈希文件，尝试准备
+                    recruit_folder = r"E:\1EHV\[01杂]\zzz去图"
+                    hash_file = filter_instance.prepare_hash_file(recruit_folder)
+                    if not hash_file:
+                        logger.error(f"[#update_log]❌ 去汉化模式需要哈希文件，但准备失败")
+                        continue
+                
+                app.process_directory(path, filter_instance, is_dehash_mode=True, extract_params=extract_params)
+            else:
+                app.process_directory(path, filter_instance, extract_params=extract_params)
             
         logger.info("[#update_log]✅ 所有任务已完成")
         return True
