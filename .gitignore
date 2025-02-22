@@ -56,3 +56,5 @@ error.log
 *.webp
 */ocr_cache.json
 src/nodes/pics/ocr_cache.json
+
+*.txt

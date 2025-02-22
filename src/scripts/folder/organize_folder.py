@@ -6,6 +6,9 @@ from pathlib import Path
 import sys
 import fnmatch
 import time
+import psutil
+from datetime import datetime, timedelta
+from nodes.tui.textual_preset import create_config_app
 try:
     import keyboard
 except ImportError:
@@ -284,6 +287,72 @@ def handle_name_conflict(target_path, is_dir=False, mode='auto'):
                 return new_path, True
             counter += 1
 
+def is_file_in_use(file_path):
+    """
+    检查文件是否正在被使用
+    
+    参数:
+    file_path (Path/str): 文件路径
+    
+    返回:
+    bool: 如果文件正在被使用返回True，否则返回False
+    """
+    try:
+        path = str(file_path)
+        for proc in psutil.process_iter(['pid', 'open_files']):
+            try:
+                files = proc.info['open_files']
+                if files:
+                    for file in files:
+                        if file.path == path:
+                            return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return False
+    except Exception as e:
+        print(f"检查文件占用状态时出错: {e}")
+        return True  # 如果无法确定，则假设文件正在使用中
+
+def handle_file_operation(file_path, operation_func, *args, **kwargs):
+    """
+    安全地处理文件操作，检查文件是否被占用
+    
+    参数:
+    file_path (Path): 要操作的文件路径
+    operation_func: 要执行的操作函数
+    *args, **kwargs: 传递给操作函数的参数
+    
+    返回:
+    bool: 操作是否成功
+    """
+    max_retries = 3
+    retry_delay = 2  # 秒
+    
+    for attempt in range(max_retries):
+        if is_file_in_use(file_path):
+            print(f"文件正在被使用中: {file_path}")
+            if attempt < max_retries - 1:
+                print(f"等待 {retry_delay} 秒后重试...")
+                time.sleep(retry_delay)
+                continue
+            return False
+        
+        try:
+            operation_func(*args, **kwargs)
+            return True
+        except PermissionError:
+            if attempt < max_retries - 1:
+                print(f"权限不足，等待 {retry_delay} 秒后重试...")
+                time.sleep(retry_delay)
+            else:
+                print(f"无法访问文件: {file_path}")
+                return False
+        except Exception as e:
+            print(f"操作失败: {e}")
+            return False
+    
+    return False
+
 def dissolve_folder(path, file_conflict='auto', dir_conflict='auto'):
     """
     将指定文件夹中的所有内容移动到其父文件夹中，然后删除该文件夹
@@ -305,6 +374,9 @@ def dissolve_folder(path, file_conflict='auto', dir_conflict='auto'):
         # 获取所有项目并排序（文件优先）
         items = list(path.iterdir())
         items.sort(key=lambda x: (x.is_dir(), x.name))  # 文件在前，文件夹在后
+        
+        def move_item(src, dst):
+            return handle_file_operation(src, shutil.move, str(src.absolute()), str(dst.absolute()))
         
         for item in items:
             target_path = parent_dir / item.name
@@ -338,10 +410,12 @@ def dissolve_folder(path, file_conflict='auto', dir_conflict='auto'):
                             )
                             if not sub_should_proceed:
                                 continue
-                        shutil.move(str(sub_item.absolute()), str(sub_target.absolute()))
+                        if not move_item(sub_item, sub_target):
+                            print(f"移动失败: {sub_item}")
                 else:
                     # 如果是文件或目标文件夹不存在，直接移动
-                    shutil.move(str(item.absolute()), str(target_path.absolute()))
+                    if not move_item(item, target_path):
+                        print(f"移动失败: {item}")
             except Exception as e:
                 print(f"移动 {item.name} 失败: {e}")
                 continue
@@ -435,7 +509,6 @@ def main():
     """
     主函数：处理命令行参数并执行相应操作
     """
-    # 如果有命令行参数，使用命令行模式
     if len(sys.argv) > 1:
         parser = argparse.ArgumentParser(description='文件夹整理工具')
         parser.add_argument('paths', nargs='*', help='要处理的路径列表')
@@ -452,6 +525,9 @@ def main():
                            help='删除备份文件和临时文件夹')
         parser.add_argument('--exclude', help='排除关键词列表，用逗号分隔多个关键词')
         parser.add_argument('--inf', action='store_true', help='无限循环模式，按F2键重新执行操作')
+        parser.add_argument('--timer', '-t', type=int, help='定时执行间隔（分钟）')
+        parser.add_argument('--start-time', type=str, help='开始时间（格式：HH:MM）')
+        parser.add_argument('--end-time', type=str, help='结束时间（格式：HH:MM）')
         args = parser.parse_args()
         
         # 获取要处理的路径
@@ -493,33 +569,49 @@ def main():
         if args.exclude:
             exclude_keywords.extend(args.exclude.split(','))
 
-        if args.inf:
-            print("\n进入无限循环模式。按F2键重新执行操作，按Ctrl+C退出。")
-            # 先执行一次操作
-            run_operations(paths, args, exclude_keywords)
+        # 处理定时模式
+        if args.timer:
+            print(f"\n进入定时模式，每 {args.timer} 分钟执行一次")
+            if args.start_time and args.end_time:
+                print(f"执行时间范围：{args.start_time} - {args.end_time}")
             
-            def on_f2_pressed(e):
-                if e.name == 'f2':
-                    print("\n\n检测到F2按键，重新执行操作...")
+            try:
+                while True:
+                    current_time = datetime.now().time()
+                    
+                    # 检查是否在指定的时间范围内
+                    if args.start_time and args.end_time:
+                        start = datetime.strptime(args.start_time, "%H:%M").time()
+                        end = datetime.strptime(args.end_time, "%H:%M").time()
+                        
+                        if not (start <= current_time <= end):
+                            print(f"\n当前时间 {current_time.strftime('%H:%M')} 不在执行时间范围内")
+                            # 计算到下一个开始时间的等待时间
+                            next_run = datetime.combine(datetime.now().date(), start)
+                            if current_time > end:
+                                next_run += timedelta(days=1)
+                            wait_seconds = (next_run - datetime.now()).total_seconds()
+                            print(f"等待到下一个执行时间：{next_run.strftime('%Y-%m-%d %H:%M')}")
+                            time.sleep(wait_seconds)
+                            continue
+                    
+                    print(f"\n\n开始执行任务 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                     # 如果使用剪贴板，重新获取路径
-                    nonlocal paths
                     if args.clipboard:
                         paths = get_paths_from_clipboard()
                         if not paths:
                             print("剪贴板中没有有效路径，跳过本次执行")
-                            return
+                            time.sleep(args.timer * 60)
+                            continue
+                    
                     run_operations(paths, args, exclude_keywords)
-            
-            # 注册F2按键事件
-            keyboard.on_press(on_f2_pressed)
-            
-            # 保持程序运行
-            try:
-                while True:
-                    time.sleep(0.1)  # 减少CPU占用
+                    
+                    next_run = datetime.now() + timedelta(minutes=args.timer)
+                    print(f"\n任务完成，下次执行时间：{next_run.strftime('%Y-%m-%d %H:%M:%S')}")
+                    time.sleep(args.timer * 60)
+                    
             except KeyboardInterrupt:
                 print("\n检测到Ctrl+C，程序退出")
-                keyboard.unhook_all()
                 return
         else:
             # 正常执行一次
@@ -529,7 +621,6 @@ def main():
     # 否则尝试使用TUI模式
     try:
         sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-        from tui.config import create_config_app
         
         # 定义复选框选项
         checkbox_options = [
@@ -539,12 +630,15 @@ def main():
             ("删除空文件夹", "remove_empty", "--remove-empty"),
             ("删除备份和临时文件", "clean_backup", "--clean-backup"),
             ("直接解散文件夹", "dissolve", "--dissolve"),
-            ("无限循环模式", "inf", "--inf"),  # 添加无限循环模式选项
+            ("定时执行模式", "timer", "--timer"),  # 添加定时模式选项
         ]
 
         # 定义输入框选项
         input_options = [
             ("排除关键词", "exclude", "--exclude", "单行", "用逗号分隔多个关键词"),
+            ("执行间隔(分钟)", "timer_interval", "", "30", "定时执行的间隔时间(分钟)"),
+            ("开始时间", "start_time", "--start-time", "09:00", "执行时间范围的开始时间(HH:MM)"),
+            ("结束时间", "end_time", "--end-time", "18:00", "执行时间范围的结束时间(HH:MM)"),
         ]
 
         # 预设配置
@@ -589,6 +683,26 @@ def main():
                 "checkbox_options": ["clipboard", "dissolve"],
                 "input_values": {
                     "exclude": "单行",
+                }
+            },
+            "定时整理": {
+                "description": "定时执行文件夹整理",
+                "checkbox_options": ["clipboard", "release_media", "flatten", "remove_empty", "clean_backup", "timer"],
+                "input_values": {
+                    "exclude": "单行",
+                    "timer_interval": "30",
+                    "start_time": "09:00", 
+                    "end_time": "18:00"
+                }
+            },
+            "夜间整理": {
+                "description": "在夜间执行文件夹整理",
+                "checkbox_options": ["clipboard", "release_media", "flatten", "remove_empty", "clean_backup", "timer"],
+                "input_values": {
+                    "exclude": "单行",
+                    "timer_interval": "60",
+                    "start_time": "23:00",
+                    "end_time": "06:00"
                 }
             }
         }
@@ -664,33 +778,49 @@ def main():
         if args.exclude:
             exclude_keywords.extend(args.exclude.split(','))
         
-        if args.inf:
-            print("\n进入无限循环模式。按F2键重新执行操作，按Ctrl+C退出。")
-            # 先执行一次操作
-            run_operations(paths, args, exclude_keywords)
+        # 处理定时模式
+        if args.timer:
+            print(f"\n进入定时模式，每 {args.timer} 分钟执行一次")
+            if args.start_time and args.end_time:
+                print(f"执行时间范围：{args.start_time} - {args.end_time}")
             
-            def on_f2_pressed(e):
-                if e.name == 'f2':
-                    print("\n\n检测到F2按键，重新执行操作...")
+            try:
+                while True:
+                    current_time = datetime.now().time()
+                    
+                    # 检查是否在指定的时间范围内
+                    if args.start_time and args.end_time:
+                        start = datetime.strptime(args.start_time, "%H:%M").time()
+                        end = datetime.strptime(args.end_time, "%H:%M").time()
+                        
+                        if not (start <= current_time <= end):
+                            print(f"\n当前时间 {current_time.strftime('%H:%M')} 不在执行时间范围内")
+                            # 计算到下一个开始时间的等待时间
+                            next_run = datetime.combine(datetime.now().date(), start)
+                            if current_time > end:
+                                next_run += timedelta(days=1)
+                            wait_seconds = (next_run - datetime.now()).total_seconds()
+                            print(f"等待到下一个执行时间：{next_run.strftime('%Y-%m-%d %H:%M')}")
+                            time.sleep(wait_seconds)
+                            continue
+                    
+                    print(f"\n\n开始执行任务 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                     # 如果使用剪贴板，重新获取路径
-                    nonlocal paths
                     if args.clipboard:
                         paths = get_paths_from_clipboard()
                         if not paths:
                             print("剪贴板中没有有效路径，跳过本次执行")
-                            return
+                            time.sleep(args.timer * 60)
+                            continue
+                    
                     run_operations(paths, args, exclude_keywords)
-            
-            # 注册F2按键事件
-            keyboard.on_press(on_f2_pressed)
-            
-            # 保持程序运行
-            try:
-                while True:
-                    time.sleep(0.1)  # 减少CPU占用
+                    
+                    next_run = datetime.now() + timedelta(minutes=args.timer)
+                    print(f"\n任务完成，下次执行时间：{next_run.strftime('%Y-%m-%d %H:%M:%S')}")
+                    time.sleep(args.timer * 60)
+                    
             except KeyboardInterrupt:
                 print("\n检测到Ctrl+C，程序退出")
-                keyboard.unhook_all()
                 return
         else:
             # 正常执行一次
