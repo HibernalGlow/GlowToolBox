@@ -35,7 +35,7 @@ class WatermarkDetector:
         self.watermark_keywords = [
             "汉化", "翻译", "扫描", "嵌字", "翻译", "组", "漢化",
             "扫图", "嵌字", "校对", "翻译", "润色", "招募", "公众号",
-            "众筹", "关注"
+            "众筹", "关注", "有偿", "福利", "二维", "淘宝", "免费",
         ]
         
     def _load_cache(self) -> Dict:

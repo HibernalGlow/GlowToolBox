@@ -179,7 +179,7 @@ def rename_images_in_zip(zip_path, input_base_path):
         backup_file(zip_path, zip_path, input_base_path)
 
         # 定义需要过滤的关键词
-        filter_keywords = ['招募', '公众号', '微信', '关注']
+        filter_keywords = ['招募', 'ver', 'zz', '众筹', 'credit']
         filtered_files = []
 
         # 创建临时目录用于存放解压的图片
