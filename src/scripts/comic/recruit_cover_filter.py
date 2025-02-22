@@ -17,6 +17,8 @@ from nodes.pics.image_filter import ImageFilter
 from nodes.io.input_handler import InputHandler
 from nodes.io.config_handler import ConfigHandler
 from nodes.io.path_handler import PathHandler, ExtractMode
+import platform
+import stat
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +77,33 @@ class RecruitCoverFilter:
         self.image_filter = ImageFilter(hash_file, cover_count, hamming_threshold)
         self.watermark_keywords = watermark_keywords
         
+    def _robust_cleanup(self, temp_dir: str) -> None:
+        """更健壮的文件清理方法，处理文件被占用的情况"""
+        if not os.path.exists(temp_dir):
+            return
+
+        def on_rm_error(func, path, exc_info):
+            try:
+                os.chmod(path, stat.S_IWRITE)
+                os.unlink(path)
+            except Exception as e:
+                logger.warning(f"[#file_ops]无法删除 {path}: {e}")
+
+        try:
+            # 尝试标准删除
+            shutil.rmtree(temp_dir, onerror=on_rm_error)
+        except Exception as e:
+            logger.warning(f"[#file_ops]标准删除失败，尝试强制删除: {temp_dir}")
+            try:
+                # 使用系统命令强制删除（Windows）
+                if platform.system() == 'Windows':
+                    subprocess.run(f'rmdir /s /q "{temp_dir}"', shell=True, check=True)
+                else:  # Linux/MacOS
+                    subprocess.run(f'rm -rf "{temp_dir}"', shell=True, check=True)
+            except subprocess.CalledProcessError as e:
+                logger.error(f"[#file_ops]强制删除失败: {temp_dir}，错误: {e}")
+                raise
+
     def process_archive(self, zip_path: str, extract_mode: str = ExtractMode.ALL, extract_params: dict = None) -> bool:
         """处理单个压缩包"""
         initialize_textual_logger(TEXTUAL_LAYOUT, config_info['log_file'])
@@ -117,7 +146,7 @@ class RecruitCoverFilter:
             
             if not to_delete:
                 logger.info("[#file_ops]没有需要删除的图片")
-                shutil.rmtree(temp_dir)
+                self._robust_cleanup(temp_dir)
                 return False
                 
             # 备份要删除的文件
@@ -150,17 +179,16 @@ class RecruitCoverFilter:
             
             if result.returncode != 0:
                 logger.error(f"[#file_ops]从压缩包删除文件失败: {result.stderr}")
-                shutil.rmtree(temp_dir)
+                self._robust_cleanup(temp_dir)
                 return False
                 
             logger.info(f"[#file_ops]成功处理压缩包: {zip_path}")
-            shutil.rmtree(temp_dir)
+            self._robust_cleanup(temp_dir)
             return True
             
         except Exception as e:
             logger.error(f"[#file_ops]处理压缩包失败 {zip_path}: {e}")
-            if os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir)
+            self._robust_cleanup(temp_dir)
             return False
 
 class Application:
