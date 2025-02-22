@@ -189,7 +189,7 @@ class RecruitCoverFilter:
             to_delete, removal_reasons = self.image_filter.process_images(
                 image_files,
                 enable_duplicate_filter=True,   # 启用重复图片过滤
-                duplicate_filter_mode='hash' if self.image_filter.hash_file else 'quality',  # 如果有哈希文件则使用哈希模式
+                duplicate_filter_mode='hash' if self.image_filter.hash_file else 'watermark',  # 如果有哈希文件则使用哈希模式
                 watermark_keywords=None if is_dehash_mode else self.watermark_keywords  # 去汉化模式不启用水印检测
             )
             
