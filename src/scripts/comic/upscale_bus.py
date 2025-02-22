@@ -17,17 +17,17 @@ TEXTUAL_LAYOUT = {
         "style": "lightyellow"
     },
     "current_progress": {
-        "ratio": 2,
+        "ratio": 4,
         "title": "🔄 文件处理",
         "style": "lightcyan"
     },
     "process_log": {
-        "ratio": 3,
+        "ratio": 1,
         "title": "📝 处理日志",
         "style": "lightmagenta"
     },
     "update_log": {
-        "ratio": 2,
+        "ratio": 1,
         "title": "ℹ️ 状态更新",
         "style": "lightblue"
     }
