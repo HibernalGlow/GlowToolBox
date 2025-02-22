@@ -184,12 +184,15 @@ class RecruitCoverFilter:
         logger.info(f"[#file_ops]准备解压文件: {[os.path.basename(f) for f in selected_files]}")
         
         # 更新解压进度
-        logger.info(f"[@path_progress]解压文件: {os.path.basename(zip_path)} 0%")
+        logger.info(f"[#path_progress]解压文件: {os.path.basename(zip_path)}")
+        logger.info(f"[#path_progress]当前进度: 0%")
+
         success, extract_dir = ArchiveHandler.extract_files(zip_path, selected_files, extract_dir)
         if not success:
-            logger.info(f"[@path_progress]解压文件: {os.path.basename(zip_path)} (失败)")
+            logger.info(f"[#path_progress]解压文件: {os.path.basename(zip_path)} (失败)")
             return False, "解压文件失败"
-        logger.info(f"[@path_progress]解压文件: {os.path.basename(zip_path)} 50%")
+        logger.info(f"[#path_progress]解压文件: {os.path.basename(zip_path)}")
+        logger.info(f"[#path_progress]当前进度: 50%")
             
         try:
             # 获取解压后的图片文件
@@ -211,7 +214,8 @@ class RecruitCoverFilter:
             if not to_delete:
                 logger.info("[#file_ops]没有需要删除的图片")
                 self._robust_cleanup(extract_dir)
-                logger.info(f"[@path_progress]处理文件: {os.path.basename(zip_path)} 100%")
+                logger.info(f"[#path_progress]处理文件: {os.path.basename(zip_path)}")
+                logger.info(f"[@path_progress]当前进度: 100%")
                 return True, "没有需要删除的图片"
                 
             # 备份要删除的文件
@@ -219,7 +223,8 @@ class RecruitCoverFilter:
             
             # 从压缩包中删除文件
             files_to_delete = [os.path.relpath(file_path, extract_dir) for file_path in to_delete]
-            logger.info(f"[@path_progress]处理文件: {os.path.basename(zip_path)} 75%")
+            logger.info(f"[#path_progress]处理文件: {os.path.basename(zip_path)}")
+            logger.info(f"[@path_progress]当前进度: 75%")
                 
             # 使用7z删除文件
             delete_list_file = os.path.join(extract_dir, '@delete.txt')
@@ -247,7 +252,8 @@ class RecruitCoverFilter:
                 
             logger.info(f"[#file_ops]成功处理压缩包: {zip_path}")
             self._robust_cleanup(extract_dir)
-            logger.info(f"[@path_progress]处理文件: {os.path.basename(zip_path)} 100%")
+            logger.info(f"[#path_progress]处理文件: {os.path.basename(zip_path)}")
+            logger.info(f"[@path_progress]当前进度: 100%")
             return True, ""
             
         except Exception as e:
