@@ -115,14 +115,31 @@ class ImageFilter:
         # 使用传入的阈值或默认值
         threshold = ref_hamming_threshold if ref_hamming_threshold is not None else self.ref_hamming_threshold
         
+        # 直接从哈希文件读取
+        try:
+            with open(self.hash_file, 'r', encoding='utf-8') as f:
+                hash_data = json.load(f).get('hashes', {})
+        except Exception as e:
+            logger.error(f"读取哈希文件失败: {e}")
+            return to_delete, removal_reasons
+        
         for img_path in group:
             hash_value = self._get_image_hash(img_path)
             if not hash_value:
                 continue
                 
+            # 获取当前图片的URI
+            current_uri = PathURIGenerator.generate(img_path)
+            if not current_uri:
+                continue
+                
             # 检查是否与哈希文件中的值相似
-            for uri, hash_data in self.hash_cache.items():
-                ref_hash = hash_data.get('hash') if isinstance(hash_data, dict) else str(hash_data)
+            for uri, ref_data in hash_data.items():
+                # 跳过自身比较
+                if uri == current_uri:
+                    continue
+                    
+                ref_hash = ref_data.get('hash') if isinstance(ref_data, dict) else str(ref_data)
                 if not ref_hash:
                     continue
                     

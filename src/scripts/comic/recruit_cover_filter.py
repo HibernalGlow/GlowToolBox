@@ -72,7 +72,7 @@ def initialize_textual_logger(layout: dict, log_file: str) -> None:
 class RecruitCoverFilter:
     """封面图片过滤器"""
     
-    def __init__(self, hash_file: str = None, hamming_threshold: int = 16, watermark_keywords: List[str] = None):
+    def __init__(self, hash_file: str = None, hamming_threshold: int = 12, watermark_keywords: List[str] = None):
         """初始化过滤器"""
         self.image_filter = ImageFilter(hash_file, hamming_threshold)
         self.watermark_keywords = watermark_keywords
@@ -281,8 +281,8 @@ def setup_cli_parser():
                       help='启用调试模式')
     parser.add_argument('--hash-file', '-hf', type=str,
                       help='哈希文件路径（可选，默认使用全局配置）')
-    parser.add_argument('--hamming-threshold', '-ht', type=int, default=16,
-                      help='汉明距离阈值 (默认: 16)')
+    parser.add_argument('--hamming-threshold', '-ht', type=int, default=12,
+                      help='汉明距离阈值 (默认: 12)')
     parser.add_argument('--clipboard', '-c', action='store_true',
                       help='从剪贴板读取路径')
     parser.add_argument('--watermark-keywords', '-wk', nargs='*',
@@ -368,7 +368,7 @@ def get_mode_config():
                     "base_args": ["-cc", "-ht"],
                     "default_params": {
                         "cc": "3",
-                        "ht": "16"
+                        "ht": "12"
                     }
                 },
                 "2": {
@@ -376,7 +376,7 @@ def get_mode_config():
                     "base_args": ["-cc", "-ht", "-em", "first_n", "-en"],
                     "default_params": {
                         "cc": "3",
-                        "ht": "16",
+                        "ht": "12",
                         "en": "3"
                     }
                 },
@@ -385,7 +385,7 @@ def get_mode_config():
                     "base_args": ["-cc", "-ht", "-em", "last_n", "-en"],
                     "default_params": {
                         "cc": "3",
-                        "ht": "16",
+                        "ht": "12",
                         "en": "3"
                     }
                 },
@@ -394,14 +394,14 @@ def get_mode_config():
                     "base_args": ["-cc", "-ht", "-em", "range", "-er"],
                     "default_params": {
                         "cc": "3",
-                        "ht": "16",
+                        "ht": "12",
                         "er": "0:3"
                     }
                 }
             },
             'param_options': {
                 "cc": {"name": "处理图片数量", "arg": "-cc", "default": "3", "type": int},
-                "ht": {"name": "汉明距离阈值", "arg": "-ht", "default": "16", "type": int},
+                "ht": {"name": "汉明距离阈值", "arg": "-ht", "default": "12", "type": int},
                 "en": {"name": "解压数量", "arg": "-en", "default": "3", "type": int},
                 "er": {"name": "解压范围", "arg": "-er", "default": "0:3", "type": str},
                 "c": {"name": "从剪贴板读取", "arg": "-c", "is_flag": True}
@@ -413,7 +413,7 @@ def get_mode_config():
             ],
             'input_options': [
                 ("处理图片数量", "cover_count", "-cc", "3", "输入数字(默认3)"),
-                ("汉明距离阈值", "hamming_threshold", "-ht", "16", "输入数字(默认16)"),
+                ("汉明距离阈值", "hamming_threshold", "-ht", "12", "输入数字(默认12)"),
                 ("解压数量", "extract_n", "-en", "3", "输入数字(默认3)"),
                 ("解压范围", "extract_range", "-er", "0:3", "格式: start:end"),
                 ("哈希文件路径", "hash_file", "-hf", "", "输入哈希文件路径(可选)"),
@@ -424,7 +424,7 @@ def get_mode_config():
                     "checkbox_options": ["clipboard"],
                     "input_values": {
                         "cover_count": "3",
-                        "hamming_threshold": "16"
+                        "hamming_threshold": "12"
                     }
                 },
                 "前N张模式": {
@@ -432,7 +432,7 @@ def get_mode_config():
                     "checkbox_options": ["clipboard"],
                     "input_values": {
                         "cover_count": "3",
-                        "hamming_threshold": "16",
+                        "hamming_threshold": "12",
                         "extract_n": "3"
                     },
                     "extra_args": ["-em", "first_n"]
@@ -442,7 +442,7 @@ def get_mode_config():
                     "checkbox_options": ["clipboard"],
                     "input_values": {
                         "cover_count": "3",
-                        "hamming_threshold": "16",
+                        "hamming_threshold": "12",
                         "extract_n": "3"
                     },
                     "extra_args": ["-em", "last_n"]
@@ -452,7 +452,7 @@ def get_mode_config():
                     "checkbox_options": ["clipboard"],
                     "input_values": {
                         "cover_count": "3",
-                        "hamming_threshold": "16",
+                        "hamming_threshold": "12",
                         "extract_range": "0:3"
                     },
                     "extra_args": ["-em", "range"]

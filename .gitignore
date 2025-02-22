@@ -55,3 +55,4 @@ error.log
 *.ico
 *.webp
 */ocr_cache.json
+src/nodes/pics/ocr_cache.json
