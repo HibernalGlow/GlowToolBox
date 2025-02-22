@@ -5,6 +5,9 @@ import os
 import argparse
 from nodes.tui.textual_preset import create_config_app
 
+# 全局配置文件路径
+GLOBAL_CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'mode_manager_config.json')
+
 class ModeManager:
     """通用模式管理器，支持TUI、调试和命令行三种模式"""
     
@@ -25,6 +28,7 @@ class ModeManager:
         self.config = self._load_config(config_path) if config_path else config or {}
         self.cli_parser_setup = cli_parser_setup
         self.application_runner = application_runner
+        self.script_path = os.path.abspath(sys.argv[0])
         
     def _load_config(self, config_path: str) -> Dict:
         """从文件加载配置"""
@@ -34,6 +38,38 @@ class ModeManager:
         except Exception as e:
             print(f"加载配置文件失败: {e}")
             return {}
+            
+    def _load_last_debug_config(self) -> Optional[Dict]:
+        """从全局配置文件加载上次的调试配置"""
+        try:
+            if os.path.exists(GLOBAL_CONFIG_FILE):
+                with open(GLOBAL_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    configs = json.load(f)
+                    return configs.get(self.script_path)
+        except Exception:
+            pass
+        return None
+        
+    def _save_last_debug_config(self, mode_choice: str, final_args: List[str]) -> None:
+        """保存当前调试配置到全局配置文件"""
+        try:
+            # 读取现有配置
+            configs = {}
+            if os.path.exists(GLOBAL_CONFIG_FILE):
+                with open(GLOBAL_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    configs = json.load(f)
+            
+            # 更新当前脚本的配置
+            configs[self.script_path] = {
+                "mode": mode_choice,
+                "args": final_args
+            }
+            
+            # 保存配置
+            with open(GLOBAL_CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(configs, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
             
     def run_tui(self, on_run: Optional[Callable] = None) -> bool:
         """
@@ -104,16 +140,10 @@ class ModeManager:
         def default_debugger():
             """默认调试处理器"""
             base_modes = self.config['debug_config']['base_modes']
-            last_config_file = self.config['debug_config'].get('last_config_file', 'last_debug_config.json')
+            param_options = self.config['debug_config'].get('param_options', {})
             
             # 加载上次配置
-            last_config = None
-            try:
-                if os.path.exists(last_config_file):
-                    with open(last_config_file, 'r', encoding='utf-8') as f:
-                        last_config = json.load(f)
-            except Exception:
-                pass
+            last_config = self._load_last_debug_config()
             
             while True:
                 print("\n=== 调试模式选项 ===")
@@ -163,15 +193,8 @@ class ModeManager:
                     else:
                         final_args.append(arg)
                 
-                # 保存配置
-                try:
-                    with open(last_config_file, 'w', encoding='utf-8') as f:
-                        json.dump({
-                            "mode": mode_choice,
-                            "args": final_args
-                        }, f, ensure_ascii=False, indent=2)
-                except Exception:
-                    pass
+                # 保存配置到全局配置文件
+                self._save_last_debug_config(mode_choice, final_args)
                 
                 return final_args
         
