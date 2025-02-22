@@ -131,8 +131,6 @@ class ExtractMode:
     """解压模式类"""
     
     ALL = "all"  # 全部解压
-    FIRST_N = "first_n"  # 解压前N张
-    LAST_N = "last_n"  # 解压后N张
     RANGE = "range"  # 解压指定范围
     
     @staticmethod
@@ -143,21 +141,13 @@ class ExtractMode:
         Args:
             mode: 解压模式
             total_files: 总文件数
-            params: 参数字典，包含 n 或 range_str
+            params: 参数字典，包含 front_n, back_n 或 range_str
             
         Returns:
             Set[int]: 选中的文件索引集合
         """
         if mode == ExtractMode.ALL:
             return set(range(total_files))
-            
-        elif mode == ExtractMode.FIRST_N:
-            n = min(params.get('n', 1), total_files)
-            return set(range(n))
-            
-        elif mode == ExtractMode.LAST_N:
-            n = min(params.get('n', 1), total_files)
-            return set(range(total_files - n, total_files))
             
         elif mode == ExtractMode.RANGE:
             range_str = params.get('range_str', '')
@@ -167,6 +157,15 @@ class ExtractMode:
                 end = min(total_files, end)
                 return set(range(start, end))
             except:
-                return set()
+                # 如果range_str无效，则尝试使用front_n和back_n
+                front_n = params.get('front_n', 0)
+                back_n = params.get('back_n', 0)
+                
+                selected = set()
+                if front_n > 0:
+                    selected.update(range(min(front_n, total_files)))
+                if back_n > 0:
+                    selected.update(range(max(0, total_files - back_n), total_files))
+                return selected
                 
         return set() 

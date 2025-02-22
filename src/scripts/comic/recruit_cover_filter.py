@@ -157,18 +157,8 @@ class RecruitCoverFilter:
         # 获取要解压的文件索引
         extract_params = extract_params or {}
         
-        # 去汉化模式特殊处理：合并前N张和后N张的索引
-        if is_dehash_mode:
-            front_n = extract_params.get('front_n', 3)  # 默认前3张
-            back_n = extract_params.get('back_n', 5)    # 默认后5张
-            
-            # 直接计算索引，避免多次列表操作
-            total_files = len(files)
-            front_indices = range(min(front_n, total_files))
-            back_indices = range(max(0, total_files - back_n), total_files)
-            selected_indices = sorted(set(front_indices) | set(back_indices))
-        else:
-            selected_indices = ExtractMode.get_selected_indices(extract_mode, len(files), extract_params)
+        # 获取选中的文件索引
+        selected_indices = ExtractMode.get_selected_indices(extract_mode, len(files), extract_params)
             
         if not selected_indices:
             logger.error("[#file_ops]未选择任何文件进行解压")
@@ -335,18 +325,16 @@ def setup_cli_parser():
                       choices=['quality', 'watermark', 'hash'],
                       default='quality', help='重复过滤模式 (默认: quality)')
     parser.add_argument('--extract-mode', '-em', type=str, 
-                      choices=[ExtractMode.ALL, ExtractMode.FIRST_N, ExtractMode.LAST_N, ExtractMode.RANGE],
+                      choices=[ExtractMode.ALL, ExtractMode.RANGE],
                       default=ExtractMode.ALL, help='解压模式 (默认: all)')
-    parser.add_argument('--extract-n', '-en', type=int,
-                      help='解压数量 (用于 first_n 和 last_n 模式)')
     parser.add_argument('--extract-range', '-er', type=str,
                       help='解压范围 (用于 range 模式，格式: start:end)')
+    parser.add_argument('--front-n', '-fn', type=int, default=3,
+                      help='处理前N张图片 (默认: 3)')
+    parser.add_argument('--back-n', '-bn', type=int, default=5,
+                      help='处理后N张图片 (默认: 5)')
     parser.add_argument('--dehash-mode', '-dm', action='store_true',
                       help='启用去汉化模式')
-    parser.add_argument('--front-n', '-fn', type=int, default=3,
-                      help='去汉化模式：处理前N张图片 (默认: 3)')
-    parser.add_argument('--back-n', '-bn', type=int, default=5,
-                      help='去汉化模式：处理后N张图片 (默认: 5)')
     parser.add_argument('--workers', '-w', type=int, default=16,
                       help='最大工作线程数，默认为CPU核心数')
     parser.add_argument('path', nargs='*', help='要处理的文件或目录路径')
@@ -369,20 +357,19 @@ def run_application(args):
             hash_file=args.hash_file,
             hamming_threshold=args.hamming_threshold,
             watermark_keywords=args.watermark_keywords,
-            max_workers=args.workers  # 传递线程数参数
+            max_workers=args.workers
         )
         
         # 准备解压参数
-        extract_params = {}
-        if args.dehash_mode:
-            extract_params['front_n'] = args.front_n
-            extract_params['back_n'] = args.back_n
-        elif args.extract_mode in [ExtractMode.FIRST_N, ExtractMode.LAST_N]:
-            extract_params['n'] = args.extract_n
-        elif args.extract_mode == ExtractMode.RANGE:
+        extract_params = {
+            'front_n': args.front_n,
+            'back_n': args.back_n
+        }
+        
+        if args.extract_mode == ExtractMode.RANGE and args.extract_range:
             extract_params['range_str'] = args.extract_range
             
-        # 创建应用程序实例，使用指定的线程数
+        # 创建应用程序实例
         app = Application(max_workers=args.workers)
         
         for path in paths:
@@ -417,7 +404,9 @@ def get_mode_config():
                     "description": "检测并删除带水印的图片",
                     "base_args": ["-ht", "--duplicate-filter-mode", "watermark"],
                     "default_params": {
-                        "ht": "16"
+                        "ht": "16",
+                        "front_n": "3",
+                        "back_n": "0"
                     }
                 },
                 "2": {
@@ -426,17 +415,15 @@ def get_mode_config():
                     "base_args": ["-dm", "-ht", "-fn", "-bn"],
                     "default_params": {
                         "ht": "16",
-                        "fn": "3",
-                        "bn": "5"
+                        "front_n": "3",
+                        "back_n": "5"
                     }
                 }
             },
             'param_options': {
                 "ht": {"name": "汉明距离阈值", "arg": "-ht", "default": "16", "type": int},
-                "en": {"name": "解压数量", "arg": "-en", "default": "3", "type": int},
-                "er": {"name": "解压范围", "arg": "-er", "default": "0:3", "type": str},
-                "fn": {"name": "前N张数量", "arg": "-fn", "default": "3", "type": int},
-                "bn": {"name": "后N张数量", "arg": "-bn", "default": "5", "type": int},
+                "front_n": {"name": "前N张数量", "arg": "-fn", "default": "3", "type": int},
+                "back_n": {"name": "后N张数量", "arg": "-bn", "default": "5", "type": int},
                 "c": {"name": "从剪贴板读取", "arg": "-c", "is_flag": True},
                 "dfm": {"name": "重复过滤模式", "arg": "--duplicate-filter-mode", "default": "quality", "type": str}
             }
@@ -448,10 +435,9 @@ def get_mode_config():
             ],
             'input_options': [
                 ("汉明距离阈值", "hamming_threshold", "-ht", "16", "输入数字(默认16)"),
-                ("解压数量", "extract_n", "-en", "3", "输入数字(默认3)"),
-                ("解压范围", "extract_range", "-er", "0:3", "格式: start:end"),
                 ("前N张数量", "front_n", "-fn", "3", "输入数字(默认3)"),
                 ("后N张数量", "back_n", "-bn", "5", "输入数字(默认5)"),
+                ("解压范围", "extract_range", "-er", "0:3", "格式: start:end"),
                 ("哈希文件路径", "hash_file", "-hf", "", "输入哈希文件路径(可选)"),
                 ("重复过滤模式", "duplicate_filter_mode", "--duplicate-filter-mode", "quality", "quality/watermark/hash"),
             ],
@@ -462,6 +448,7 @@ def get_mode_config():
                     "input_values": {
                         "hamming_threshold": "16",
                         "front_n": "3",
+                        "back_n": "0",
                         "duplicate_filter_mode": "watermark"
                     }
                 },
