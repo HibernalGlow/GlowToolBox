@@ -103,17 +103,17 @@ class InputHandler:
             
         return paths
         
-    # @staticmethod
-    # def initialize_textual_logger(layout: dict, log_file: str) -> None:
-    #     """
-    #     初始化日志布局
+    @staticmethod
+    def initialize_textual_logger(layout: dict, log_file: str) -> None:
+        """
+        初始化日志布局
         
-    #     Args:
-    #         layout: 布局配置字典
-    #         log_file: 日志文件路径
-    #     """
-    #     try:
-    #         TextualLoggerManager.set_layout(layout, log_file)
-    #         logger.info("[#update_log]✅ 日志系统初始化完成")
-    #     except Exception as e:
-    #         print(f"❌ 日志系统初始化失败: {e}") 
+        Args:
+            layout: 布局配置字典
+            log_file: 日志文件路径
+        """
+        try:
+            TextualLoggerManager.set_layout(layout, log_file)
+            logger.info("[#update_log]✅ 日志系统初始化完成")
+        except Exception as e:
+            print(f"❌ 日志系统初始化失败: {e}") 

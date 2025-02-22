@@ -14,6 +14,9 @@ from nodes.tui.mode_manager import create_mode_manager
 from nodes.file_ops.backup_handler import BackupHandler
 from nodes.file_ops.archive_handler import ArchiveHandler
 from nodes.pics.image_filter import ImageFilter
+from nodes.io.input_handler import InputHandler
+from nodes.io.config_handler import ConfigHandler
+from nodes.io.path_handler import PathHandler, ExtractMode
 
 logger = logging.getLogger(__name__)
 
@@ -53,44 +56,7 @@ TEXTUAL_LAYOUT = {
 
 def initialize_textual_logger():
     """初始化日志布局"""
-    try:
-        TextualLoggerManager.set_layout(TEXTUAL_LAYOUT, config_info['log_file'])
-        logger.info("[#update_log]✅ 日志系统初始化完成")
-    except Exception as e:
-        print(f"❌ 日志系统初始化失败: {e}")
-
-class ExtractMode:
-    """解压模式类"""
-    ALL = "all"  # 全部解压
-    FIRST_N = "first_n"  # 解压前N张
-    LAST_N = "last_n"  # 解压后N张
-    RANGE = "range"  # 解压指定范围
-    
-    @staticmethod
-    def get_selected_indices(mode: str, total_files: int, params: dict) -> Set[int]:
-        """根据解压模式获取选中的文件索引"""
-        if mode == ExtractMode.ALL:
-            return set(range(total_files))
-            
-        elif mode == ExtractMode.FIRST_N:
-            n = min(params.get('n', 1), total_files)
-            return set(range(n))
-            
-        elif mode == ExtractMode.LAST_N:
-            n = min(params.get('n', 1), total_files)
-            return set(range(total_files - n, total_files))
-            
-        elif mode == ExtractMode.RANGE:
-            range_str = params.get('range_str', '')
-            try:
-                start, end = map(int, range_str.split(':'))
-                start = max(0, start)
-                end = min(total_files, end)
-                return set(range(start, end))
-            except:
-                return set()
-                
-        return set()
+    InputHandler.initialize_textual_logger(TEXTUAL_LAYOUT, config_info['log_file'])
 
 class RecruitCoverFilter:
     """封面图片过滤器"""
@@ -127,8 +93,8 @@ class RecruitCoverFilter:
             image_files = []
             for root, _, files in os.walk(temp_dir):
                 for file in files:
-                    if file.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
-                        image_files.append(os.path.join(root, file))
+                    if PathHandler.get_file_extension(file) in {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif', '.heic', '.heif', '.jxl'}:
+                        image_files.append(PathHandler.join_paths(root, file))
                         
             # 处理图片
             to_delete, removal_reasons = self.image_filter.process_images(image_files)
@@ -161,61 +127,6 @@ class RecruitCoverFilter:
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
             return False
-
-class InputHandler:
-    """输入处理类"""
-    
-    @staticmethod
-    def normalize_path(path: str) -> str:
-        """规范化路径，处理引号和转义字符"""
-        path = path.strip('"\'')
-        path = path.replace('\\\\', '\\')
-        return path
-
-    @staticmethod
-    def get_input_paths(args):
-        """获取输入路径"""
-        paths = []
-        
-        # 从命令行参数获取路径
-        if args.path:
-            paths.extend([InputHandler.normalize_path(p) for p in args.path])
-            
-        # 从剪贴板获取路径
-        if args.clipboard or not paths:
-            try:
-                clipboard_content = pyperclip.paste()
-                if clipboard_content:
-                    clipboard_paths = [
-                        InputHandler.normalize_path(p.strip())
-                        for p in clipboard_content.splitlines()
-                        if p.strip()
-                    ]
-                    paths.extend(clipboard_paths)
-                    logger.info(f"[#file_ops]从剪贴板读取了 {len(clipboard_paths)} 个路径")
-            except Exception as e:
-                logger.error(f"[#update_log]从剪贴板读取失败: {e}")
-                
-        # 如果仍然没有路径，提示用户输入
-        if not paths:
-            print("请输入要处理的文件夹或压缩包路径（每行一个，输入空行结束）：")
-            while True:
-                line = input().strip()
-                if not line:
-                    break
-                paths.append(InputHandler.normalize_path(line))
-                
-        initialize_textual_logger()
-        
-        # 验证路径是否存在
-        valid_paths = []
-        for p in paths:
-            if os.path.exists(p):
-                valid_paths.append(p)
-            else:
-                logger.warning(f"[#file_ops]路径不存在: {p}")
-                
-        return valid_paths
 
 class Application:
     """应用程序类"""
@@ -259,7 +170,11 @@ def setup_cli_parser():
 def run_application(args):
     """运行应用程序"""
     try:
-        paths = InputHandler.get_input_paths(args)
+        paths = InputHandler.get_input_paths(
+            cli_paths=args.path,
+            use_clipboard=args.clipboard,
+            path_normalizer=PathHandler.normalize_path
+        )
         
         if not paths:
             logger.error("[#update_log]未提供任何有效路径")
