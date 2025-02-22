@@ -42,17 +42,17 @@ TEXTUAL_LAYOUT = {
     #     "style": "lightyellow"
     # },
     "path_progress": {
-        "ratio": 1,
+        "ratio": 2,
         "title": "🔄 当前进度",
         "style": "lightcyan"
     },
     "file_ops": {
-        "ratio": 2,
+        "ratio": 4,
         "title": "📂 文件操作",
         "style": "lightpink"
     },
     "sys_log": {
-        "ratio": 1,
+        "ratio": 3,
         "title": "🔧 系统消息",
         "style": "lightgreen"
     }
