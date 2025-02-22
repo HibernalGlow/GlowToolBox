@@ -70,9 +70,10 @@ def initialize_textual_logger(layout: dict, log_file: str) -> None:
 class RecruitCoverFilter:
     """封面图片过滤器"""
     
-    def __init__(self, hash_file: str = None, cover_count: int = 3, hamming_threshold: int = 12):
+    def __init__(self, hash_file: str = None, cover_count: int = 3, hamming_threshold: int = 12, watermark_keywords: List[str] = None):
         """初始化过滤器"""
         self.image_filter = ImageFilter(hash_file, cover_count, hamming_threshold)
+        self.watermark_keywords = watermark_keywords
         
     def process_archive(self, zip_path: str, extract_mode: str = ExtractMode.ALL, extract_params: dict = None) -> bool:
         """处理单个压缩包"""
@@ -106,8 +107,13 @@ class RecruitCoverFilter:
                     if PathHandler.get_file_extension(file) in {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif', '.heic', '.heif', '.jxl'}:
                         image_files.append(PathHandler.join_paths(root, file))
                         
-            # 处理图片
-            to_delete, removal_reasons = self.image_filter.process_images(image_files)
+            # 处理图片 - 启用重复图片过滤，使用水印模式
+            to_delete, removal_reasons = self.image_filter.process_images(
+                image_files,
+                enable_duplicate_filter=True,   # 启用重复图片过滤
+                duplicate_filter_mode='watermark',  # 使用水印过滤模式
+                watermark_keywords=self.watermark_keywords  # 传递水印关键词
+            )
             
             if not to_delete:
                 logger.info("[#file_ops]没有需要删除的图片")
@@ -180,6 +186,8 @@ def setup_cli_parser():
                       help='汉明距离阈值 (默认: 12)')
     parser.add_argument('--clipboard', '-c', action='store_true',
                       help='从剪贴板读取路径')
+    parser.add_argument('--watermark-keywords', '-wk', nargs='*',
+                      help='水印关键词列表，不指定则使用默认列表')
     parser.add_argument('--extract-mode', '-em', type=str, 
                       choices=[ExtractMode.ALL, ExtractMode.FIRST_N, ExtractMode.LAST_N, ExtractMode.RANGE],
                       default=ExtractMode.ALL, help='解压模式 (默认: all)')
@@ -206,7 +214,8 @@ def run_application(args):
         filter_instance = RecruitCoverFilter(
             hash_file=args.hash_file,
             cover_count=args.cover_count,
-            hamming_threshold=args.hamming_threshold
+            hamming_threshold=args.hamming_threshold,
+            watermark_keywords=args.watermark_keywords
         )
         
         # 准备解压参数
