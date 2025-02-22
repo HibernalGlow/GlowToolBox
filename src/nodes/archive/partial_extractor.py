@@ -2,7 +2,7 @@ import os
 import subprocess
 from typing import List, Set, Dict, Any
 import shutil
-from ..pics.range_control import RangeControl
+from nodes.pics.range_control import RangeControl
 
 class PartialExtractor:
     """处理压缩包部分解压的类"""
