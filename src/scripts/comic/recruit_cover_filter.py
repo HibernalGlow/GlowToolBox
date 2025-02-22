@@ -101,13 +101,14 @@ class RecruitCoverFilter:
                 else:  # Linux/MacOS
                     subprocess.run(f'rm -rf "{temp_dir}"', shell=True, check=True)
             except subprocess.CalledProcessError as e:
-                logger.error(f"[#file_ops]强制删除失败: {temp_dir}，错误: {e}")
+                logger.error(f"[#update_log]强制删除失败: {temp_dir}")
                 raise
 
     def process_archive(self, zip_path: str, extract_mode: str = ExtractMode.ALL, extract_params: dict = None) -> bool:
         """处理单个压缩包"""
         initialize_textual_logger(TEXTUAL_LAYOUT, config_info['log_file'])
         logger.info(f"[#file_ops]开始处理压缩包: {zip_path}")
+        logger.info("[#update_log]✅ 哈希索引已更新")
         
         # 列出压缩包内容
         files = ArchiveHandler.list_archive_contents(zip_path)
@@ -183,6 +184,7 @@ class RecruitCoverFilter:
                 return False
                 
             logger.info(f"[#file_ops]成功处理压缩包: {zip_path}")
+            logger.info("[#cur_progress]正在分析图片相似度...")
             self._robust_cleanup(temp_dir)
             return True
             
@@ -280,7 +282,7 @@ def run_application(args):
         for path in paths:
             app.process_directory(path, filter_instance)
             
-        logger.info("[#update_log]处理完成")
+        logger.info("[#update_log]✅ 所有任务已完成")
         return True
         
     except Exception as e:
