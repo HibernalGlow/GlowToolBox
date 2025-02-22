@@ -59,12 +59,13 @@ class WatermarkDetector:
         """生成图片的URI"""
         return PathURIGenerator.generate(image_path)
 
-    def detect_watermark(self, image_path: str) -> Tuple[bool, List[str]]:
+    def detect_watermark(self, image_path: str, keywords: List[str] = None) -> Tuple[bool, List[str]]:
         """
         检测图片中是否存在水印
         
         Args:
             image_path: 图片文件路径
+            keywords: 自定义水印关键词列表，None时使用默认列表
             
         Returns:
             Tuple[bool, List[str]]: (是否存在水印, 检测到的水印文字列表)
@@ -87,10 +88,13 @@ class WatermarkDetector:
                 self._save_cache()
                 logger.info(f"已缓存OCR结果: {image_uri}")
             
+            # 使用指定的关键词列表或默认列表
+            check_keywords = keywords if keywords is not None else self.watermark_keywords
+            
             # 检查是否包含水印关键词
             watermark_texts = []
             for text in detected_texts:
-                if any(keyword in text for keyword in self.watermark_keywords):
+                if any(keyword in text for keyword in check_keywords):
                     watermark_texts.append(text)
                     
             return bool(watermark_texts), watermark_texts

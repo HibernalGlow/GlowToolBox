@@ -232,35 +232,26 @@ class ImageFilter:
             group: 相似图片组
             watermark_keywords: 水印关键词列表，None时使用默认列表
         """
-        # 默认水印关键词
-        DEFAULT_WATERMARK_KEYWORDS = [
-            "招募", "水印", "版权", "禁止", "转载", "复制",
-            "盗版", "侵权", "版权所有", "未经授权"
-        ]
-        
-        keywords = watermark_keywords if watermark_keywords is not None else DEFAULT_WATERMARK_KEYWORDS
         to_delete = []
         watermark_results = {}
         
         # 检测每张图片的水印
         for img_path in group:
-            has_watermark, texts = self.watermark_detector.detect_watermark(img_path)
-            # 只有当检测到水印文字，且文字中包含关键词时才认为有水印
-            has_keyword = any(any(keyword in text for keyword in keywords) for text in texts) if texts else False
-            watermark_results[img_path] = (has_watermark and has_keyword, texts)
-            if has_watermark and has_keyword:
-                logger.info(f"发现水印关键词: {os.path.basename(img_path)} -> {texts}")
+            has_watermark, texts = self.watermark_detector.detect_watermark(img_path, watermark_keywords)
+            watermark_results[img_path] = (has_watermark, texts)
+            if has_watermark:
+                logger.info(f"发现水印: {os.path.basename(img_path)} -> {texts}")
             
         # 找出无水印的图片
         clean_images = [img for img, (has_mark, _) in watermark_results.items() if not has_mark]
         
-        # if clean_images:
-        #     # 如果有无水印图片，保留其中最大的一张
-        #     keep_image = max(clean_images, key=lambda x: os.path.getsize(x))
-        #     # 删除其他有水印的图片
-        #     for img in group:
-        #         if img != keep_image and watermark_results[img][0]:
-        #             to_delete.append((img, watermark_results[img][1]))
+        if clean_images:
+            # 如果有无水印图片，保留其中最大的一张
+            keep_image = max(clean_images, key=lambda x: os.path.getsize(x))
+            # 删除其他有水印的图片
+            for img in group:
+                if img != keep_image and watermark_results[img][0]:
+                    to_delete.append((img, watermark_results[img][1]))
                     
         return to_delete
 
