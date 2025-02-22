@@ -482,14 +482,16 @@ def run_application(args):
                 archive = future_to_archive[future]
                 try:
                     # 显示当前处理的文件进度
-                    logger.info(f"[@path_progress]处理文件: {os.path.basename(archive)} 0%")
+                    logger.info(f"[#path_progress]处理文件: {os.path.basename(archive)}")
+                    logger.info(f"[@path_progress]当前进度: 0%")
                     
                     success, error_msg = future.result()
                     if success:
                         success_count += 1
                         logger.info(f"[#file_ops]✅ 成功处理: {os.path.basename(archive)}")
                         # 更新当前文件进度为100%
-                        logger.info(f"[@path_progress]处理文件: {os.path.basename(archive)} 100%")
+                        logger.info(f"[#path_progress]处理文件: {os.path.basename(archive)}")
+                        logger.info(f"[@path_progress]当前进度: 100%")
                     else:
                         error_count += 1
                         error_msg = f"处理返回失败: {os.path.basename(archive)}, 原因: {error_msg}"
@@ -505,7 +507,7 @@ def run_application(args):
                     error_details.append(error_msg)
                     logger.error(f"[#file_ops]❌ {error_msg}")
                     # 更新当前文件进度为错误
-                    logger.info(f"[@path_progress]处理文件: {os.path.basename(archive)} (错误)")
+                    logger.info(f"[#path_progress]处理文件: {os.path.basename(archive)} (错误)")
                 
                 # 更新全局进度
                 completed = success_count + error_count
