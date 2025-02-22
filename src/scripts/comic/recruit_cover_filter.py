@@ -453,6 +453,8 @@ class Application:
     """应用程序类"""
     
     def process_directory(self, directory: str, filter_instance: RecruitCoverFilter):
+        initialize_textual_logger()
+
         """处理目录"""
         try:
             if os.path.isfile(directory):
@@ -472,7 +474,6 @@ class Application:
         try:
             args = InputHandler.parse_arguments()
             paths = InputHandler.get_input_paths(args)
-            initialize_textual_logger()
         
             if not paths:
                 logger.error("[#update_log]未提供任何有效路径")
