@@ -10,6 +10,7 @@ import argparse
 import pyperclip
 from nodes.config.import_bundles import *
 from nodes.record.logger_config import setup_logger
+from nodes.tui.mode_manager import create_mode_manager
 
 # 添加项目根目录到Python路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -497,7 +498,7 @@ class BackupHandler:
 class DebuggerHandler:
     """调试模式处理类"""
     
-    LAST_CONFIG_FILE = "last_debug_config.json"
+    LAST_CONFIG_FILE = "recruit_cover_filter_last_debug_config.json"
     
     @staticmethod
     def save_last_config(mode_choice, final_args):
@@ -696,12 +697,266 @@ class DebuggerHandler:
             
         return []
 
+class ModeManager:
+    """模式管理器，统一管理不同的运行模式"""
+    
+    def __init__(self, config: dict = None):
+        """
+        初始化模式管理器
+        
+        Args:
+            config: 配置字典，包含:
+                - use_debugger: 是否启用调试模式
+                - use_tui: 是否启用TUI模式
+                - debug_config: 调试模式配置
+                - tui_config: TUI模式配置
+                - cli_config: 命令行模式配置
+        """
+        self.config = config or {
+            'use_debugger': True,
+            'use_tui': True,
+            'debug_config': {
+                'base_modes': {
+                    "1": {
+                        "name": "去水印模式",
+                        "base_args": ["-cc", "-ht"],
+                        "default_params": {
+                            "cc": "3",
+                            "ht": "12"
+                        }
+                    },
+                    "2": {
+                        "name": "前N张模式",
+                        "base_args": ["-cc", "-ht", "-em", "first_n", "-en"],
+                        "default_params": {
+                            "cc": "3",
+                            "ht": "12",
+                            "en": "3"
+                        }
+                    },
+                    "3": {
+                        "name": "后N张模式",
+                        "base_args": ["-cc", "-ht", "-em", "last_n", "-en"],
+                        "default_params": {
+                            "cc": "3",
+                            "ht": "12",
+                            "en": "3"
+                        }
+                    },
+                    "4": {
+                        "name": "范围模式",
+                        "base_args": ["-cc", "-ht", "-em", "range", "-er"],
+                        "default_params": {
+                            "cc": "3",
+                            "ht": "12",
+                            "er": "0:3"
+                        }
+                    }
+                },
+                'param_options': {
+                    "cc": {"name": "处理图片数量", "arg": "-cc", "default": "3", "type": int},
+                    "ht": {"name": "汉明距离阈值", "arg": "-ht", "default": "12", "type": int},
+                    "en": {"name": "解压数量", "arg": "-en", "default": "3", "type": int},
+                    "er": {"name": "解压范围", "arg": "-er", "default": "0:3", "type": str},
+                    "c": {"name": "从剪贴板读取", "arg": "-c", "is_flag": True}
+                }
+            },
+            'tui_config': {
+                'checkbox_options': [
+                    ("从剪贴板读取", "clipboard", "-c"),
+                ],
+                'input_options': [
+                    ("处理图片数量", "cover_count", "-cc", "3", "输入数字(默认3)"),
+                    ("汉明距离阈值", "hamming_threshold", "-ht", "12", "输入数字(默认12)"),
+                    ("解压数量", "extract_n", "-en", "3", "输入数字(默认3)"),
+                    ("解压范围", "extract_range", "-er", "0:3", "格式: start:end"),
+                    ("哈希文件路径", "hash_file", "-hf", "", "输入哈希文件路径(可选)"),
+                ],
+                'preset_configs': {
+                    "去水印模式": {
+                        "description": "仅处理水印和重复",
+                        "checkbox_options": ["clipboard"],
+                        "input_values": {
+                            "cover_count": "3",
+                            "hamming_threshold": "12"
+                        }
+                    },
+                    "前N张模式": {
+                        "description": "处理前N张图片",
+                        "checkbox_options": ["clipboard"],
+                        "input_values": {
+                            "cover_count": "3",
+                            "hamming_threshold": "12",
+                            "extract_n": "3",
+                            "extract_mode": "first_n"
+                        }
+                    },
+                    "后N张模式": {
+                        "description": "处理后N张图片",
+                        "checkbox_options": ["clipboard"],
+                        "input_values": {
+                            "cover_count": "3",
+                            "hamming_threshold": "12",
+                            "extract_n": "3",
+                            "extract_mode": "last_n"
+                        }
+                    },
+                    "范围模式": {
+                        "description": "处理指定范围的图片",
+                        "checkbox_options": ["clipboard"],
+                        "input_values": {
+                            "cover_count": "3",
+                            "hamming_threshold": "12",
+                            "extract_range": "0:3",
+                            "extract_mode": "range"
+                        }
+                    }
+                }
+            }
+        }
+        
+    def _setup_cli_parser(self):
+        """设置命令行参数解析器"""
+        parser = argparse.ArgumentParser(description='招募封面图片过滤工具')
+        parser.add_argument('--hash-file', '-hf', type=str,
+                          help='哈希文件路径（可选，默认使用全局配置）')
+        parser.add_argument('--cover-count', '-cc', type=int, default=3,
+                          help='处理的封面图片数量 (默认: 3)')
+        parser.add_argument('--hamming-threshold', '-ht', type=int, default=12,
+                          help='汉明距离阈值 (默认: 12)')
+        parser.add_argument('--clipboard', '-c', action='store_true',
+                          help='从剪贴板读取路径')
+        parser.add_argument('--extract-mode', '-em', type=str, 
+                          choices=[ExtractMode.ALL, ExtractMode.FIRST_N, ExtractMode.LAST_N, ExtractMode.RANGE],
+                          default=ExtractMode.ALL, help='解压模式 (默认: all)')
+        parser.add_argument('--extract-n', '-en', type=int,
+                          help='解压数量 (用于 first_n 和 last_n 模式)')
+        parser.add_argument('--extract-range', '-er', type=str,
+                          help='解压范围 (用于 range 模式，格式: start:end)')
+        parser.add_argument('path', nargs='*', help='要处理的文件或目录路径')
+        return parser
+        
+    def _run_tui_mode(self):
+        """运行TUI模式"""
+        def on_run(params: dict):
+            """TUI回调函数"""
+            args = []
+            
+            # 添加选中的选项
+            for arg, enabled in params['options'].items():
+                if enabled:
+                    args.append(arg)
+            
+            # 添加输入值
+            for arg, value in params['inputs'].items():
+                if value:
+                    args.extend([arg, value])
+            
+            # 如果选择了预设，添加对应的extract_mode
+            if params.get('preset'):
+                preset_name = params['preset']
+                if preset_name == "前N张模式":
+                    args.extend(['-em', 'first_n'])
+                elif preset_name == "后N张模式":
+                    args.extend(['-em', 'last_n'])
+                elif preset_name == "范围模式":
+                    args.extend(['-em', 'range'])
+            
+            # 运行命令行模式
+            return self._run_cli_mode(args)
+        
+        # 创建TUI应用
+        app = create_config_app(
+            program=sys.argv[0],
+            checkbox_options=self.config['tui_config']['checkbox_options'],
+            input_options=self.config['tui_config']['input_options'],
+            title="招募封面图片过滤工具",
+            preset_configs=self.config['tui_config']['preset_configs'],
+            on_run=on_run
+        )
+        
+        # 运行TUI应用
+        app.run()
+        return True
+        
+    def _run_debug_mode(self):
+        """运行调试模式"""
+        debugger = DebuggerHandler()
+        debugger.base_modes = self.config['debug_config']['base_modes']
+        
+        selected_options = debugger.get_debugger_options()
+        if selected_options:
+            return self._run_cli_mode(selected_options)
+        return False
+        
+    def _run_cli_mode(self, cli_args=None):
+        """运行命令行模式"""
+        parser = self._setup_cli_parser()
+        args = parser.parse_args(cli_args)
+        return self._run_application(args)
+        
+    def _run_application(self, args):
+        """运行应用程序"""
+        try:
+            paths = InputHandler.get_input_paths(args)
+            
+            if not paths:
+                logger.error("[#update_log]未提供任何有效路径")
+                return False
+                
+            filter_instance = RecruitCoverFilter(
+                hash_file=args.hash_file,
+                cover_count=args.cover_count,
+                hamming_threshold=args.hamming_threshold
+            )
+            
+            # 准备解压参数
+            extract_params = {}
+            if args.extract_mode in [ExtractMode.FIRST_N, ExtractMode.LAST_N]:
+                extract_params['n'] = args.extract_n
+            elif args.extract_mode == ExtractMode.RANGE:
+                extract_params['range_str'] = args.extract_range
+                
+            app = Application()
+            for path in paths:
+                app.process_directory(path, filter_instance)
+                
+            logger.info("[#update_log]处理完成")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[#update_log]程序执行失败: {e}")
+            return False
+            
+    def run(self, cli_args=None):
+        """
+        运行程序
+        
+        Args:
+            cli_args: 命令行参数列表，如果为None则从sys.argv获取
+            
+        Returns:
+            bool: 是否成功执行
+        """
+        try:
+            # 根据不同模式运行
+            if cli_args:
+                return self._run_cli_mode(cli_args)
+            elif self.config['use_tui']:
+                return self._run_tui_mode()
+            elif self.config['use_debugger']:
+                return self._run_debug_mode()
+            else:
+                return self._run_cli_mode()
+                
+        except Exception as e:
+            logger.error(f"[#update_log]运行失败: {e}")
+            return False
+
 class Application:
     """应用程序类"""
     
     def process_directory(self, directory: str, filter_instance: RecruitCoverFilter):
-        initialize_textual_logger()
-
         """处理目录"""
         try:
             if os.path.isfile(directory):
@@ -716,45 +971,174 @@ class Application:
         except Exception as e:
             logger.error(f"[#update_log]处理目录失败 {directory}: {e}")
 
-    def main(self):
-        """主函数"""
-        try:
-            args = InputHandler.parse_arguments()
-            paths = InputHandler.get_input_paths(args)
+def setup_cli_parser():
+    """设置命令行参数解析器"""
+    parser = argparse.ArgumentParser(description='招募封面图片过滤工具')
+    parser.add_argument('--hash-file', '-hf', type=str,
+                      help='哈希文件路径（可选，默认使用全局配置）')
+    parser.add_argument('--cover-count', '-cc', type=int, default=3,
+                      help='处理的封面图片数量 (默认: 3)')
+    parser.add_argument('--hamming-threshold', '-ht', type=int, default=12,
+                      help='汉明距离阈值 (默认: 12)')
+    parser.add_argument('--clipboard', '-c', action='store_true',
+                      help='从剪贴板读取路径')
+    parser.add_argument('--extract-mode', '-em', type=str, 
+                      choices=[ExtractMode.ALL, ExtractMode.FIRST_N, ExtractMode.LAST_N, ExtractMode.RANGE],
+                      default=ExtractMode.ALL, help='解压模式 (默认: all)')
+    parser.add_argument('--extract-n', '-en', type=int,
+                      help='解压数量 (用于 first_n 和 last_n 模式)')
+    parser.add_argument('--extract-range', '-er', type=str,
+                      help='解压范围 (用于 range 模式，格式: start:end)')
+    parser.add_argument('path', nargs='*', help='要处理的文件或目录路径')
+    return parser
+
+def run_application(args):
+    """运行应用程序"""
+    try:
+        paths = InputHandler.get_input_paths(args)
         
-            if not paths:
-                logger.error("[#update_log]未提供任何有效路径")
-                return
-                
-            filter_instance = RecruitCoverFilter(
-                hash_file=args.hash_file,
-                cover_count=args.cover_count,
-                hamming_threshold=args.hamming_threshold
-            )
+        if not paths:
+            logger.error("[#update_log]未提供任何有效路径")
+            return False
             
-            # 准备解压参数
-            extract_params = {}
-            if args.extract_mode in [ExtractMode.FIRST_N, ExtractMode.LAST_N]:
-                extract_params['n'] = args.extract_n
-            elif args.extract_mode == ExtractMode.RANGE:
-                extract_params['range_str'] = args.extract_range
+        filter_instance = RecruitCoverFilter(
+            hash_file=args.hash_file,
+            cover_count=args.cover_count,
+            hamming_threshold=args.hamming_threshold
+        )
+        
+        # 准备解压参数
+        extract_params = {}
+        if args.extract_mode in [ExtractMode.FIRST_N, ExtractMode.LAST_N]:
+            extract_params['n'] = args.extract_n
+        elif args.extract_mode == ExtractMode.RANGE:
+            extract_params['range_str'] = args.extract_range
             
-            for path in paths:
-                self.process_directory(path, filter_instance)
-                
-            logger.info("[#update_log]处理完成")
+        app = Application()
+        for path in paths:
+            app.process_directory(path, filter_instance)
             
-        except Exception as e:
-            logger.error(f"[#update_log]程序执行失败: {e}")
+        logger.info("[#update_log]处理完成")
+        return True
+        
+    except Exception as e:
+        logger.error(f"[#update_log]程序执行失败: {e}")
+        return False
+
+def get_mode_config():
+    """获取模式配置"""
+    return {
+        'use_debugger': True,
+        'use_tui': True,
+        'debug_config': {
+            'base_modes': {
+                "1": {
+                    "name": "去水印模式",
+                    "base_args": ["-cc", "-ht"],
+                    "default_params": {
+                        "cc": "3",
+                        "ht": "12"
+                    }
+                },
+                "2": {
+                    "name": "前N张模式",
+                    "base_args": ["-cc", "-ht", "-em", "first_n", "-en"],
+                    "default_params": {
+                        "cc": "3",
+                        "ht": "12",
+                        "en": "3"
+                    }
+                },
+                "3": {
+                    "name": "后N张模式",
+                    "base_args": ["-cc", "-ht", "-em", "last_n", "-en"],
+                    "default_params": {
+                        "cc": "3",
+                        "ht": "12",
+                        "en": "3"
+                    }
+                },
+                "4": {
+                    "name": "范围模式",
+                    "base_args": ["-cc", "-ht", "-em", "range", "-er"],
+                    "default_params": {
+                        "cc": "3",
+                        "ht": "12",
+                        "er": "0:3"
+                    }
+                }
+            },
+            'last_config_file': 'recruit_cover_filter_last_debug_config.json'
+        },
+        'tui_config': {
+            'checkbox_options': [
+                ("从剪贴板读取", "clipboard", "-c"),
+            ],
+            'input_options': [
+                ("处理图片数量", "cover_count", "-cc", "3", "输入数字(默认3)"),
+                ("汉明距离阈值", "hamming_threshold", "-ht", "12", "输入数字(默认12)"),
+                ("解压数量", "extract_n", "-en", "3", "输入数字(默认3)"),
+                ("解压范围", "extract_range", "-er", "0:3", "格式: start:end"),
+                ("哈希文件路径", "hash_file", "-hf", "", "输入哈希文件路径(可选)"),
+            ],
+            'preset_configs': {
+                "去水印模式": {
+                    "description": "仅处理水印和重复",
+                    "checkbox_options": ["clipboard"],
+                    "input_values": {
+                        "cover_count": "3",
+                        "hamming_threshold": "12"
+                    }
+                },
+                "前N张模式": {
+                    "description": "处理前N张图片",
+                    "checkbox_options": ["clipboard"],
+                    "input_values": {
+                        "cover_count": "3",
+                        "hamming_threshold": "12",
+                        "extract_n": "3"
+                    },
+                    "extra_args": ["-em", "first_n"]
+                },
+                "后N张模式": {
+                    "description": "处理后N张图片",
+                    "checkbox_options": ["clipboard"],
+                    "input_values": {
+                        "cover_count": "3",
+                        "hamming_threshold": "12",
+                        "extract_n": "3"
+                    },
+                    "extra_args": ["-em", "last_n"]
+                },
+                "范围模式": {
+                    "description": "处理指定范围的图片",
+                    "checkbox_options": ["clipboard"],
+                    "input_values": {
+                        "cover_count": "3",
+                        "hamming_threshold": "12",
+                        "extract_range": "0:3"
+                    },
+                    "extra_args": ["-em", "range"]
+                }
+            }
+        }
+    }
 
 if __name__ == '__main__':
-    if USE_DEBUGGER and len(sys.argv) <= 1:
-        selected_options = DebuggerHandler.get_debugger_options()
-        if selected_options:
-            args = InputHandler.parse_arguments(selected_options)
-            Application().main()
-        else:
-            print("未选择任何功能，程序退出。")
-            sys.exit(0)
+    # 创建模式管理器
+    mode_manager = create_mode_manager(
+        config=get_mode_config(),
+        cli_parser_setup=setup_cli_parser,
+        application_runner=run_application
+    )
+    
+    # 根据参数选择运行模式
+    if len(sys.argv) > 1:
+        # 有命令行参数时运行命令行模式
+        success = mode_manager.run_cli()
     else:
-        Application().main() 
+        # 无参数时运行TUI模式
+        success = mode_manager.run_tui()
+    
+    if not success:
+        sys.exit(1) 
