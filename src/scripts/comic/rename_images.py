@@ -9,6 +9,7 @@ import sys
 import subprocess
 import time  # 添加time模块导入
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from nodes.pics.watermark_detector import WatermarkDetector
 
 class InputHandler:
     """输入处理类"""
@@ -165,6 +166,8 @@ def rename_images_in_zip(zip_path, input_base_path):
         return
 
     new_zip_path = None  # 初始化变量
+    detector = WatermarkDetector()  # 创建水印检测器实例
+    
     try:
         # 创建新的压缩包路径
         original_dir = os.path.dirname(zip_path)
@@ -175,38 +178,61 @@ def rename_images_in_zip(zip_path, input_base_path):
         # 备份原始文件（使用完整路径）
         backup_file(zip_path, zip_path, input_base_path)
 
-        # 使用7z重命名文件
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            with zipfile.ZipFile(new_zip_path, 'w', zipfile.ZIP_DEFLATED) as new_zip:
-                for item in zip_ref.infolist():
-                    # 读取原始文件内容
-                    with zip_ref.open(item.filename) as source:
-                        data = source.read()
-                        
-                    # 处理文件名
-                    new_filename = re.sub(r'\[hash-[0-9a-fA-F]+\]', '', item.filename)
-                    
-                    # 如果文件名没有变化，直接写入
-                    if new_filename == item.filename:
-                        new_zip.writestr(item, data)
-                    else:
-                        # 创建新的ZipInfo对象以保留原始文件属性
-                        new_info = zipfile.ZipInfo(new_filename)
-                        new_info.date_time = item.date_time
-                        new_info.compress_type = item.compress_type
-                        new_info.create_system = item.create_system
-                        new_info.external_attr = item.external_attr
-                        new_zip.writestr(new_info, data)
-                        print(f"重命名: {item.filename} -> {new_filename}")
+        # 定义需要过滤的关键词
+        filter_keywords = ['招募', '公众号', '微信', '关注']
+        filtered_files = []
 
-        # 检查新压缩包大小
-        # if os.path.getsize(new_zip_path) > os.path.getsize(zip_path) + 1024*1024:
-        #     print(f"警告: 新压缩包大小增加超过1MB，还原备份")
-        #     os.remove(new_zip_path)
-        #     return
+        # 创建临时目录用于存放解压的图片
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # 使用7z重命名文件
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                with zipfile.ZipFile(new_zip_path, 'w', zipfile.ZIP_DEFLATED) as new_zip:
+                    for item in zip_ref.infolist():
+                        # 检查文件名是否包含过滤关键词
+                        if any(keyword in item.filename for keyword in filter_keywords):
+                            filtered_files.append(item.filename)
+                            print(f"基于文件名过滤: {item.filename}")
+                            continue
+
+                        # 检查是否为图片文件
+                        if item.filename.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.avif', '.jxl')):
+                            # 解压到临时目录
+                            temp_path = os.path.join(temp_dir, os.path.basename(item.filename))
+                            with zip_ref.open(item) as source, open(temp_path, 'wb') as target:
+                                shutil.copyfileobj(source, target)
+                            
+                            # 检测水印
+                            has_watermark, watermark_texts = detector.detect_watermark(temp_path)
+                            if has_watermark:
+                                filtered_files.append(item.filename)
+                                print(f"基于OCR过滤: {item.filename}")
+                                print(f"检测到的水印文字: {watermark_texts}")
+                                continue
+
+                        # 读取原始文件内容
+                        with zip_ref.open(item.filename) as source:
+                            data = source.read()
+                            
+                        # 处理文件名
+                        new_filename = re.sub(r'\[hash-[0-9a-fA-F]+\]', '', item.filename)
+                        
+                        # 如果文件名没有变化，直接写入
+                        if new_filename == item.filename:
+                            new_zip.writestr(item, data)
+                        else:
+                            # 创建新的ZipInfo对象以保留原始文件属性
+                            new_info = zipfile.ZipInfo(new_filename)
+                            new_info.date_time = item.date_time
+                            new_info.compress_type = item.compress_type
+                            new_info.create_system = item.create_system
+                            new_info.external_attr = item.external_attr
+                            new_zip.writestr(new_info, data)
+                            print(f"重命名: {item.filename} -> {new_filename}")
 
         # 替换原始文件
         os.replace(new_zip_path, zip_path)
+        if filtered_files:
+            print(f"已过滤 {len(filtered_files)} 个文件")
         print(f"压缩包处理完成：{zip_path}")
         
     except Exception as e:
