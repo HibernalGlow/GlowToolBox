@@ -6,15 +6,13 @@ from .watermark_detector import WatermarkDetector
 from PIL import Image
 from io import BytesIO
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import multiprocessing
 
 logger = logging.getLogger(__name__)
 
 class ImageFilter:
     """图片过滤器，支持多种独立的过滤功能"""
     
-    def __init__(self, hash_file: str = None, hamming_threshold: int = 12, ref_hamming_threshold: int = None, max_workers: int = None):
+    def __init__(self, hash_file: str = None, hamming_threshold: int = 12, ref_hamming_threshold: int = None):
         """
         初始化过滤器
         
@@ -22,7 +20,6 @@ class ImageFilter:
             hash_file: 哈希文件路径
             hamming_threshold: 汉明距离阈值
             ref_hamming_threshold: 哈希文件过滤的汉明距离阈值，默认使用hamming_threshold
-            max_workers: 最大工作线程数，默认为CPU核心数
         """
         self.hash_file = hash_file
         self.hamming_threshold = hamming_threshold
@@ -31,7 +28,6 @@ class ImageFilter:
         if hash_file:
             self.hash_cache = self._load_hash_file()
         self.watermark_detector = WatermarkDetector()
-        self.max_workers = max_workers or multiprocessing.cpu_count()
         
     def _load_hash_file(self) -> Dict:
         """加载哈希文件"""
@@ -160,27 +156,16 @@ class ImageFilter:
         # 使用传入的阈值或默认值
         threshold = ref_hamming_threshold if ref_hamming_threshold is not None else self.ref_hamming_threshold
         
-        # 使用线程池并行计算哈希值
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # 并行计算哈希值
-            future_to_img = {
-                executor.submit(self._get_image_hash_and_uri, img_path): img_path 
-                for img_path in group
-            }
-            
-            # 收集结果
-            hash_values = {}
-            for future in as_completed(future_to_img):
-                img_path = future_to_img[future]
-                try:
-                    result = future.result()
-                    if result:
-                        uri, hash_value = result
-                        hash_values[img_path] = (uri, hash_value)
-                except Exception as e:
-                    logger.error(f"计算哈希值失败 {img_path}: {e}")
+        # 预先计算所有图片的哈希值
+        hash_values = {}
+        for img_path in group:
+            hash_value = self._get_image_hash(img_path)
+            if hash_value:
+                uri = PathURIGenerator.generate(img_path)
+                if uri:
+                    hash_values[img_path] = (uri, hash_value)
         
-        # 读取哈希文件
+        # 直接从哈希文件读取
         try:
             with open(self.hash_file, 'r', encoding='utf-8') as f:
                 hash_data = json.load(f).get('hashes', {})
@@ -188,61 +173,8 @@ class ImageFilter:
             logger.error(f"读取哈希文件失败: {e}")
             return to_delete, removal_reasons
         
-        # 并行比较哈希值
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # 创建比较任务
-            future_to_comparison = {
-                executor.submit(
-                    self._compare_hash_with_reference,
-                    img_path, current_uri, current_hash,
-                    hash_data, threshold
-                ): img_path
-                for img_path, (current_uri, current_hash) in hash_values.items()
-            }
-            
-            # 收集结果
-            for future in as_completed(future_to_comparison):
-                img_path = future_to_comparison[future]
-                try:
-                    result = future.result()
-                    if result:
-                        match_uri, distance = result
-                        to_delete.add(img_path)
-                        removal_reasons[img_path] = {
-                            'reason': 'hash_duplicate',
-                            'ref_uri': match_uri,
-                            'distance': distance
-                        }
-                        logger.info(f"标记删除重复图片: {os.path.basename(img_path)} (参考URI: {match_uri}, 距离: {distance})")
-                except Exception as e:
-                    logger.error(f"比较哈希值失败 {img_path}: {e}")
-                    
-        return to_delete, removal_reasons
-
-    def _get_image_hash_and_uri(self, img_path: str) -> Tuple[str, str]:
-        """获取图片的哈希值和URI"""
-        try:
-            if not os.path.exists(img_path):
-                return None
-            
-            uri = PathURIGenerator.generate(img_path)
-            if not uri:
-                return None
-                
-            hash_value = self._get_image_hash(img_path)
-            if not hash_value:
-                return None
-                
-            return uri, hash_value
-            
-        except Exception as e:
-            logger.error(f"获取图片哈希和URI失败 {img_path}: {e}")
-            return None
-
-    def _compare_hash_with_reference(self, img_path: str, current_uri: str, current_hash: str, 
-                                   hash_data: Dict, threshold: int) -> Tuple[str, int]:
-        """比较哈希值与参考哈希值"""
-        try:
+        # 比较哈希值
+        for img_path, (current_uri, current_hash) in hash_values.items():
             for uri, ref_data in hash_data.items():
                 if uri == current_uri:
                     continue
@@ -251,14 +183,22 @@ class ImageFilter:
                 if not ref_hash:
                     continue
                     
-                distance = ImageHashCalculator.calculate_hamming_distance(current_hash, ref_hash)
-                if distance <= threshold:
-                    return uri, distance
-            return None
-            
-        except Exception as e:
-            logger.error(f"比较哈希值失败 {img_path}: {e}")
-            return None
+                try:
+                    distance = ImageHashCalculator.calculate_hamming_distance(current_hash, ref_hash)
+                    if distance <= threshold:
+                        to_delete.add(img_path)
+                        removal_reasons[img_path] = {
+                            'reason': 'hash_duplicate',
+                            'ref_uri': uri,
+                            'distance': distance
+                        }
+                        logger.info(f"标记删除重复图片: {os.path.basename(img_path)} (参考URI: {uri}, 距离: {distance})")
+                        break
+                except Exception as e:
+                    logger.error(f"计算汉明距离失败 {img_path} vs {uri}: {str(e)}")
+                    continue
+                    
+        return to_delete, removal_reasons
 
     def process_images(
         self, 
@@ -348,74 +288,41 @@ class ImageFilter:
         similar_groups = []
         processed = set()
         
-        # 并行计算所有图片的哈希值
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_to_img = {
-                executor.submit(self._get_image_hash, img): img 
-                for img in images
-            }
-            
-            # 收集哈希值
-            hash_values = {}
-            for future in as_completed(future_to_img):
-                img = future_to_img[future]
-                try:
-                    hash_value = future.result()
-                    if hash_value:
-                        hash_values[img] = hash_value
-                except Exception as e:
-                    logger.error(f"计算哈希值失败 {img}: {e}")
-        
-        # 使用计算好的哈希值进行比较
         for i, img1 in enumerate(images):
-            if img1 in processed or img1 not in hash_values:
+            if img1 in processed:
                 continue
                 
-            hash1 = hash_values[img1]
+            hash1 = self._get_image_hash(img1)
+            if not hash1:  # 跳过无效哈希
+                logger.warning(f"跳过无效哈希的图片: {os.path.basename(img1)}")
+                continue
+                
             current_group = [img1]
             
-            # 并行比较剩余图片
-            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                future_to_comparison = {
-                    executor.submit(
-                        self._compare_hashes,
-                        hash1, hash_values.get(img2), img2,
-                        self.hamming_threshold
-                    ): img2
-                    for img2 in images[i+1:]
-                    if img2 not in processed and img2 in hash_values
-                }
-                
-                # 收集结果
-                for future in as_completed(future_to_comparison):
-                    img2 = future_to_comparison[future]
-                    try:
-                        is_similar = future.result()
-                        if is_similar:
-                            current_group.append(img2)
-                    except Exception as e:
-                        logger.error(f"比较哈希值失败 {img1} vs {img2}: {e}")
-            
+            for j, img2 in enumerate(images[i+1:], i+1):
+                if img2 in processed:
+                    continue
+                    
+                hash2 = self._get_image_hash(img2)
+                if not hash2:  # 跳过无效哈希
+                    logger.warning(f"跳过无效哈希的图片: {os.path.basename(img2)}")
+                    continue
+                    
+                try:
+                    distance = ImageHashCalculator.calculate_hamming_distance(hash1, hash2)
+                    if distance <= self.hamming_threshold:
+                        current_group.append(img2)
+                        logger.info(f"找到相似图片: {os.path.basename(img2)} (距离: {distance})")
+                except Exception as e:
+                    logger.error(f"计算汉明距离失败 {img1} vs {img2}: {str(e)}")
+                    continue
+                    
             if len(current_group) > 1:
                 similar_groups.append(current_group)
                 processed.update(current_group)
                 logger.info(f"找到相似图片组: {len(current_group)}张")
                 
         return similar_groups
-
-    def _compare_hashes(self, hash1: str, hash2: str, img2: str, threshold: int) -> bool:
-        """比较两个哈希值"""
-        try:
-            if not hash2:
-                return False
-            distance = ImageHashCalculator.calculate_hamming_distance(hash1, hash2)
-            if distance <= threshold:
-                logger.info(f"找到相似图片: {os.path.basename(img2)} (距离: {distance})")
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"比较哈希值失败: {e}")
-            return False
 
     def _get_image_hash(self, image_path: str) -> str:
         """获取图片哈希值，优先从缓存读取"""
