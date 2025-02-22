@@ -17,7 +17,7 @@ def extract_processed_paths(logs_dir: str, output_file: str):
                     with open(log_path, 'r', encoding='utf-8') as f:
                         content = f.read()
                         # 匹配作者目录路径
-                        paths = re.findall(r'E:\\1EHV\\[^"<>|:\n]+?(?=\]|\n|$)', content)
+                        paths = re.findall(r'E:\\\d+EHV\\[^"<>|:\n]+?(?=\]|\n|$)', content)
                         processed_dirs.update(paths)
                 except Exception as e:
                     print(f"读取日志文件失败 {log_path}: {e}")
@@ -27,7 +27,7 @@ def extract_processed_paths(logs_dir: str, output_file: str):
     for path in processed_dirs:
         # 清理路径并确保以]结尾
         clean_path = path.strip().strip('"\']') + ']'
-        if clean_path.startswith('E:\\1EHV\\['):
+        if clean_path.startswith('E:\\\d+EHV\\['):
             cleaned_paths.add(clean_path)
     
     # 保存到文件
