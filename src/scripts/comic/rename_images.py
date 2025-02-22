@@ -9,7 +9,6 @@ import sys
 import subprocess
 import time  # 添加time模块导入
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
-from fix_filename_encoding import EncodingFixer
 
 class InputHandler:
     """输入处理类"""
@@ -90,9 +89,6 @@ def backup_file(file_path, original_path, input_base_path):
 def rename_images_in_directory(dir_path):
     processed_count = 0
     skipped_count = 0
-    encoding_fixed_count = 0
-    
-    fixer = EncodingFixer(verbose=True)
     
     # 获取总文件数
     total_files = sum(1 for root, _, files in os.walk(dir_path) 
@@ -112,17 +108,7 @@ def rename_images_in_directory(dir_path):
                 if filename.lower().endswith(('.jpg', '.png', '.avif', '.jxl', 'webp')):
                     progress.update(task, description=f"处理: {filename}")
                     
-                    # 首先尝试修复文件名编码
-                    fixed_filename, method = fixer.fix_filename(filename)
-                    if fixed_filename != filename:
-                        print(f"\n🔍 检测到编码问题")
-                        print(f"   原文件名: {filename}")
-                        print(f"   修复后: {fixed_filename}")
-                        print(f"   使用方法: {method}")
-                        filename = fixed_filename
-                        encoding_fixed_count += 1
-                    
-                    # 处理hash标记
+                    # 匹配文件名中的 [hash-xxxxxx] 模式
                     new_filename = re.sub(r'\[hash-[0-9a-fA-F]+\]', '', filename)
                     
                     # 如果文件名发生了变化
@@ -159,9 +145,7 @@ def rename_images_in_directory(dir_path):
     
     print(f"\n📊 处理完成:")
     print(f"   - 成功处理: {processed_count} 个文件")
-    print(f"   - 修复编码: {encoding_fixed_count} 个文件")
     print(f"   - 跳过处理: {skipped_count} 个文件")
-
 def has_hash_files_in_zip(zip_path):
     """使用7z检查压缩包中是否有包含[hash-]的文件"""
     try:
@@ -179,8 +163,6 @@ def rename_images_in_zip(zip_path, input_base_path):
 
     new_zip_path = None  # 初始化变量
     try:
-        fixer = EncodingFixer(verbose=True)
-        
         # 创建新的压缩包路径
         original_dir = os.path.dirname(zip_path)
         file_name = os.path.splitext(os.path.basename(zip_path))[0]
@@ -198,17 +180,7 @@ def rename_images_in_zip(zip_path, input_base_path):
                     with zip_ref.open(item.filename) as source:
                         data = source.read()
                         
-                    # 处理文件名，包括编码修复
-                    original_filename = item.filename
-                    fixed_filename, method = fixer.fix_filename(original_filename)
-                    if fixed_filename != original_filename:
-                        print(f"\n🔍 检测到编码问题")
-                        print(f"   原文件名: {original_filename}")
-                        print(f"   修复后: {fixed_filename}")
-                        print(f"   使用方法: {method}")
-                        item.filename = fixed_filename
-                    
-                    # 处理hash标记
+                    # 处理文件名
                     new_filename = re.sub(r'\[hash-[0-9a-fA-F]+\]', '', item.filename)
                     
                     # 如果文件名没有变化，直接写入
@@ -240,7 +212,6 @@ def rename_images_in_zip(zip_path, input_base_path):
             os.remove(new_zip_path)
         print("继续处理下一个文件...")
         return  # 返回继续处理下一个文件
-
 if __name__ == "__main__":
     # 获取输入路径
     args = InputHandler.parse_arguments()
