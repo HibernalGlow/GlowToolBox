@@ -6,9 +6,10 @@ from pathlib import Path
 import sys
 import fnmatch
 import time
-import psutil
-from datetime import datetime, timedelta
+import threading
+from enum import Enum
 from nodes.tui.textual_preset import create_config_app
+
 try:
     import keyboard
 except ImportError:
@@ -27,6 +28,12 @@ DELETE_KEYWORDS = [
     ('temp_*', 'dir'),     # 仅匹配文件夹
     ('*.trash', 'both')    # 同时匹配文件和文件夹
 ]
+
+# 添加无限模式枚举类
+class InfiniteMode(Enum):
+    NONE = "none"  # 不使用无限模式
+    KEYBOARD = "keyboard"  # 键盘触发模式
+    TIMER = "timer"  # 定时触发模式
 
 def is_video_file(filename):
     """判断文件是否为视频文件"""
@@ -287,72 +294,6 @@ def handle_name_conflict(target_path, is_dir=False, mode='auto'):
                 return new_path, True
             counter += 1
 
-def is_file_in_use(file_path):
-    """
-    检查文件是否正在被使用
-    
-    参数:
-    file_path (Path/str): 文件路径
-    
-    返回:
-    bool: 如果文件正在被使用返回True，否则返回False
-    """
-    try:
-        path = str(file_path)
-        for proc in psutil.process_iter(['pid', 'open_files']):
-            try:
-                files = proc.info['open_files']
-                if files:
-                    for file in files:
-                        if file.path == path:
-                            return True
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-        return False
-    except Exception as e:
-        print(f"检查文件占用状态时出错: {e}")
-        return True  # 如果无法确定，则假设文件正在使用中
-
-def handle_file_operation(file_path, operation_func, *args, **kwargs):
-    """
-    安全地处理文件操作，检查文件是否被占用
-    
-    参数:
-    file_path (Path): 要操作的文件路径
-    operation_func: 要执行的操作函数
-    *args, **kwargs: 传递给操作函数的参数
-    
-    返回:
-    bool: 操作是否成功
-    """
-    max_retries = 3
-    retry_delay = 2  # 秒
-    
-    for attempt in range(max_retries):
-        if is_file_in_use(file_path):
-            print(f"文件正在被使用中: {file_path}")
-            if attempt < max_retries - 1:
-                print(f"等待 {retry_delay} 秒后重试...")
-                time.sleep(retry_delay)
-                continue
-            return False
-        
-        try:
-            operation_func(*args, **kwargs)
-            return True
-        except PermissionError:
-            if attempt < max_retries - 1:
-                print(f"权限不足，等待 {retry_delay} 秒后重试...")
-                time.sleep(retry_delay)
-            else:
-                print(f"无法访问文件: {file_path}")
-                return False
-        except Exception as e:
-            print(f"操作失败: {e}")
-            return False
-    
-    return False
-
 def dissolve_folder(path, file_conflict='auto', dir_conflict='auto'):
     """
     将指定文件夹中的所有内容移动到其父文件夹中，然后删除该文件夹
@@ -374,9 +315,6 @@ def dissolve_folder(path, file_conflict='auto', dir_conflict='auto'):
         # 获取所有项目并排序（文件优先）
         items = list(path.iterdir())
         items.sort(key=lambda x: (x.is_dir(), x.name))  # 文件在前，文件夹在后
-        
-        def move_item(src, dst):
-            return handle_file_operation(src, shutil.move, str(src.absolute()), str(dst.absolute()))
         
         for item in items:
             target_path = parent_dir / item.name
@@ -410,12 +348,10 @@ def dissolve_folder(path, file_conflict='auto', dir_conflict='auto'):
                             )
                             if not sub_should_proceed:
                                 continue
-                        if not move_item(sub_item, sub_target):
-                            print(f"移动失败: {sub_item}")
+                        shutil.move(str(sub_item.absolute()), str(sub_target.absolute()))
                 else:
                     # 如果是文件或目标文件夹不存在，直接移动
-                    if not move_item(item, target_path):
-                        print(f"移动失败: {item}")
+                    shutil.move(str(item.absolute()), str(target_path.absolute()))
             except Exception as e:
                 print(f"移动 {item.name} 失败: {e}")
                 continue
@@ -475,21 +411,16 @@ def remove_backup_and_temp(path, exclude_keywords=[]):
 
 def run_operations(paths, args, exclude_keywords):
     """执行所有操作的函数"""
-    if not paths:
-        print("没有可处理的路径")
-        return False
+    for path in paths:
+        print(f"\n处理目录: {path}")
         
-    print(f"\n处理目录: {paths}")
-    
-    # 如果指定了dissolve模式，直接解散文件夹
-    if args.dissolve:
-        for path in paths:
+        # 如果指定了dissolve模式，直接解散文件夹
+        if args.dissolve:
             dissolve_folder(path, 
                           file_conflict=args.file_conflict,
                           dir_conflict=args.dir_conflict)
-        return True
-    
-    for path in paths:
+            continue
+        
         # 1. 释放单独媒体文件夹
         if args.release_media:
             print("\n>>> 释放单独媒体文件夹...")
@@ -509,64 +440,58 @@ def run_operations(paths, args, exclude_keywords):
         if args.clean_backup:
             print("\n>>> 清理备份文件和临时文件夹...")
             remove_backup_and_temp(path, exclude_keywords)
-    
-    return True
 
-def handle_timer_mode(args, initial_paths, exclude_keywords):
-    """处理定时模式"""
-    print(f"\n进入定时模式，每 {args.timer} 分钟执行一次")
-    if args.start_time and args.end_time:
-        print(f"执行时间范围：{args.start_time} - {args.end_time}")
+def run_infinite_mode(paths, args, exclude_keywords):
+    """运行无限模式"""
+    print("\n进入无限模式...")
     
-    # 保存初始路径
-    last_valid_paths = initial_paths
+    # 先执行一次操作
+    run_operations(paths, args, exclude_keywords)
     
-    try:
-        while True:
-            current_time = datetime.now().time()
+    if args.inf_mode == InfiniteMode.KEYBOARD:
+        print("按F2键重新执行操作，按Ctrl+C退出")
+        
+        def on_f2_pressed(e):
+            if e.name == 'f2':
+                print("\n\n检测到F2按键，重新执行操作...")
+                run_operations(paths, args, exclude_keywords)
+        
+        # 注册F2按键事件
+        keyboard.on_press(on_f2_pressed)
+        
+        # 保持程序运行
+        try:
+            while True:
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            print("\n检测到Ctrl+C，程序退出")
+            keyboard.unhook_all()
             
-            # 检查是否在指定的时间范围内
-            if args.start_time and args.end_time:
-                start = datetime.strptime(args.start_time, "%H:%M").time()
-                end = datetime.strptime(args.end_time, "%H:%M").time()
-                
-                if not (start <= current_time <= end):
-                    print(f"\n当前时间 {current_time.strftime('%H:%M')} 不在执行时间范围内")
-                    next_run = datetime.combine(datetime.now().date(), start)
-                    if current_time > end:
-                        next_run += timedelta(days=1)
-                    wait_seconds = (next_run - datetime.now()).total_seconds()
-                    print(f"等待到下一个执行时间：{next_run.strftime('%Y-%m-%d %H:%M')}")
-                    time.sleep(wait_seconds)
-                    continue
-            
-            print(f"\n\n开始执行任务 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            
-            # 如果使用剪贴板，尝试获取新路径
-            current_paths = last_valid_paths
-            if args.clipboard:
-                if new_paths := get_paths_from_clipboard():
-                    current_paths = new_paths
-                    last_valid_paths = new_paths  # 更新最后的有效路径
-                else:
-                    print(f"剪贴板中没有有效路径，使用上次的路径: {[str(p) for p in current_paths]}")
-            
-            # 执行操作
-            if run_operations(current_paths, args, exclude_keywords):
-                next_run = datetime.now() + timedelta(minutes=args.timer)
-                print(f"\n任务完成，下次执行时间：{next_run.strftime('%Y-%m-%d %H:%M:%S')}")
-            else:
-                print("\n任务执行失败")
-            
-            time.sleep(args.timer * 60)
-            
-    except KeyboardInterrupt:
-        print("\n检测到Ctrl+C，程序退出")
+    elif args.inf_mode == InfiniteMode.TIMER:
+        print(f"每 {args.interval} 秒自动执行一次，按Ctrl+C退出")
+        
+        def timer_task():
+            while True:
+                time.sleep(args.interval)
+                print("\n\n定时触发，重新执行操作...")
+                run_operations(paths, args, exclude_keywords)
+        
+        # 启动定时器线程
+        timer_thread = threading.Thread(target=timer_task, daemon=True)
+        timer_thread.start()
+        
+        # 保持主线程运行
+        try:
+            while True:
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            print("\n检测到Ctrl+C，程序退出")
 
 def main():
     """
     主函数：处理命令行参数并执行相应操作
     """
+    # 如果有命令行参数，使用命令行模式
     if len(sys.argv) > 1:
         parser = argparse.ArgumentParser(description='文件夹整理工具')
         parser.add_argument('paths', nargs='*', help='要处理的路径列表')
@@ -582,11 +507,24 @@ def main():
         parser.add_argument('--clean-backup', '-b', action='store_true', 
                            help='删除备份文件和临时文件夹')
         parser.add_argument('--exclude', help='排除关键词列表，用逗号分隔多个关键词')
-        parser.add_argument('--inf', action='store_true', help='无限循环模式，按F2键重新执行操作')
-        parser.add_argument('--timer', '-t', type=int, help='定时执行间隔（分钟）')
-        parser.add_argument('--start-time', type=str, help='开始时间（格式：HH:MM）')
-        parser.add_argument('--end-time', type=str, help='结束时间（格式：HH:MM）')
+        
+        # 修改无限模式相关参数
+        inf_group = parser.add_mutually_exclusive_group()
+        inf_group.add_argument('--keyboard', action='store_true', 
+                             help='无限模式-键盘触发(F2)')
+        inf_group.add_argument('--timer', type=int, metavar='SECONDS',
+                             help='无限模式-定时触发(指定间隔秒数)')
+        
         args = parser.parse_args()
+        
+        # 处理无限模式参数
+        args.inf_mode = InfiniteMode.NONE
+        args.interval = 0
+        if args.keyboard:
+            args.inf_mode = InfiniteMode.KEYBOARD
+        elif args.timer is not None:
+            args.inf_mode = InfiniteMode.TIMER
+            args.interval = args.timer
         
         # 获取要处理的路径
         paths = []
@@ -627,9 +565,9 @@ def main():
         if args.exclude:
             exclude_keywords.extend(args.exclude.split(','))
 
-        # 处理定时模式
-        if args.timer:
-            handle_timer_mode(args, paths, exclude_keywords)
+        # 执行操作
+        if args.inf_mode != InfiniteMode.NONE:
+            run_infinite_mode(paths, args, exclude_keywords)
         else:
             run_operations(paths, args, exclude_keywords)
         return
@@ -640,21 +578,21 @@ def main():
         
         # 定义复选框选项
         checkbox_options = [
-            ("从剪贴板读取路径", "clipboard", "--clipboard", True),  # 默认开启
+            ("从剪贴板读取路径", "clipboard", "--clipboard", True),
             ("释放单独媒体文件夹", "release_media", "--release-media"),
             ("解散嵌套的单独文件夹", "flatten", "--flatten"),
             ("删除空文件夹", "remove_empty", "--remove-empty"),
             ("删除备份和临时文件", "clean_backup", "--clean-backup"),
             ("直接解散文件夹", "dissolve", "--dissolve"),
-            ("定时执行模式", "timer", "--timer"),  # 添加定时模式选项
+            ("无限模式-键盘触发", "keyboard", "--keyboard"),
         ]
 
         # 定义输入框选项
         input_options = [
             ("排除关键词", "exclude", "--exclude", "单行", "用逗号分隔多个关键词"),
-            ("执行间隔(分钟)", "timer_interval", "", "30", "定时执行的间隔时间(分钟)"),
-            ("开始时间", "start_time", "--start-time", "09:00", "执行时间范围的开始时间(HH:MM)"),
-            ("结束时间", "end_time", "--end-time", "18:00", "执行时间范围的结束时间(HH:MM)"),
+            ("定时间隔(秒)", "timer", "--timer", "", "定时触发模式的间隔时间"),
+            ("文件冲突处理", "file_conflict", "--file-conflict", "auto", "文件重名处理方式(auto/skip/overwrite/rename)"),
+            ("文件夹冲突处理", "dir_conflict", "--dir-conflict", "auto", "文件夹重名处理方式(auto/skip/overwrite/rename)")
         ]
 
         # 预设配置
@@ -664,6 +602,9 @@ def main():
                 "checkbox_options": ["clipboard", "release_media", "flatten", "remove_empty", "clean_backup"],
                 "input_values": {
                     "exclude": "单行",
+                    "timer": "",
+                    "file_conflict": "auto",
+                    "dir_conflict": "auto"
                 }
             },
             "释放媒体": {
@@ -671,6 +612,9 @@ def main():
                 "checkbox_options": ["clipboard", "release_media"],
                 "input_values": {
                     "exclude": "单行",
+                    "timer": "",
+                    "file_conflict": "auto",
+                    "dir_conflict": "auto"
                 }
             },
             "解散嵌套": {
@@ -678,6 +622,9 @@ def main():
                 "checkbox_options": ["clipboard", "flatten"],
                 "input_values": {
                     "exclude": "单行",
+                    "timer": "",
+                    "file_conflict": "auto",
+                    "dir_conflict": "auto"
                 }
             },
             "删除空文件夹": {
@@ -685,6 +632,9 @@ def main():
                 "checkbox_options": ["clipboard", "remove_empty"],
                 "input_values": {
                     "exclude": "单行",
+                    "timer": "",
+                    "file_conflict": "auto",
+                    "dir_conflict": "auto"
                 }
             },
             "清理备份": {
@@ -692,6 +642,9 @@ def main():
                 "checkbox_options": ["clipboard", "clean_backup"],
                 "input_values": {
                     "exclude": "单行",
+                    "timer": "",
+                    "file_conflict": "auto",
+                    "dir_conflict": "auto"
                 }
             },
             "直接解散": {
@@ -699,26 +652,19 @@ def main():
                 "checkbox_options": ["clipboard", "dissolve"],
                 "input_values": {
                     "exclude": "单行",
+                    "timer": "",
+                    "file_conflict": "auto",
+                    "dir_conflict": "auto"
                 }
             },
-            "定时整理": {
-                "description": "定时执行文件夹整理",
-                "checkbox_options": ["clipboard", "release_media", "flatten", "remove_empty", "clean_backup", "timer"],
+            "定时清理备份": {
+                "description": "每30秒清理一次备份文件和临时文件夹",
+                "checkbox_options": ["clipboard", "clean_backup"],
                 "input_values": {
                     "exclude": "单行",
-                    "timer_interval": "30",
-                    "start_time": "09:00", 
-                    "end_time": "18:00"
-                }
-            },
-            "夜间整理": {
-                "description": "在夜间执行文件夹整理",
-                "checkbox_options": ["clipboard", "release_media", "flatten", "remove_empty", "clean_backup", "timer"],
-                "input_values": {
-                    "exclude": "单行",
-                    "timer_interval": "60",
-                    "start_time": "23:00",
-                    "end_time": "06:00"
+                    "timer": "30",
+                    "file_conflict": "auto",
+                    "dir_conflict": "auto"
                 }
             }
         }
@@ -794,10 +740,36 @@ def main():
         if args.exclude:
             exclude_keywords.extend(args.exclude.split(','))
         
-        # 处理定时模式
-        if args.timer:
-            handle_timer_mode(args, paths, exclude_keywords)
+        if args.inf:
+            print("\n进入无限循环模式。按F2键重新执行操作，按Ctrl+C退出。")
+            # 先执行一次操作
+            run_operations(paths, args, exclude_keywords)
+            
+            def on_f2_pressed(e):
+                if e.name == 'f2':
+                    print("\n\n检测到F2按键，重新执行操作...")
+                    # 如果使用剪贴板，重新获取路径
+                    nonlocal paths
+                    if args.clipboard:
+                        paths = get_paths_from_clipboard()
+                        if not paths:
+                            print("剪贴板中没有有效路径，跳过本次执行")
+                            return
+                    run_operations(paths, args, exclude_keywords)
+            
+            # 注册F2按键事件
+            keyboard.on_press(on_f2_pressed)
+            
+            # 保持程序运行
+            try:
+                while True:
+                    time.sleep(0.1)  # 减少CPU占用
+            except KeyboardInterrupt:
+                print("\n检测到Ctrl+C，程序退出")
+                keyboard.unhook_all()
+                return
         else:
+            # 正常执行一次
             run_operations(paths, args, exclude_keywords)
 
 if __name__ == "__main__":
