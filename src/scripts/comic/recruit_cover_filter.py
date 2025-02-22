@@ -171,16 +171,21 @@ class RecruitCoverFilter:
             logger.error("[#file_ops]未选择任何文件进行解压")
             return False
             
+        # 生成解压目录名称
+        zip_name = os.path.splitext(os.path.basename(zip_path))[0]
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        extract_dir = os.path.join(os.path.dirname(zip_path), f"temp_{zip_name}_{timestamp}")
+            
         # 解压选定文件
         selected_files = [files[i] for i in selected_indices]
-        success, temp_dir = ArchiveHandler.extract_files(zip_path, selected_files)
+        success, extract_dir = ArchiveHandler.extract_files(zip_path, selected_files, extract_dir)
         if not success:
             return False
             
         try:
             # 获取解压后的图片文件
             image_files = []
-            for root, _, files in os.walk(temp_dir):
+            for root, _, files in os.walk(extract_dir):
                 for file in files:
                     if PathHandler.get_file_extension(file) in {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif', '.heic', '.heif', '.jxl'}:
                         image_files.append(PathHandler.join_paths(root, file))
@@ -195,7 +200,7 @@ class RecruitCoverFilter:
             
             if not to_delete:
                 logger.info("[#file_ops]没有需要删除的图片")
-                self._robust_cleanup(temp_dir)
+                self._robust_cleanup(extract_dir)
                 return False
                 
             # 备份要删除的文件
@@ -205,11 +210,11 @@ class RecruitCoverFilter:
             files_to_delete = []
             for file_path in to_delete:
                 # 获取文件在压缩包中的相对路径
-                rel_path = os.path.relpath(file_path, temp_dir)
+                rel_path = os.path.relpath(file_path, extract_dir)
                 files_to_delete.append(rel_path)
                 
             # 使用7z删除文件
-            delete_list_file = os.path.join(temp_dir, '@delete.txt')
+            delete_list_file = os.path.join(extract_dir, '@delete.txt')
             with open(delete_list_file, 'w', encoding='utf-8') as f:
                 for file_path in files_to_delete:
                     f.write(file_path + '\n')
@@ -228,17 +233,17 @@ class RecruitCoverFilter:
             
             if result.returncode != 0:
                 logger.error(f"[#file_ops]从压缩包删除文件失败: {result.stderr}")
-                self._robust_cleanup(temp_dir)
+                self._robust_cleanup(extract_dir)
                 return False
                 
             logger.info(f"[#file_ops]成功处理压缩包: {zip_path}")
             logger.info("[#cur_progress]正在分析图片相似度...")
-            self._robust_cleanup(temp_dir)
+            self._robust_cleanup(extract_dir)
             return True
             
         except Exception as e:
             logger.error(f"[#file_ops]处理压缩包失败 {zip_path}: {e}")
-            self._robust_cleanup(temp_dir)
+            self._robust_cleanup(extract_dir)
             return False
 
 class Application:
