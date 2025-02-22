@@ -475,16 +475,21 @@ def remove_backup_and_temp(path, exclude_keywords=[]):
 
 def run_operations(paths, args, exclude_keywords):
     """执行所有操作的函数"""
-    for path in paths:
-        print(f"\n处理目录: {path}")
+    if not paths:
+        print("没有可处理的路径")
+        return False
         
-        # 如果指定了dissolve模式，直接解散文件夹
-        if args.dissolve:
+    print(f"\n处理目录: {paths}")
+    
+    # 如果指定了dissolve模式，直接解散文件夹
+    if args.dissolve:
+        for path in paths:
             dissolve_folder(path, 
                           file_conflict=args.file_conflict,
                           dir_conflict=args.dir_conflict)
-            continue
-        
+        return True
+    
+    for path in paths:
         # 1. 释放单独媒体文件夹
         if args.release_media:
             print("\n>>> 释放单独媒体文件夹...")
@@ -504,6 +509,59 @@ def run_operations(paths, args, exclude_keywords):
         if args.clean_backup:
             print("\n>>> 清理备份文件和临时文件夹...")
             remove_backup_and_temp(path, exclude_keywords)
+    
+    return True
+
+def handle_timer_mode(args, initial_paths, exclude_keywords):
+    """处理定时模式"""
+    print(f"\n进入定时模式，每 {args.timer} 分钟执行一次")
+    if args.start_time and args.end_time:
+        print(f"执行时间范围：{args.start_time} - {args.end_time}")
+    
+    # 保存初始路径
+    last_valid_paths = initial_paths
+    
+    try:
+        while True:
+            current_time = datetime.now().time()
+            
+            # 检查是否在指定的时间范围内
+            if args.start_time and args.end_time:
+                start = datetime.strptime(args.start_time, "%H:%M").time()
+                end = datetime.strptime(args.end_time, "%H:%M").time()
+                
+                if not (start <= current_time <= end):
+                    print(f"\n当前时间 {current_time.strftime('%H:%M')} 不在执行时间范围内")
+                    next_run = datetime.combine(datetime.now().date(), start)
+                    if current_time > end:
+                        next_run += timedelta(days=1)
+                    wait_seconds = (next_run - datetime.now()).total_seconds()
+                    print(f"等待到下一个执行时间：{next_run.strftime('%Y-%m-%d %H:%M')}")
+                    time.sleep(wait_seconds)
+                    continue
+            
+            print(f"\n\n开始执行任务 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            # 如果使用剪贴板，尝试获取新路径
+            current_paths = last_valid_paths
+            if args.clipboard:
+                if new_paths := get_paths_from_clipboard():
+                    current_paths = new_paths
+                    last_valid_paths = new_paths  # 更新最后的有效路径
+                else:
+                    print(f"剪贴板中没有有效路径，使用上次的路径: {[str(p) for p in current_paths]}")
+            
+            # 执行操作
+            if run_operations(current_paths, args, exclude_keywords):
+                next_run = datetime.now() + timedelta(minutes=args.timer)
+                print(f"\n任务完成，下次执行时间：{next_run.strftime('%Y-%m-%d %H:%M:%S')}")
+            else:
+                print("\n任务执行失败")
+            
+            time.sleep(args.timer * 60)
+            
+    except KeyboardInterrupt:
+        print("\n检测到Ctrl+C，程序退出")
 
 def main():
     """
@@ -571,50 +629,8 @@ def main():
 
         # 处理定时模式
         if args.timer:
-            print(f"\n进入定时模式，每 {args.timer} 分钟执行一次")
-            if args.start_time and args.end_time:
-                print(f"执行时间范围：{args.start_time} - {args.end_time}")
-            
-            try:
-                while True:
-                    current_time = datetime.now().time()
-                    
-                    # 检查是否在指定的时间范围内
-                    if args.start_time and args.end_time:
-                        start = datetime.strptime(args.start_time, "%H:%M").time()
-                        end = datetime.strptime(args.end_time, "%H:%M").time()
-                        
-                        if not (start <= current_time <= end):
-                            print(f"\n当前时间 {current_time.strftime('%H:%M')} 不在执行时间范围内")
-                            # 计算到下一个开始时间的等待时间
-                            next_run = datetime.combine(datetime.now().date(), start)
-                            if current_time > end:
-                                next_run += timedelta(days=1)
-                            wait_seconds = (next_run - datetime.now()).total_seconds()
-                            print(f"等待到下一个执行时间：{next_run.strftime('%Y-%m-%d %H:%M')}")
-                            time.sleep(wait_seconds)
-                            continue
-                    
-                    print(f"\n\n开始执行任务 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                    # 如果使用剪贴板，重新获取路径
-                    if args.clipboard:
-                        paths = get_paths_from_clipboard()
-                        if not paths:
-                            print("剪贴板中没有有效路径，跳过本次执行")
-                            time.sleep(args.timer * 60)
-                            continue
-                    
-                    run_operations(paths, args, exclude_keywords)
-                    
-                    next_run = datetime.now() + timedelta(minutes=args.timer)
-                    print(f"\n任务完成，下次执行时间：{next_run.strftime('%Y-%m-%d %H:%M:%S')}")
-                    time.sleep(args.timer * 60)
-                    
-            except KeyboardInterrupt:
-                print("\n检测到Ctrl+C，程序退出")
-                return
+            handle_timer_mode(args, paths, exclude_keywords)
         else:
-            # 正常执行一次
             run_operations(paths, args, exclude_keywords)
         return
 
@@ -780,50 +796,8 @@ def main():
         
         # 处理定时模式
         if args.timer:
-            print(f"\n进入定时模式，每 {args.timer} 分钟执行一次")
-            if args.start_time and args.end_time:
-                print(f"执行时间范围：{args.start_time} - {args.end_time}")
-            
-            try:
-                while True:
-                    current_time = datetime.now().time()
-                    
-                    # 检查是否在指定的时间范围内
-                    if args.start_time and args.end_time:
-                        start = datetime.strptime(args.start_time, "%H:%M").time()
-                        end = datetime.strptime(args.end_time, "%H:%M").time()
-                        
-                        if not (start <= current_time <= end):
-                            print(f"\n当前时间 {current_time.strftime('%H:%M')} 不在执行时间范围内")
-                            # 计算到下一个开始时间的等待时间
-                            next_run = datetime.combine(datetime.now().date(), start)
-                            if current_time > end:
-                                next_run += timedelta(days=1)
-                            wait_seconds = (next_run - datetime.now()).total_seconds()
-                            print(f"等待到下一个执行时间：{next_run.strftime('%Y-%m-%d %H:%M')}")
-                            time.sleep(wait_seconds)
-                            continue
-                    
-                    print(f"\n\n开始执行任务 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                    # 如果使用剪贴板，重新获取路径
-                    if args.clipboard:
-                        paths = get_paths_from_clipboard()
-                        if not paths:
-                            print("剪贴板中没有有效路径，跳过本次执行")
-                            time.sleep(args.timer * 60)
-                            continue
-                    
-                    run_operations(paths, args, exclude_keywords)
-                    
-                    next_run = datetime.now() + timedelta(minutes=args.timer)
-                    print(f"\n任务完成，下次执行时间：{next_run.strftime('%Y-%m-%d %H:%M:%S')}")
-                    time.sleep(args.timer * 60)
-                    
-            except KeyboardInterrupt:
-                print("\n检测到Ctrl+C，程序退出")
-                return
+            handle_timer_mode(args, paths, exclude_keywords)
         else:
-            # 正常执行一次
             run_operations(paths, args, exclude_keywords)
 
 if __name__ == "__main__":
