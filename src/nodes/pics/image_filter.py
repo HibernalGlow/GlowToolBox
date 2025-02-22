@@ -42,6 +42,71 @@ class ImageFilter:
             logger.error(f"加载哈希文件失败: {e}")
             return {}
 
+    def _process_small_images(self, cover_files: List[str], min_size: int) -> Tuple[Set[str], Dict[str, Dict]]:
+        """处理小图过滤"""
+        to_delete = set()
+        removal_reasons = {}
+        
+        small_images = self._filter_small_images(cover_files, min_size)
+        for img in small_images:
+            to_delete.add(img)
+            removal_reasons[img] = {
+                'reason': 'small_image',
+                'details': f'小于{min_size}像素'
+            }
+            logger.info(f"标记删除小图: {os.path.basename(img)}")
+            
+        return to_delete, removal_reasons
+        
+    def _process_grayscale_images(self, cover_files: List[str]) -> Tuple[Set[str], Dict[str, Dict]]:
+        """处理黑白图过滤"""
+        to_delete = set()
+        removal_reasons = {}
+        
+        grayscale_images = self._filter_grayscale_images(cover_files)
+        for img in grayscale_images:
+            to_delete.add(img)
+            removal_reasons[img] = {
+                'reason': 'grayscale',
+                'details': '黑白图片'
+            }
+            logger.info(f"标记删除黑白图片: {os.path.basename(img)}")
+            
+        return to_delete, removal_reasons
+        
+    def _process_watermark_images(self, group: List[str], watermark_keywords: List[str] = None) -> Tuple[Set[str], Dict[str, Dict]]:
+        """处理水印过滤"""
+        to_delete = set()
+        removal_reasons = {}
+        
+        deleted_files = self._apply_watermark_filter(group, watermark_keywords)
+        for img, texts in deleted_files:
+            to_delete.add(img)
+            removal_reasons[img] = {
+                'reason': 'watermark',
+                'watermark_texts': texts,
+                'matched_keywords': [kw for kw in (watermark_keywords or []) if any(kw in text for text in texts)]
+            }
+            logger.info(f"标记删除有水印图片: {os.path.basename(img)}")
+            
+        return to_delete, removal_reasons
+        
+    def _process_quality_images(self, group: List[str]) -> Tuple[Set[str], Dict[str, Dict]]:
+        """处理质量过滤"""
+        to_delete = set()
+        removal_reasons = {}
+        
+        deleted_files = self._apply_quality_filter(group)
+        for img, size_diff in deleted_files:
+            to_delete.add(img)
+            removal_reasons[img] = {
+                'reason': 'quality',
+                'size_diff': size_diff
+            }
+            logger.info(f"标记删除较小图片: {os.path.basename(img)}")
+            
+        return to_delete, removal_reasons
+
     def process_images(
         self, 
         image_files: List[str],
@@ -69,6 +134,7 @@ class ImageFilter:
         Returns:
             Tuple[Set[str], Dict[str, Dict]]: (要删除的文件集合, 删除原因字典)
         """
+        logger.info("[#cur_progress]开始分析图片质量...")
         sorted_files = sorted(image_files)
         cover_files = sorted_files[:self.cover_count]
         
@@ -82,26 +148,17 @@ class ImageFilter:
         
         # 1. 小图过滤
         if enable_small_filter:
-            small_images = self._filter_small_images(cover_files, min_size)
-            for img in small_images:
-                to_delete.add(img)
-                removal_reasons[img] = {
-                    'reason': 'small_image',
-                    'details': f'小于{min_size}像素'
-                }
-                logger.info(f"标记删除小图: {os.path.basename(img)}")
+            small_to_delete, small_reasons = self._process_small_images(cover_files, min_size)
+            to_delete.update(small_to_delete)
+            removal_reasons.update(small_reasons)
         
         # 2. 黑白图过滤
         if enable_grayscale_filter:
-            grayscale_images = self._filter_grayscale_images(cover_files)
-            for img in grayscale_images:
-                if img not in to_delete:  # 避免重复添加
-                    to_delete.add(img)
-                    removal_reasons[img] = {
-                        'reason': 'grayscale',
-                        'details': '黑白图片'
-                    }
-                    logger.info(f"标记删除黑白图片: {os.path.basename(img)}")
+            gray_to_delete, gray_reasons = self._process_grayscale_images(cover_files)
+            # 避免重复添加
+            gray_to_delete = {img for img in gray_to_delete if img not in to_delete}
+            to_delete.update(gray_to_delete)
+            removal_reasons.update({k: v for k, v in gray_reasons.items() if k in gray_to_delete})
         
         # 3. 重复图片过滤
         if enable_duplicate_filter:
@@ -116,25 +173,14 @@ class ImageFilter:
                         
                     if duplicate_filter_mode == 'watermark':
                         # 水印过滤模式
-                        deleted_files = self._apply_watermark_filter(group, watermark_keywords)
-                        for img, texts in deleted_files:
-                            to_delete.add(img)
-                            removal_reasons[img] = {
-                                'reason': 'watermark',
-                                'watermark_texts': texts,
-                                'matched_keywords': [kw for kw in (watermark_keywords or []) if any(kw in text for text in texts)]
-                            }
-                            logger.info(f"标记删除有水印图片: {os.path.basename(img)}")
+                        watermark_to_delete, watermark_reasons = self._process_watermark_images(group, watermark_keywords)
+                        to_delete.update(watermark_to_delete)
+                        removal_reasons.update(watermark_reasons)
                     else:
                         # 质量过滤模式（默认）
-                        deleted_files = self._apply_quality_filter(group)
-                        for img, size_diff in deleted_files:
-                            to_delete.add(img)
-                            removal_reasons[img] = {
-                                'reason': 'quality',
-                                'size_diff': size_diff
-                            }
-                            logger.info(f"标记删除较小图片: {os.path.basename(img)}")
+                        quality_to_delete, quality_reasons = self._process_quality_images(group)
+                        to_delete.update(quality_to_delete)
+                        removal_reasons.update(quality_reasons)
         
         return to_delete, removal_reasons
 
@@ -292,4 +338,4 @@ class ImageFilter:
                 size_diff = f"{file_sizes[keep_image] - file_sizes[img]} bytes"
                 to_delete.append((img, size_diff))
                 
-        return to_delete 
+        return to_delete
