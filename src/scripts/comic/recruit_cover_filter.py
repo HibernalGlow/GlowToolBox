@@ -24,9 +24,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from queue import Queue
 import multiprocessing
 import zipfile
+from datetime import datetime
+import re
 
 # 在文件开头添加常量
 SUPPORTED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif', '.heic', '.heif', '.jxl'}
+LOGS_DIR = r"D:\1VSCODE\GlowToolBox\logs\recruit_cover_filter"
+PROCESSED_CACHE = set()
 
 config = {
     'script_name': 'recruit_cover_filter',
@@ -376,16 +380,24 @@ class Application:
             raise
             
     def process_directory(self, directory: str, filter_instance: RecruitCoverFilter, is_dehash_mode: bool = False, extract_params: dict = None):
-        """处理目录或文件
-        
-        Args:
-            directory: 目录或文件路径
-            filter_instance: 过滤器实例
-            is_dehash_mode: 是否为去汉化模式
-            extract_params: 解压参数
-        """
+        """处理目录或文件"""
         try:
+            # 加载已处理文件的缓存
+            global PROCESSED_CACHE
+            if not PROCESSED_CACHE:
+                PROCESSED_CACHE = load_processed_files(LOGS_DIR)
+            
+            # 获取当前路径
+            abs_path = os.path.abspath(directory)
+            
+            # 检查当前路径或其父目录是否已处理
+            for processed_dir in PROCESSED_CACHE:
+                if abs_path.startswith(processed_dir):
+                    logger.info(f"[#sys_log]跳过已处理目录: {abs_path}")
+                    return True, "目录已处理"
+            
             return self._process_single_archive((directory, filter_instance, extract_params, is_dehash_mode))
+        
         except Exception as e:
             logger.error(f"[#sys_log]处理失败 {directory}: {e}")
             return False, "处理失败"
@@ -638,3 +650,40 @@ if __name__ == '__main__':
     
     if not success:
         sys.exit(1) 
+
+def load_processed_files(logs_dir: str) -> Set[str]:
+    """
+    从日志文件夹加载已处理的目录路径记录
+    
+    Args:
+        logs_dir: 日志文件夹路径
+        
+    Returns:
+        Set[str]: 已处理目录路径的集合
+    """
+    processed_dirs = set()
+    try:
+        if not os.path.exists(logs_dir):
+            logger.warning(f"[#sys_log]日志目录不存在: {logs_dir}")
+            return processed_dirs
+            
+        # 遍历日志文件夹
+        for root, _, files in os.walk(logs_dir):
+            for file in files:
+                if file.endswith('.log'):
+                    log_path = os.path.join(root, file)
+                    try:
+                        with open(log_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                            # 匹配类似 E:\1EHV\[作者名] 的路径模式
+                            paths = re.findall(r'E:\\1EHV\\[.*?](?:\\[^\\]+)*', content)
+                            processed_dirs.update(paths)
+                    except Exception as e:
+                        logger.warning(f"[#sys_log]读取日志文件失败 {log_path}: {e}")
+                        
+        logger.info(f"[#sys_log]从日志加载了 {len(processed_dirs)} 个已处理目录记录")
+        return processed_dirs
+        
+    except Exception as e:
+        logger.error(f"[#sys_log]加载处理记录失败: {e}")
+        return set() 
