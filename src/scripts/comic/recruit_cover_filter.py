@@ -161,11 +161,26 @@ class Application:
     def process_directory(self, directory: str, filter_instance: RecruitCoverFilter):
         """处理目录"""
         try:
+            # 定义黑名单关键词
+            blacklist_keywords = ["画集", "CG", "图集"]
+            
+            # 检查输入路径是否包含黑名单关键词（不区分大小写）
+            directory_lower = directory.lower()
+            if any(kw in directory_lower for kw in blacklist_keywords):
+                logger.info(f"[#file_ops]跳过黑名单路径: {directory}")
+                return
+
             if os.path.isfile(directory):
                 if directory.lower().endswith('.zip'):
                     filter_instance.process_archive(directory)
             else:
                 for root, _, files in os.walk(directory):
+                    # 检查当前目录路径是否包含黑名单关键词
+                    root_lower = root.lower()
+                    if any(kw in root_lower for kw in blacklist_keywords):
+                        logger.info(f"[#file_ops]跳过黑名单目录: {root}")
+                        continue
+                    
                     for file in files:
                         if file.lower().endswith('.zip'):
                             zip_path = os.path.join(root, file)
