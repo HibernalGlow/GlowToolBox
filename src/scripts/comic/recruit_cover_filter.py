@@ -54,10 +54,19 @@ TEXTUAL_LAYOUT = {
     }
 }
 
-def initialize_textual_logger():
-    """初始化日志布局"""
-    InputHandler.initialize_textual_logger(TEXTUAL_LAYOUT, config_info['log_file'])
-
+def initialize_textual_logger(layout: dict, log_file: str) -> None:
+    """
+    初始化日志布局
+    
+    Args:
+        layout: 布局配置字典
+        log_file: 日志文件路径
+    """
+    try:
+        TextualLoggerManager.set_layout(layout, log_file)
+        logger.info("[#update_log]✅ 日志系统初始化完成")
+    except Exception as e:
+        print(f"❌ 日志系统初始化失败: {e}") 
 class RecruitCoverFilter:
     """封面图片过滤器"""
     
@@ -67,6 +76,7 @@ class RecruitCoverFilter:
         
     def process_archive(self, zip_path: str, extract_mode: str = ExtractMode.ALL, extract_params: dict = None) -> bool:
         """处理单个压缩包"""
+        initialize_textual_logger(TEXTUAL_LAYOUT, config_info['log_file'])
         logger.info(f"[#file_ops]开始处理压缩包: {zip_path}")
         
         # 列出压缩包内容
@@ -149,6 +159,8 @@ class Application:
 def setup_cli_parser():
     """设置命令行参数解析器"""
     parser = argparse.ArgumentParser(description='招募封面图片过滤工具')
+    parser.add_argument('--debug', '-d', action='store_true',
+                      help='启用调试模式')
     parser.add_argument('--hash-file', '-hf', type=str,
                       help='哈希文件路径（可选，默认使用全局配置）')
     parser.add_argument('--cover-count', '-cc', type=int, default=3,
@@ -309,6 +321,9 @@ def get_mode_config():
         }
     }
 
+# 调试模式开关
+DEBUG_MODE = True
+
 if __name__ == '__main__':
     mode_manager = create_mode_manager(
         config=get_mode_config(),
@@ -316,7 +331,9 @@ if __name__ == '__main__':
         application_runner=run_application
     )
     
-    if len(sys.argv) > 1:
+    if DEBUG_MODE:
+        success = mode_manager.run_debug()
+    elif len(sys.argv) > 1:
         success = mode_manager.run_cli()
     else:
         success = mode_manager.run_tui()
