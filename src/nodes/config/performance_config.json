@@ -1,0 +1,69 @@
+{
+  "18384": {
+    "thread_count": 1,
+    "batch_size": 1
+  },
+  "81640": {
+    "thread_count": 8,
+    "batch_size": 8
+  },
+  "15480": {
+    "thread_count": 1,
+    "batch_size": 1
+  },
+  "50452": {
+    "thread_count": 8,
+    "batch_size": 8
+  },
+  "fa4f8858_20250218154440": {
+    "thread_count": 2,
+    "batch_size": 1,
+    "last_modified": "2025-02-18T15:45:07.849954"
+  },
+  "aa3e162b_20250218154454": {
+    "thread_count": 16,
+    "batch_size": 16,
+    "last_modified": "2025-02-18T15:45:07.830446"
+  },
+  "d2334d07_20250218": {
+    "thread_count": 1,
+    "batch_size": 1
+  },
+  "abf9bbf9_20250218": {
+    "thread_count": 16,
+    "batch_size": 16
+  },
+  "2d4bca9d_20250218": {
+    "thread_count": 8,
+    "batch_size": 8
+  },
+  "275c103e_20250218": {
+    "thread_count": 1,
+    "batch_size": 1
+  },
+  "37336dc0_20250218": {
+    "thread_count": 16,
+    "batch_size": 16
+  },
+  "55323a9f_20250218": {
+    "thread_count": 8,
+    "batch_size": 8
+  },
+  "Thread-4 (<lambda>)_227a": {
+    "thread_count": 8,
+    "batch_size": 8
+  },
+  "Thread-4 (<lambda>)_dd38": {
+    "thread_count": 8,
+    "batch_size": 8
+  },
+  "11796": {
+    "thread_count": 8,
+    "batch_size": 8
+  },
+  "44428": {
+    "thread_count": 1,
+    "batch_size": 1,
+    "start_time": "2025-02-22T13:33:49.250711"
+  }
+}

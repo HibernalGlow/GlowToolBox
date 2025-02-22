@@ -340,8 +340,6 @@ class InputHandler:
 class Application:
     """应用程序类"""
     
-    def __init__(self):
-        initialize_textual_logger()
         
     def process_directory(self, directory: str, filter_instance: RecruitCoverFilter):
         """处理目录"""
@@ -363,7 +361,9 @@ class Application:
         try:
             args = InputHandler.parse_arguments()
             paths = InputHandler.get_input_paths(args)
-            
+            initialize_textual_logger()
+        
+
             if not paths:
                 logger.error("[#update_log]未提供任何有效路径")
                 return

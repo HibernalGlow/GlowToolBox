@@ -4,15 +4,17 @@ import fsspec
 
 import importlib.util
 import tempfile
+# ----
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from nodes.config.performance_config import get_thread_count, get_batch_size
-
 spec = importlib.util.spec_from_file_location(
     "performance_config",
-    r"D:\1VSCODE\1ehv\archive\config\performance_config.py"
+    # os.path.join(os.path.dirname(__file__), "configs/performance_config.py")
+    r"D:\1VSCODE\GlowToolBox\src\nodes\config\performance_config.py"
 )
 performance_config = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(performance_config)
+from nodes.config.performance_config import *
+# ---
 ConfigGUI = performance_config.ConfigGUI
 from nodes.tui.textual_logger import TextualLoggerManager
 vipshome = Path(r'D:\1VSCODE\1ehv\other\vips\bin')
@@ -21,7 +23,6 @@ if hasattr(os, 'add_dll_directory'):
 os.environ['PATH'] = str(vipshome) + ';' + os.environ['PATH']
 import pyvips
 # 全局配置
-vipshome = Path('D:\\1VSCODE\\1ehv\\other\\vips\\bin')
 if hasattr(os, 'add_dll_directory'):
     os.add_dll_directory(str(vipshome))
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))

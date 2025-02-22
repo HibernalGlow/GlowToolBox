@@ -18,7 +18,6 @@ from pathlib import Path
 import sys
 
 # 添加项目根目录到Python路径
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.rich_logger import RichProgressHandler
 
 # 设置日志处理器，限制单个日志文件大小为45MB，最多保留3个备份
