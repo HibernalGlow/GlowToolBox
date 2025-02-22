@@ -1,171 +1,151 @@
 import os
 import sys
-import subprocess
 import argparse
-from typing import Optional, Tuple
-import chardet
-from pathlib import Path
-import re
+import subprocess
 import logging
+import tempfile
+import shutil
+import json
 
-class EncodingFixer:
-    def __init__(self, verbose=False):
-        self.verbose = verbose
-        self.logger = self._setup_logger()
-        self.tools_dir = self._get_tools_dir()
-        self._check_tools()
+def setup_logger(verbose=False):
+    logger = logging.getLogger('EncodingFixer')
+    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(levelname)s: %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    return logger
 
-    def _setup_logger(self):
-        logger = logging.getLogger('EncodingFixer')
-        logger.setLevel(logging.DEBUG if self.verbose else logging.INFO)
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter('%(levelname)s: %(message)s')
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        return logger
-
-    def _get_tools_dir(self) -> Path:
-        """获取外部工具目录"""
-        script_dir = Path(__file__).parent
-        tools_dir = script_dir / 'tools'
-        tools_dir.mkdir(exist_ok=True)
-        return tools_dir
-
-    def _check_tools(self):
-        """检查必要的工具是否存在"""
-        nkf_path = self.tools_dir / 'nkf.exe'
-        if not nkf_path.exists():
-            self.logger.warning(f"未找到nkf.exe，请从 https://github.com/erw7/nkf/releases 下载并放到 {self.tools_dir} 目录")
-
-    def _run_nkf(self, text: str, args: list) -> Optional[str]:
-        """运行nkf命令"""
-        nkf_path = self.tools_dir / 'nkf.exe'
-        if not nkf_path.exists():
-            return None
-
-        try:
-            # 创建临时文件
-            temp_file = self.tools_dir / f'temp_{hash(text)}.txt'
-            temp_file.write_text(text, encoding='utf-8', errors='ignore')
-
-            # 运行nkf
-            cmd = [str(nkf_path)] + args + [str(temp_file)]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            
-            # 清理临时文件
-            temp_file.unlink()
-            
-            if result.returncode == 0:
-                return result.stdout.strip()
-        except Exception as e:
-            self.logger.debug(f"nkf处理失败: {e}")
+def load_encoding_map():
+    """加载编码映射文件"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    map_file = os.path.join(script_dir, 'encoding_map.json')
+    try:
+        with open(map_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        logging.error(f"无法加载编码映射文件: {e}")
         return None
 
-    def detect_encoding(self, text: str) -> str:
-        """使用多种方法检测编码"""
-        # 1. 使用nkf检测
-        nkf_result = self._run_nkf(text, ['-g'])
-        if nkf_result:
-            return nkf_result
+def fix_filename_with_map(filename: str, encoding_map: dict) -> str:
+    """使用字符映射修复文件名"""
+    result = filename
+    char_mappings = encoding_map.get('character_mappings', {})
+    
+    # 应用字符映射
+    for old_char, new_char in char_mappings.items():
+        result = result.replace(old_char, new_char)
+    
+    return result
 
-        # 2. 使用chardet检测
+def run_encfix(files: list[str], verbose: bool = False) -> bool:
+    """运行文件名修复"""
+    logger = setup_logger(verbose)
+    
+    if not files:
+        logger.error("未指定文件")
+        return False
+
+    # 加载编码映射
+    encoding_map = load_encoding_map()
+    if not encoding_map:
+        logger.error("无法加载编码映射，将使用默认的 encfix 命令")
+        return run_encfix_command(files, verbose)
+
+    # 检查文件是否存在
+    for file in files:
+        if not os.path.exists(file):
+            logger.error(f"文件不存在: {file}")
+            return False
+
+    # 使用映射修复文件名
+    success = True
+    for file in files:
         try:
-            raw_bytes = text.encode('cp437', errors='replace')
-            result = chardet.detect(raw_bytes)
-            if result['confidence'] > 0.7:
-                return result['encoding']
-        except Exception:
-            pass
+            dirname = os.path.dirname(file)
+            filename = os.path.basename(file)
+            new_filename = fix_filename_with_map(filename, encoding_map)
+            
+            if new_filename != filename:
+                new_path = os.path.join(dirname, new_filename)
+                logger.info(f"重命名: {filename} -> {new_filename}")
+                os.rename(file, new_path)
+        except Exception as e:
+            logger.error(f"处理文件 {file} 时出错: {e}")
+            success = False
 
-        return 'unknown'
+    return success
 
-    def fix_filename(self, filename: str) -> Tuple[str, str]:
-        """修复文件名编码"""
-        # 如果文件名看起来是正确的日文，直接返回
-        if self._is_valid_japanese(filename):
-            return filename, 'utf-8 (已是正确编码)'
-
-        # 检测编码
-        detected_encoding = self.detect_encoding(filename)
-        self.logger.debug(f"检测到的编码: {detected_encoding}")
-
-        # 尝试使用nkf修复
-        fixed = self._run_nkf(filename, ['-w', '--no-cp932'])
-        if fixed and self._is_valid_japanese(fixed):
-            return fixed, 'nkf'
-
-        # 尝试其他编码组合
-        encodings = ['cp437', 'cp932', 'shift_jis', 'euc_jp', 'iso2022_jp']
-        for enc_from in encodings:
-            try:
-                # 转换为bytes
-                raw_bytes = filename.encode(enc_from, errors='replace')
-                # 尝试不同的解码方式
-                for enc_to in ['cp932', 'shift_jis', 'utf-8']:
-                    try:
-                        decoded = raw_bytes.decode(enc_to, errors='replace')
-                        if self._is_valid_japanese(decoded):
-                            return decoded, f'{enc_from}->{enc_to}'
-                    except Exception:
-                        continue
-            except Exception:
-                continue
-
-        return filename, '未能修复'
-
-    def _is_valid_japanese(self, text: str) -> bool:
-        """检查是否是有效的日文文件名"""
-        # 检查是否包含日文字符
-        has_jp = any(
-            '\u3040' <= c <= '\u309F' or  # 平假名
-            '\u30A0' <= c <= '\u30FF' or  # 片假名
-            '\u4E00' <= c <= '\u9FFF'     # 汉字
-            for c in text
+def run_encfix_command(files: list[str], verbose: bool = False) -> bool:
+    """使用原始的 encfix 命令修复文件名编码"""
+    try:
+        cmd = ['encfix'] + files
+        logger.info(f"执行命令: {' '.join(cmd)}")
+        
+        env = os.environ.copy()
+        env['PYTHONIOENCODING'] = 'utf-8'
+        
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            encoding='utf-8',
+            errors='replace'
         )
-
-        # 检查是否是常见的日文文件名格式
-        common_patterns = [
-            r'\[.*?\]',          # [xxx]
-            r'\(.*?\)',          # (xxx)
-            r'第\d+[巻話]',      # 第xx巻/話
-            r'Vol\.\d+',         # Vol.xx
-            r'[上中下]巻',       # 上巻/中巻/下巻
-        ]
-
-        matches_pattern = any(re.search(pattern, text) for pattern in common_patterns)
-
-        # 如果包含日文字符或匹配常见模式，且不包含明显的乱码字符
-        if (has_jp or matches_pattern) and not re.search(r'[├╢┼Θ╤╕╪╜┤]', text):
-            return True
-
+        
+        stdout, stderr = process.communicate()
+        
+        if stdout:
+            print(stdout)
+        if stderr:
+            print(stderr, file=sys.stderr)
+            
+        return process.returncode == 0
+    except Exception as e:
+        logger.error(f"执行失败: {str(e)}")
         return False
 
 def demo_fix():
     """演示功能"""
+    logger = setup_logger(verbose=True)
+    
+    # 测试用例
     test_cases = [
-        "【例】日本語のファイル名.txt",     # 正确的日文
-        "ｱｲｳｴｵ漢字かきくけこ.txt",        # 混合假名
-        "(C100) [サークル名] 作品名.zip",  # 同人志格式
-        "第01巻.zip",                      # 简单数字和日文
-        "úñ3000ííüä╚╦Ñ╩⌐ûÑ╖ñ┴ñπñ≤╛╨╩°ñ╖ñ╞",  # 乱码
-        "2021-05-14 ╢╣╝╜╥╙╨╞╖╓▒╫.zip",    # 乱码
-        "├╢┼Θ╤╕╪╜┤я╛я╖я┐╛╨╩°я╖я╞│╗я▐я╟",  # 乱码
+        "2021-05-14 úñ3000ííüä╚╦Ñ╩⌐ûÑ╖ñ┴ñπñ≤╛╨╩°ñ╖ñ╞│»ñ▐ñ╟Ñ¼Ñ├Ñ─ÑΩ╖N╓▓ñ¿╗ß(▓ε╖╓╢α╩²) 14[hash-99511b59f3e3e422].txt",
+        "搶曽峠杺嫿.cfg",  # 应该是 "東方紅魔郷.cfg"
+        "CRH¶¯³µ×é·¢Õ¹Æ×ÏµÍ¼2016.12.jpg",  # 应该是 "CRH动车组发展谱系图2016.12.jpg"
+        "%5BFeather%40TSDM%5D%5BSumiSora%26CASO%5D%5BChaos_Child%5D%5B04%5D%5BGB%5D%5B720p%5D.mp4"  # URL编码的文件名
     ]
     
-    fixer = EncodingFixer(verbose=True)
     print("\n=== 编码修复演示 ===")
+    temp_dir = tempfile.mkdtemp()
     
-    for i, case in enumerate(test_cases, 1):
-        print(f"\n测试用例 {i}:")
-        print(f"原始文件名: {case}")
-        fixed, method = fixer.fix_filename(case)
-        print(f"修复后文件名: {fixed}")
-        print(f"使用的方法: {method}")
-        print("-" * 50)
+    try:
+        # 创建测试文件
+        test_files = []
+        for case in test_cases:
+            test_file = os.path.join(temp_dir, case)
+            with open(test_file, 'w', encoding='utf-8') as f:
+                f.write("测试内容")
+            test_files.append(test_file)
+            
+        # 运行 encfix
+        print("\n原始文件名:")
+        for file in test_files:
+            print(f"- {os.path.basename(file)}")
+            
+        print("\n修复结果:")
+        run_encfix(test_files, verbose=True)
+    
+    finally:
+        # 清理临时目录
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
 
 def main():
-    parser = argparse.ArgumentParser(description='修复日文文件名乱码')
-    parser.add_argument('filename', nargs='?', help='要修复的文件名')
+    parser = argparse.ArgumentParser(description='修复文件名编码问题')
+    parser.add_argument('files', nargs='+', help='要修复的文件路径列表')
     parser.add_argument('--verbose', '-v', action='store_true', help='显示详细信息')
     parser.add_argument('--demo', '-d', action='store_true', help='运行演示')
     args = parser.parse_args()
@@ -173,21 +153,10 @@ def main():
     if args.demo:
         demo_fix()
         return
-        
-    if not args.filename:
-        parser.print_help()
-        return
-        
-    fixer = EncodingFixer(verbose=args.verbose)
-    fixed_name, method = fixer.fix_filename(args.filename)
     
-    if args.verbose:
-        print(f"原始文件名: {args.filename}")
-        print(f"修复后文件名: {fixed_name}")
-        print(f"使用的方法: {method}")
-    else:
-        print(fixed_name)
+    run_encfix(args.files, args.verbose)
 
 if __name__ == "__main__":
-    demo_fix() 
+    
+    main() 
     

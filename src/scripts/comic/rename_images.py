@@ -197,10 +197,10 @@ def rename_images_in_zip(zip_path, input_base_path):
                         print(f"重命名: {item.filename} -> {new_filename}")
 
         # 检查新压缩包大小
-        if os.path.getsize(new_zip_path) > os.path.getsize(zip_path) + 1024*1024:
-            print(f"警告: 新压缩包大小增加超过1MB，还原备份")
-            os.remove(new_zip_path)
-            return
+        # if os.path.getsize(new_zip_path) > os.path.getsize(zip_path) + 1024*1024:
+        #     print(f"警告: 新压缩包大小增加超过1MB，还原备份")
+        #     os.remove(new_zip_path)
+        #     return
 
         # 替换原始文件
         os.replace(new_zip_path, zip_path)
