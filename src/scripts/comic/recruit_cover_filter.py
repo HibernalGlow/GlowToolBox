@@ -30,6 +30,7 @@ import re
 # 在文件开头添加常量
 SUPPORTED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif', '.heic', '.heif', '.jxl'}
 LOGS_DIR = r"D:\1VSCODE\GlowToolBox\logs\recruit_cover_filter"
+PROCESSED_PATHS_FILE = r"D:\1VSCODE\GlowToolBox\data\processed_paths.txt"
 PROCESSED_CACHE = set()
 
 config = {
@@ -385,7 +386,7 @@ class Application:
             # 加载已处理文件的缓存
             global PROCESSED_CACHE
             if not PROCESSED_CACHE:
-                PROCESSED_CACHE = load_processed_files(LOGS_DIR)
+                PROCESSED_CACHE = load_processed_files(PROCESSED_PATHS_FILE)
             
             # 获取当前路径
             abs_path = os.path.abspath(directory)
@@ -651,37 +652,26 @@ if __name__ == '__main__':
     if not success:
         sys.exit(1) 
 
-def load_processed_files(logs_dir: str) -> Set[str]:
+def load_processed_files(paths_file: str) -> Set[str]:
     """
-    从日志文件夹加载已处理的目录路径记录
+    从路径文件加载已处理的目录记录
     
     Args:
-        logs_dir: 日志文件夹路径
+        paths_file: 路径文件
         
     Returns:
         Set[str]: 已处理目录路径的集合
     """
     processed_dirs = set()
     try:
-        if not os.path.exists(logs_dir):
-            logger.warning(f"[#sys_log]日志目录不存在: {logs_dir}")
+        if not os.path.exists(paths_file):
+            logger.warning(f"[#sys_log]路径文件不存在: {paths_file}")
             return processed_dirs
             
-        # 遍历日志文件夹
-        for root, _, files in os.walk(logs_dir):
-            for file in files:
-                if file.endswith('.log'):
-                    log_path = os.path.join(root, file)
-                    try:
-                        with open(log_path, 'r', encoding='utf-8') as f:
-                            content = f.read()
-                            # 匹配类似 E:\1EHV\[作者名] 的路径模式
-                            paths = re.findall(r'E:\\1EHV\\[.*?](?:\\[^\\]+)*', content)
-                            processed_dirs.update(paths)
-                    except Exception as e:
-                        logger.warning(f"[#sys_log]读取日志文件失败 {log_path}: {e}")
-                        
-        logger.info(f"[#sys_log]从日志加载了 {len(processed_dirs)} 个已处理目录记录")
+        with open(paths_file, 'r', encoding='utf-8') as f:
+            processed_dirs = {line.strip() for line in f if line.strip()}
+            
+        logger.info(f"[#sys_log]从文件加载了 {len(processed_dirs)} 个已处理目录记录")
         return processed_dirs
         
     except Exception as e:
