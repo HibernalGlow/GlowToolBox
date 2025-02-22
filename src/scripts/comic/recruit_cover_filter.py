@@ -36,12 +36,12 @@ logger, config_info = setup_logger(config)
 DEBUG_MODE = False
 
 TEXTUAL_LAYOUT = {
-    "cur_stats": {
+    "global_progress": {
         "ratio": 1,
-        "title": "📊 总体进度",
+        "title": "🌐 总体进度",
         "style": "lightyellow"
     },
-    "cur_progress": {
+    "path_progress": {
         "ratio": 1,
         "title": "🔄 当前进度",
         "style": "lightcyan"
@@ -50,11 +50,6 @@ TEXTUAL_LAYOUT = {
         "ratio": 2,
         "title": "📂 文件操作",
         "style": "lightpink"
-    },
-    "ocr_results": {
-        "ratio": 2,
-        "title": "📝 OCR结果",
-        "style": "lightgreen"
     },
     "update_log": {
         "ratio": 1,
@@ -187,12 +182,17 @@ class RecruitCoverFilter:
         # 解压选定文件
         selected_files = [files[i] for i in selected_indices]
         logger.info(f"[#file_ops]准备解压文件: {[os.path.basename(f) for f in selected_files]}")
+        
+        # 更新解压进度
+        logger.info(f"[@path_progress]解压文件: {os.path.basename(zip_path)} 0%")
         success, extract_dir = ArchiveHandler.extract_files(zip_path, selected_files, extract_dir)
         if not success:
+            logger.info(f"[@path_progress]解压文件: {os.path.basename(zip_path)} (失败)")
             return False, "解压文件失败"
+        logger.info(f"[@path_progress]解压文件: {os.path.basename(zip_path)} 50%")
             
         try:
-            # 获取解压后的图片文件（使用列表推导式优化）
+            # 获取解压后的图片文件
             image_files = [
                 PathHandler.join_paths(root, file)
                 for root, _, files in os.walk(extract_dir)
@@ -211,13 +211,15 @@ class RecruitCoverFilter:
             if not to_delete:
                 logger.info("[#file_ops]没有需要删除的图片")
                 self._robust_cleanup(extract_dir)
-                return False, "没有需要删除的图片"
+                logger.info(f"[@path_progress]处理文件: {os.path.basename(zip_path)} 100%")
+                return True, "没有需要删除的图片"
                 
             # 备份要删除的文件
             backup_results = BackupHandler.backup_removed_files(zip_path, to_delete, removal_reasons)
             
-            # 从压缩包中删除文件（使用列表推导式优化）
+            # 从压缩包中删除文件
             files_to_delete = [os.path.relpath(file_path, extract_dir) for file_path in to_delete]
+            logger.info(f"[@path_progress]处理文件: {os.path.basename(zip_path)} 75%")
                 
             # 使用7z删除文件
             delete_list_file = os.path.join(extract_dir, '@delete.txt')
@@ -240,15 +242,18 @@ class RecruitCoverFilter:
             if result.returncode != 0:
                 logger.error(f"[#file_ops]从压缩包删除文件失败: {result.stderr}")
                 self._robust_cleanup(extract_dir)
+                logger.info(f"[@path_progress]处理文件: {os.path.basename(zip_path)} (失败)")
                 return False, f"从压缩包删除文件失败: {result.stderr}"
                 
             logger.info(f"[#file_ops]成功处理压缩包: {zip_path}")
             self._robust_cleanup(extract_dir)
+            logger.info(f"[@path_progress]处理文件: {os.path.basename(zip_path)} 100%")
             return True, ""
             
         except Exception as e:
             logger.error(f"[#file_ops]处理压缩包失败 {zip_path}: {e}")
             self._robust_cleanup(extract_dir)
+            logger.info(f"[@path_progress]处理文件: {os.path.basename(zip_path)} (错误)")
             return False, f"处理过程出错: {str(e)}"
 
 class Application:
@@ -453,6 +458,9 @@ def run_application(args):
         error_count = 0
         error_details = []
         
+        # 显示初始全局进度
+        logger.info(f"[@global_progress]总任务进度 (0/{total_count}) 0%")
+        
         # 使用线程池并行处理压缩包
         with ThreadPoolExecutor(max_workers=args.workers) as executor:
             # 创建任务列表
@@ -467,27 +475,36 @@ def run_application(args):
             for future in as_completed(future_to_archive):
                 archive = future_to_archive[future]
                 try:
+                    # 显示当前处理的文件进度
+                    logger.info(f"[@path_progress]处理文件: {os.path.basename(archive)} 0%")
+                    
                     success, error_msg = future.result()
                     if success:
                         success_count += 1
                         logger.info(f"[#file_ops]✅ 成功处理: {os.path.basename(archive)}")
+                        # 更新当前文件进度为100%
+                        logger.info(f"[@path_progress]处理文件: {os.path.basename(archive)} 100%")
                     else:
                         error_count += 1
                         error_msg = f"处理返回失败: {os.path.basename(archive)}, 原因: {error_msg}"
                         error_details.append(error_msg)
                         logger.warning(f"[#file_ops]⚠️ {error_msg}")
+                        # 更新当前文件进度为失败
+                        logger.info(f"[@path_progress]处理文件: {os.path.basename(archive)} (失败)")
                 except Exception as e:
                     error_count += 1
-                    # 获取详细的错误信息
                     import traceback
                     error_trace = traceback.format_exc()
                     error_msg = f"处理出错 {os.path.basename(archive)}: {str(e)}\n{error_trace}"
                     error_details.append(error_msg)
                     logger.error(f"[#file_ops]❌ {error_msg}")
+                    # 更新当前文件进度为错误
+                    logger.info(f"[@path_progress]处理文件: {os.path.basename(archive)} (错误)")
                 
-                # 更新进度
-                progress = ((success_count + error_count) / total_count) * 100
-                logger.info(f"[#current_stats]总数: {total_count} 成功: {success_count} 失败: {error_count} 进度: {progress:.1f}%")
+                # 更新全局进度
+                completed = success_count + error_count
+                progress = (completed / total_count) * 100
+                logger.info(f"[@global_progress]总任务进度 ({completed}/{total_count}) {progress:.1f}%")
         
         # 输出最终统计信息
         logger.info(f"[#update_log]处理完成 ✅成功: {success_count} ❌失败: {error_count} 总数: {total_count}")
