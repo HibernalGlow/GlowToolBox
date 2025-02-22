@@ -135,7 +135,8 @@ class RecruitRemoveFilter:
             to_delete, removal_reasons = self.image_filter.process_images(
                 image_files,
                 enable_duplicate_filter=True,   # 启用重复图片过滤
-                duplicate_filter_mode='quality'  # 使用质量过滤模式
+                duplicate_filter_mode='hash',  # 使用哈希模式进行去重
+                hash_file=hash_file  # 传入已生成的哈希文件
             )
             
             if not to_delete:
