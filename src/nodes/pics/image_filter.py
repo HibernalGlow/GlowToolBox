@@ -181,7 +181,8 @@ class ImageFilter:
                 continue
                 
             hash1 = self._get_image_hash(img1)
-            if not hash1:
+            if not hash1:  # 跳过无效哈希
+                logger.warning(f"跳过无效哈希的图片: {os.path.basename(img1)}")
                 continue
                 
             current_group = [img1]
@@ -191,13 +192,18 @@ class ImageFilter:
                     continue
                     
                 hash2 = self._get_image_hash(img2)
-                if not hash2:
+                if not hash2:  # 跳过无效哈希
+                    logger.warning(f"跳过无效哈希的图片: {os.path.basename(img2)}")
                     continue
                     
-                distance = ImageHashCalculator.calculate_hamming_distance(hash1, hash2)
-                if distance <= self.hamming_threshold:
-                    current_group.append(img2)
-                    logger.info(f"找到相似图片: {os.path.basename(img2)} (距离: {distance})")
+                try:
+                    distance = ImageHashCalculator.calculate_hamming_distance(hash1, hash2)
+                    if distance <= self.hamming_threshold:
+                        current_group.append(img2)
+                        logger.info(f"找到相似图片: {os.path.basename(img2)} (距离: {distance})")
+                except Exception as e:
+                    logger.error(f"计算汉明距离失败 {img1} vs {img2}: {str(e)}")
+                    continue
                     
             if len(current_group) > 1:
                 similar_groups.append(current_group)
@@ -208,21 +214,38 @@ class ImageFilter:
 
     def _get_image_hash(self, image_path: str) -> str:
         """获取图片哈希值，优先从缓存读取"""
-        image_uri = PathURIGenerator.generate(image_path)
-        
-        if image_uri in self.hash_cache:
-            hash_data = self.hash_cache[image_uri]
-            return hash_data.get('hash') if isinstance(hash_data, dict) else hash_data
-            
         try:
-            hash_value = ImageHashCalculator.calculate_phash(image_path)
-            if hash_value:
-                self.hash_cache[image_uri] = {'hash': hash_value}
-                return hash_value
-        except Exception as e:
-            logger.error(f"计算图片哈希值失败 {image_path}: {e}")
+            # 增加路径有效性检查
+            if not os.path.exists(image_path):
+                logger.error(f"图片路径不存在: {image_path}")
+                return None
             
-        return None
+            image_uri = PathURIGenerator.generate(image_path)
+            if not image_uri:  # 处理生成URI失败的情况
+                logger.error(f"生成图片URI失败: {image_path}")
+                return None
+
+            # 增加缓存键存在性检查
+            if image_uri in self.hash_cache:
+                hash_data = self.hash_cache[image_uri]
+                # 处理不同的缓存数据结构
+                if isinstance(hash_data, dict):
+                    return hash_data.get('hash')
+                return str(hash_data)  # 兼容旧版本字符串格式
+
+            # 计算新哈希
+            hash_value = ImageHashCalculator.calculate_phash(image_path)
+            if not hash_value:
+                logger.error(f"计算图片哈希失败: {image_path}")
+                return None
+
+            # 更新缓存
+            self.hash_cache[image_uri] = {'hash': hash_value}
+            return hash_value
+        
+        except Exception as e:
+            logger.error(f"获取图片哈希异常 {image_path}: {str(e)}")
+            return None
 
     def _apply_watermark_filter(self, group: List[str], watermark_keywords: List[str] = None) -> List[Tuple[str, List[str]]]:
         """

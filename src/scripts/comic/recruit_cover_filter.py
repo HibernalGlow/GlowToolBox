@@ -205,7 +205,7 @@ def setup_cli_parser():
                       help='哈希文件路径（可选，默认使用全局配置）')
     parser.add_argument('--cover-count', '-cc', type=int, default=3,
                       help='处理的封面图片数量 (默认: 3)')
-    parser.add_argument('--hamming-threshold', '-ht', type=int, default=12,
+    parser.add_argument('--hamming-threshold', '-ht', type=int, default=16,
                       help='汉明距离阈值 (默认: 12)')
     parser.add_argument('--clipboard', '-c', action='store_true',
                       help='从剪贴板读取路径')
