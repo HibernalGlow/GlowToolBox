@@ -265,6 +265,7 @@ class RecruitCoverFilter:
 
     def process_archive(self, zip_path: str, extract_mode: str = ExtractMode.ALL, extract_params: dict = None) -> bool:
         """处理单个压缩包"""
+        temp_dir = None
         try:
             logger.info(f"[#file_ops]开始处理压缩包: {zip_path}")
             
@@ -334,6 +335,9 @@ class RecruitCoverFilter:
                 shutil.rmtree(temp_dir)
                 return False
                 
+            # 备份要删除的文件
+            BackupHandler.backup_removed_files(zip_path, to_delete, removal_reasons)
+            
             # 删除标记的文件
             for file_path in to_delete:
                 try:
@@ -449,6 +453,249 @@ class InputHandler:
                 
         return valid_paths
 
+class BackupHandler:
+    """处理备份和删除文件的类"""
+    
+    @staticmethod
+    def backup_removed_files(zip_path: str, removed_files: Set[str], removal_reasons: Dict[str, Dict]):
+        """
+        将删除的文件备份到trash文件夹中，按删除原因分类
+        
+        Args:
+            zip_path: 原始压缩包路径
+            removed_files: 被删除的文件集合
+            removal_reasons: 文件删除原因的字典
+        """
+        try:
+            if not removed_files:
+                return
+                
+            zip_name = os.path.splitext(os.path.basename(zip_path))[0]
+            trash_dir = os.path.join(os.path.dirname(zip_path), f'{zip_name}.trash')
+            
+            # 按删除原因分类
+            for file_path in removed_files:
+                try:
+                    reason = removal_reasons.get(file_path, {}).get('reason', 'unknown')
+                    subdir = os.path.join(trash_dir, reason)
+                    os.makedirs(subdir, exist_ok=True)
+                    
+                    # 复制文件到对应子目录
+                    dest_path = os.path.join(subdir, os.path.basename(file_path))
+                    shutil.copy2(file_path, dest_path)
+                    logger.info(f"[#file_ops]已备份到 {reason}: {os.path.basename(file_path)}")
+                    
+                except Exception as e:
+                    logger.error(f"[#file_ops]备份文件失败 {file_path}: {e}")
+                    continue
+                    
+            logger.info(f"[#file_ops]已备份删除的文件到: {trash_dir}")
+            
+        except Exception as e:
+            logger.error(f"[#file_ops]备份删除文件时出错: {e}")
+
+class DebuggerHandler:
+    """调试模式处理类"""
+    
+    LAST_CONFIG_FILE = "last_debug_config.json"
+    
+    @staticmethod
+    def save_last_config(mode_choice, final_args):
+        """保存最后一次使用的配置"""
+        try:
+            config = {
+                "mode": mode_choice,
+                "args": final_args
+            }
+            with open(DebuggerHandler.LAST_CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"[#update_log]保存配置失败: {e}")
+
+    @staticmethod
+    def load_last_config():
+        """加载上次使用的配置"""
+        try:
+            if os.path.exists(DebuggerHandler.LAST_CONFIG_FILE):
+                with open(DebuggerHandler.LAST_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.error(f"[#update_log]加载配置失败: {e}")
+        return None
+
+    @staticmethod
+    def get_debugger_options():
+        """交互式调试模式菜单"""
+        # 基础模式选项
+        base_modes = {
+            "1": {
+                "name": "去水印模式",
+                "base_args": ["-cc", "-ht"],
+                "default_params": {
+                    "cc": "3",  # cover_count
+                    "ht": "12"  # hamming_threshold
+                }
+            },
+            "2": {
+                "name": "前N张模式",
+                "base_args": ["-cc", "-ht", "-em", "first_n", "-en"],
+                "default_params": {
+                    "cc": "3",
+                    "ht": "12",
+                    "en": "3"
+                }
+            },
+            "3": {
+                "name": "后N张模式",
+                "base_args": ["-cc", "-ht", "-em", "last_n", "-en"],
+                "default_params": {
+                    "cc": "3",
+                    "ht": "12",
+                    "en": "3"
+                }
+            },
+            "4": {
+                "name": "范围模式",
+                "base_args": ["-cc", "-ht", "-em", "range", "-er"],
+                "default_params": {
+                    "cc": "3",
+                    "ht": "12",
+                    "er": "0:3"
+                }
+            }
+        }
+        
+        # 可配置参数选项
+        param_options = {
+            "cc": {"name": "处理图片数量", "arg": "-cc", "default": "3", "type": int},
+            "ht": {"name": "汉明距离阈值", "arg": "-ht", "default": "12", "type": int},
+            "en": {"name": "解压数量", "arg": "-en", "default": "3", "type": int},
+            "er": {"name": "解压范围", "arg": "-er", "default": "0:3", "type": str},
+            "c": {"name": "从剪贴板读取", "arg": "-c", "is_flag": True}
+        }
+
+        # 加载上次配置
+        last_config = DebuggerHandler.load_last_config()
+        
+        while True:
+            print("\n=== 调试模式选项 ===")
+            print("\n基础模式:")
+            for key, mode in base_modes.items():
+                print(f"{key}. {mode['name']}")
+            
+            if last_config:
+                print("\n上次配置:")
+                print(f"模式: {base_modes[last_config['mode']]['name']}")
+                print("参数:", " ".join(last_config['args']))
+                print("\n选项:")
+                print("L. 使用上次配置")
+                print("N. 使用新配置")
+                choice = input("\n请选择 (L/N 或直接选择模式 1-4): ").strip().upper()
+                
+                if choice == 'L':
+                    return last_config['args']
+                elif choice == 'N':
+                    pass
+                elif not choice:
+                    return []
+                elif choice in base_modes:
+                    mode_choice = choice
+                else:
+                    print("❌ 无效的选择，请重试")
+                    continue
+            else:
+                mode_choice = input("\n请选择基础模式(1-4): ").strip()
+                if not mode_choice:
+                    return []
+                if mode_choice not in base_modes:
+                    print("❌ 无效的模式选择，请重试")
+                    continue
+            
+            selected_mode = base_modes[mode_choice]
+            final_args = []
+            
+            # 添加基础参数和默认值
+            for arg in selected_mode["base_args"]:
+                if arg.startswith('-'):
+                    param_key = arg.lstrip('-').replace('-', '_')
+                    if param_key in selected_mode.get("default_params", {}):
+                        final_args.extend([arg, selected_mode["default_params"][param_key]])
+                    else:
+                        final_args.append(arg)
+                else:
+                    final_args.append(arg)
+            
+            # 显示当前配置
+            print("\n当前配置:")
+            for i in range(0, len(final_args), 2):
+                if i + 1 < len(final_args):
+                    print(f"  {final_args[i]} = {final_args[i+1]}")
+                else:
+                    print(f"  {final_args[i]}")
+            
+            # 询问是否需要修改参数
+            while True:
+                print("\n可选操作:")
+                print("1. 修改参数")
+                print("2. 添加参数")
+                print("3. 开始执行")
+                print("4. 重新选择模式")
+                print("0. 退出程序")
+                
+                op_choice = input("\n请选择操作(0-4): ").strip()
+                
+                if op_choice == "0":
+                    return []
+                elif op_choice == "1":
+                    # 显示当前所有参数
+                    print("\n当前参数:")
+                    for i in range(0, len(final_args), 2):
+                        if i + 1 < len(final_args):
+                            print(f"{i//2 + 1}. {final_args[i]} = {final_args[i+1]}")
+                        else:
+                            print(f"{i//2 + 1}. {final_args[i]}")
+                            
+                    param_idx = input("请选择要修改的参数序号: ").strip()
+                    try:
+                        idx = (int(param_idx) - 1) * 2
+                        if 0 <= idx < len(final_args):
+                            new_value = input(f"请输入新的值: ").strip()
+                            if idx + 1 < len(final_args):
+                                final_args[idx + 1] = new_value
+                    except ValueError:
+                        print("❌ 无效的输入")
+                        
+                elif op_choice == "2":
+                    # 显示可添加的参数
+                    print("\n可添加的参数:")
+                    for key, param in param_options.items():
+                        if param.get("is_flag"):
+                            print(f"  {key}. {param['name']} (开关参数)")
+                        else:
+                            print(f"  {key}. {param['name']} (默认值: {param['default']})")
+                    
+                    param_key = input("请输入要添加的参数代号: ").strip()
+                    if param_key in param_options:
+                        param = param_options[param_key]
+                        if param.get("is_flag"):
+                            if param["arg"] not in final_args:
+                                final_args.append(param["arg"])
+                        else:
+                            value = input(f"请输入{param['name']}的值 (默认: {param['default']}): ").strip() or param['default']
+                            if param["arg"] not in final_args:
+                                final_args.extend([param["arg"], value])
+                            
+                elif op_choice == "3":
+                    print("\n最终参数:", " ".join(final_args))
+                    DebuggerHandler.save_last_config(mode_choice, final_args)
+                    return final_args
+                elif op_choice == "4":
+                    break
+                else:
+                    print("❌ 无效的选择")
+            
+        return []
+
 class Application:
     """应用程序类"""
     
@@ -501,4 +748,13 @@ class Application:
             logger.error(f"[#update_log]程序执行失败: {e}")
 
 if __name__ == '__main__':
-    Application().main() 
+    if USE_DEBUGGER and len(sys.argv) <= 1:
+        selected_options = DebuggerHandler.get_debugger_options()
+        if selected_options:
+            args = InputHandler.parse_arguments(selected_options)
+            Application().main()
+        else:
+            print("未选择任何功能，程序退出。")
+            sys.exit(0)
+    else:
+        Application().main() 
