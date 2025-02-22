@@ -65,7 +65,7 @@ def initialize_textual_logger(layout: dict, log_file: str) -> None:
         log_file: 日志文件路径
     """
     try:
-        TextualLoggerManager.set_layout(layout, log_file)
+        TextualLoggerManager.set_layout(layout, config_info['log_file'])
         logger.info("[#update_log]✅ 日志系统初始化完成")
     except Exception as e:
         print(f"❌ 日志系统初始化失败: {e}") 
