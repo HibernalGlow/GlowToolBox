@@ -20,13 +20,13 @@ from nodes.io.path_handler import PathHandler, ExtractMode
 import platform
 import stat
 
-logger = logging.getLogger(__name__)
-
+ 
 config = {
     'script_name': 'recruit_cover_filter',
     'console_enabled': False,
 }
 logger, config_info = setup_logger(config)
+DEBUG_MODE = True
 
 TEXTUAL_LAYOUT = {
     "cur_stats": {
@@ -72,11 +72,38 @@ def initialize_textual_logger(layout: dict, log_file: str) -> None:
 class RecruitCoverFilter:
     """封面图片过滤器"""
     
-    def __init__(self, hash_file: str = None, cover_count: int = 3, hamming_threshold: int = 12, watermark_keywords: List[str] = None):
+    def __init__(self, hash_file: str = None, hamming_threshold: int = 16, watermark_keywords: List[str] = None):
         """初始化过滤器"""
-        self.image_filter = ImageFilter(hash_file, cover_count, hamming_threshold)
+        self.image_filter = ImageFilter(hash_file, hamming_threshold)
         self.watermark_keywords = watermark_keywords
         
+    def prepare_hash_file(self, recruit_folder: str, workers: int = 4, force_update: bool = False) -> str:
+        """
+        准备哈希文件
+        
+        Args:
+            recruit_folder: 招募文件夹路径
+            workers: 工作线程数
+            force_update: 是否强制更新
+            
+        Returns:
+            str: 哈希文件路径，失败返回None
+        """
+        try:
+            from nodes.pics.hash_process_config import process_artist_folder
+            hash_file = process_artist_folder(recruit_folder, workers, force_update)
+            if hash_file:
+                logger.info(f"[#update_log]✅ 成功生成哈希文件: {hash_file}")
+                self.image_filter.hash_file = hash_file
+                self.image_filter.hash_cache = self.image_filter._load_hash_file()
+                return hash_file
+            else:
+                logger.error("[#update_log]❌ 生成哈希文件失败")
+                return None
+        except Exception as e:
+            logger.error(f"[#update_log]❌ 准备哈希文件时出错: {e}")
+            return None
+
     def _robust_cleanup(self, temp_dir: str) -> None:
         """更健壮的文件清理方法，处理文件被占用的情况"""
         if not os.path.exists(temp_dir):
@@ -108,7 +135,6 @@ class RecruitCoverFilter:
         """处理单个压缩包"""
         initialize_textual_logger(TEXTUAL_LAYOUT, config_info['log_file'])
         logger.info(f"[#file_ops]开始处理压缩包: {zip_path}")
-        logger.info("[#update_log]✅ 哈希索引已更新")
         
         # 列出压缩包内容
         files = ArchiveHandler.list_archive_contents(zip_path)
@@ -137,11 +163,11 @@ class RecruitCoverFilter:
                     if PathHandler.get_file_extension(file) in {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif', '.heic', '.heif', '.jxl'}:
                         image_files.append(PathHandler.join_paths(root, file))
                         
-            # 处理图片 - 启用重复图片过滤，使用水印模式
+            # 处理图片
             to_delete, removal_reasons = self.image_filter.process_images(
                 image_files,
                 enable_duplicate_filter=True,   # 启用重复图片过滤
-                duplicate_filter_mode='watermark',  # 使用水印过滤模式
+                duplicate_filter_mode='hash' if self.image_filter.hash_file else 'quality',  # 如果有哈希文件则使用哈希模式
                 watermark_keywords=self.watermark_keywords  # 传递水印关键词
             )
             
@@ -236,7 +262,7 @@ def setup_cli_parser():
     parser.add_argument('--cover-count', '-cc', type=int, default=3,
                       help='处理的封面图片数量 (默认: 3)')
     parser.add_argument('--hamming-threshold', '-ht', type=int, default=16,
-                      help='汉明距离阈值 (默认: 12)')
+                      help='汉明距离阈值 (默认: 16)')
     parser.add_argument('--clipboard', '-c', action='store_true',
                       help='从剪贴板读取路径')
     parser.add_argument('--watermark-keywords', '-wk', nargs='*',
@@ -266,7 +292,6 @@ def run_application(args):
             
         filter_instance = RecruitCoverFilter(
             hash_file=args.hash_file,
-            cover_count=args.cover_count,
             hamming_threshold=args.hamming_threshold,
             watermark_keywords=args.watermark_keywords
         )
@@ -301,7 +326,7 @@ def get_mode_config():
                     "base_args": ["-cc", "-ht"],
                     "default_params": {
                         "cc": "3",
-                        "ht": "12"
+                        "ht": "16"
                     }
                 },
                 "2": {
@@ -309,7 +334,7 @@ def get_mode_config():
                     "base_args": ["-cc", "-ht", "-em", "first_n", "-en"],
                     "default_params": {
                         "cc": "3",
-                        "ht": "12",
+                        "ht": "16",
                         "en": "3"
                     }
                 },
@@ -318,7 +343,7 @@ def get_mode_config():
                     "base_args": ["-cc", "-ht", "-em", "last_n", "-en"],
                     "default_params": {
                         "cc": "3",
-                        "ht": "12",
+                        "ht": "16",
                         "en": "3"
                     }
                 },
@@ -327,14 +352,14 @@ def get_mode_config():
                     "base_args": ["-cc", "-ht", "-em", "range", "-er"],
                     "default_params": {
                         "cc": "3",
-                        "ht": "12",
+                        "ht": "16",
                         "er": "0:3"
                     }
                 }
             },
             'param_options': {
                 "cc": {"name": "处理图片数量", "arg": "-cc", "default": "3", "type": int},
-                "ht": {"name": "汉明距离阈值", "arg": "-ht", "default": "12", "type": int},
+                "ht": {"name": "汉明距离阈值", "arg": "-ht", "default": "16", "type": int},
                 "en": {"name": "解压数量", "arg": "-en", "default": "3", "type": int},
                 "er": {"name": "解压范围", "arg": "-er", "default": "0:3", "type": str},
                 "c": {"name": "从剪贴板读取", "arg": "-c", "is_flag": True}
@@ -346,7 +371,7 @@ def get_mode_config():
             ],
             'input_options': [
                 ("处理图片数量", "cover_count", "-cc", "3", "输入数字(默认3)"),
-                ("汉明距离阈值", "hamming_threshold", "-ht", "12", "输入数字(默认12)"),
+                ("汉明距离阈值", "hamming_threshold", "-ht", "16", "输入数字(默认16)"),
                 ("解压数量", "extract_n", "-en", "3", "输入数字(默认3)"),
                 ("解压范围", "extract_range", "-er", "0:3", "格式: start:end"),
                 ("哈希文件路径", "hash_file", "-hf", "", "输入哈希文件路径(可选)"),
@@ -357,7 +382,7 @@ def get_mode_config():
                     "checkbox_options": ["clipboard"],
                     "input_values": {
                         "cover_count": "3",
-                        "hamming_threshold": "12"
+                        "hamming_threshold": "16"
                     }
                 },
                 "前N张模式": {
@@ -365,7 +390,7 @@ def get_mode_config():
                     "checkbox_options": ["clipboard"],
                     "input_values": {
                         "cover_count": "3",
-                        "hamming_threshold": "12",
+                        "hamming_threshold": "16",
                         "extract_n": "3"
                     },
                     "extra_args": ["-em", "first_n"]
@@ -375,7 +400,7 @@ def get_mode_config():
                     "checkbox_options": ["clipboard"],
                     "input_values": {
                         "cover_count": "3",
-                        "hamming_threshold": "12",
+                        "hamming_threshold": "16",
                         "extract_n": "3"
                     },
                     "extra_args": ["-em", "last_n"]
@@ -385,7 +410,7 @@ def get_mode_config():
                     "checkbox_options": ["clipboard"],
                     "input_values": {
                         "cover_count": "3",
-                        "hamming_threshold": "12",
+                        "hamming_threshold": "16",
                         "extract_range": "0:3"
                     },
                     "extra_args": ["-em", "range"]
@@ -395,7 +420,6 @@ def get_mode_config():
     }
 
 # 调试模式开关
-DEBUG_MODE = True
 
 if __name__ == '__main__':
     mode_manager = create_mode_manager(

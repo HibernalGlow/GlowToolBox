@@ -12,18 +12,16 @@ logger = logging.getLogger(__name__)
 class ImageFilter:
     """图片过滤器，支持多种独立的过滤功能"""
     
-    def __init__(self, hash_file: str = None, cover_count: int = 3, hamming_threshold: int = 12, ref_hamming_threshold: int = None):
+    def __init__(self, hash_file: str = None, hamming_threshold: int = 12, ref_hamming_threshold: int = None):
         """
         初始化过滤器
         
         Args:
             hash_file: 哈希文件路径
-            cover_count: 处理的封面图片数量
             hamming_threshold: 汉明距离阈值
             ref_hamming_threshold: 哈希文件过滤的汉明距离阈值，默认使用hamming_threshold
         """
         self.hash_file = hash_file
-        self.cover_count = cover_count
         self.hamming_threshold = hamming_threshold
         self.ref_hamming_threshold = ref_hamming_threshold if ref_hamming_threshold is not None else hamming_threshold
         self.hash_cache = self._load_hash_file()
@@ -166,7 +164,7 @@ class ImageFilter:
             enable_grayscale_filter: 是否启用黑白图过滤
             enable_duplicate_filter: 是否启用重复图片过滤
             min_size: 最小图片尺寸
-            duplicate_filter_mode: 重复图片过滤模式 ('quality' 或 'watermark')
+            duplicate_filter_mode: 重复图片过滤模式 ('quality', 'watermark' 或 'hash')
             watermark_keywords: 水印关键词列表，None时使用默认列表
             ref_hamming_threshold: 哈希文件过滤的汉明距离阈值，None时使用初始化时的值
             **kwargs: 其他可扩展的参数
@@ -174,27 +172,25 @@ class ImageFilter:
         Returns:
             Tuple[Set[str], Dict[str, Dict]]: (要删除的文件集合, 删除原因字典)
         """
-        logger.info("[#cur_progress]开始分析图片质量...")
         sorted_files = sorted(image_files)
-        cover_files = sorted_files[:self.cover_count]
         
-        if not cover_files:
+        if not sorted_files:
             return set(), {}
             
-        logger.info(f"处理前{self.cover_count}张图片")
+        logger.info(f"开始处理{len(sorted_files)}张图片")
         
         to_delete = set()
         removal_reasons = {}
         
         # 1. 小图过滤
         if enable_small_filter:
-            small_to_delete, small_reasons = self._process_small_images(cover_files, min_size)
+            small_to_delete, small_reasons = self._process_small_images(sorted_files, min_size)
             to_delete.update(small_to_delete)
             removal_reasons.update(small_reasons)
         
         # 2. 黑白图过滤
         if enable_grayscale_filter:
-            gray_to_delete, gray_reasons = self._process_grayscale_images(cover_files)
+            gray_to_delete, gray_reasons = self._process_grayscale_images(sorted_files)
             # 避免重复添加
             gray_to_delete = {img for img in gray_to_delete if img not in to_delete}
             to_delete.update(gray_to_delete)
@@ -203,29 +199,30 @@ class ImageFilter:
         # 3. 重复图片过滤
         if enable_duplicate_filter:
             # 获取未被其他过滤器删除的文件
-            remaining_files = [f for f in cover_files if f not in to_delete]
+            remaining_files = [f for f in sorted_files if f not in to_delete]
             if remaining_files:
-                similar_groups = self._find_similar_images(remaining_files)
-                
-                for group in similar_groups:
-                    if len(group) <= 1:
-                        continue
-                        
-                    if duplicate_filter_mode == 'watermark':
-                        # 水印过滤模式
-                        watermark_to_delete, watermark_reasons = self._process_watermark_images(group, watermark_keywords)
-                        to_delete.update(watermark_to_delete)
-                        removal_reasons.update(watermark_reasons)
-                    elif duplicate_filter_mode == 'hash':
-                        # 哈希文件过滤模式
-                        hash_to_delete, hash_reasons = self._process_hash_images(group, ref_hamming_threshold)
-                        to_delete.update(hash_to_delete)
-                        removal_reasons.update(hash_reasons)
-                    else:
-                        # 质量过滤模式（默认）
-                        quality_to_delete, quality_reasons = self._process_quality_images(group)
-                        to_delete.update(quality_to_delete)
-                        removal_reasons.update(quality_reasons)
+                if duplicate_filter_mode == 'hash' and self.hash_file:
+                    # 直接使用哈希文件进行过滤
+                    hash_to_delete, hash_reasons = self._process_hash_images(remaining_files, ref_hamming_threshold)
+                    to_delete.update(hash_to_delete)
+                    removal_reasons.update(hash_reasons)
+                else:
+                    # 使用传统的相似图片组过滤
+                    similar_groups = self._find_similar_images(remaining_files)
+                    for group in similar_groups:
+                        if len(group) <= 1:
+                            continue
+                            
+                        if duplicate_filter_mode == 'watermark':
+                            # 水印过滤模式
+                            watermark_to_delete, watermark_reasons = self._process_watermark_images(group, watermark_keywords)
+                            to_delete.update(watermark_to_delete)
+                            removal_reasons.update(watermark_reasons)
+                        else:
+                            # 质量过滤模式（默认）
+                            quality_to_delete, quality_reasons = self._process_quality_images(group)
+                            to_delete.update(quality_to_delete)
+                            removal_reasons.update(quality_reasons)
         
         return to_delete, removal_reasons
 
