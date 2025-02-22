@@ -54,7 +54,7 @@ TEXTUAL_LAYOUT = {
     "sys_log": {
         "ratio": 1,
         "title": "🔧 系统消息",
-        "style": "lightwhite"
+        "style": "lightgreen"
     }
 }
 
