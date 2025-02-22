@@ -51,7 +51,7 @@ TEXTUAL_LAYOUT = {
         "title": "📂 文件操作",
         "style": "lightpink"
     },
-    "update_log": {
+    "sys_log": {
         "ratio": 1,
         "title": "🔧 系统消息",
         "style": "lightwhite"
@@ -68,7 +68,7 @@ def initialize_textual_logger(layout: dict, log_file: str) -> None:
     """
     try:
         TextualLoggerManager.set_layout(layout, config_info['log_file'])
-        logger.info("[#update_log]✅ 日志系统初始化完成")
+        logger.info("[#sys_log]✅ 日志系统初始化完成")
     except Exception as e:
         print(f"❌ 日志系统初始化失败: {e}") 
 
@@ -99,15 +99,15 @@ class RecruitCoverFilter:
             from nodes.pics.hash_process_config import process_artist_folder
             hash_file = process_artist_folder(recruit_folder, workers, force_update)
             if hash_file:
-                logger.info(f"[#update_log]✅ 成功生成哈希文件: {hash_file}")
+                logger.info(f"[#sys_log]✅ 成功生成哈希文件: {hash_file}")
                 self.image_filter.hash_file = hash_file
                 self.image_filter.hash_cache = self.image_filter._load_hash_file()
                 return hash_file
             else:
-                logger.error("[#update_log]❌ 生成哈希文件失败")
+                logger.error("[#sys_log]❌ 生成哈希文件失败")
                 return None
         except Exception as e:
-            logger.error(f"[#update_log]❌ 准备哈希文件时出错: {e}")
+            logger.error(f"[#sys_log]❌ 准备哈希文件时出错: {e}")
             return None
 
     def _robust_cleanup(self, temp_dir: str) -> None:
@@ -135,7 +135,7 @@ class RecruitCoverFilter:
                 else:  # Linux/MacOS
                     subprocess.run(f'rm -rf "{temp_dir}"', shell=True, check=True)
             except subprocess.CalledProcessError as e:
-                logger.error(f"[#update_log]强制删除失败: {temp_dir}")
+                logger.error(f"[#sys_log]强制删除失败: {temp_dir}")
                 raise
 
     def process_archive(self, zip_path: str, extract_mode: str = ExtractMode.ALL, extract_params: dict = None, is_dehash_mode: bool = False) -> Tuple[bool, str]:
@@ -181,7 +181,7 @@ class RecruitCoverFilter:
             
         # 解压选定文件
         selected_files = [files[i] for i in selected_indices]
-        logger.info(f"[#update_log]准备解压文件: {[os.path.basename(f) for f in selected_files]}")
+        logger.info(f"[#sys_log]准备解压文件: {[os.path.basename(f) for f in selected_files]}")
         
         # 更新解压进度
         logger.info(f"[#path_progress]解压文件: {os.path.basename(zip_path)}")
@@ -212,7 +212,7 @@ class RecruitCoverFilter:
             )
             
             if not to_delete:
-                logger.info("[#update_log]没有需要删除的图片")
+                logger.info("[#sys_log]没有需要删除的图片")
                 self._robust_cleanup(extract_dir)
                 logger.info(f"[#path_progress]处理文件: {os.path.basename(zip_path)}")
                 logger.info(f"[@path_progress]当前进度: 100%")
@@ -234,9 +234,9 @@ class RecruitCoverFilter:
             # 在执行删除操作前备份原始压缩包
             backup_success, backup_path = BackupHandler.backup_source_file(zip_path)
             if backup_success:
-                logger.info(f"[#update_log]✅ 源文件备份成功: {backup_path}")
+                logger.info(f"[#sys_log]✅ 源文件备份成功: {backup_path}")
             else:
-                logger.warning(f"[#update_log]⚠️ 源文件备份失败: {backup_path}")
+                logger.warning(f"[#sys_log]⚠️ 源文件备份失败: {backup_path}")
                 return False, "源文件备份失败"
 
             # 使用7z删除文件
@@ -245,7 +245,7 @@ class RecruitCoverFilter:
             os.remove(delete_list_file)
             
             if result.returncode != 0:
-                logger.error(f"[#update_log]从压缩包删除文件失败: {result.stderr}")
+                logger.error(f"[#sys_log]从压缩包删除文件失败: {result.stderr}")
                 self._robust_cleanup(extract_dir)
                 logger.info(f"[#path_progress]处理文件: {os.path.basename(zip_path)} (失败)")
                 return False, f"从压缩包删除文件失败: {result.stderr}"
@@ -257,7 +257,7 @@ class RecruitCoverFilter:
             return True, ""
             
         except Exception as e:
-            logger.error(f"[#update_log]处理压缩包失败 {zip_path}: {e}")
+            logger.error(f"[#sys_log]处理压缩包失败 {zip_path}: {e}")
             self._robust_cleanup(extract_dir)
             logger.info(f"[#path_progress]处理文件: {os.path.basename(zip_path)} (错误)")
             return False, f"处理过程出错: {str(e)}"
@@ -304,7 +304,7 @@ class Application:
                     # 检查当前目录路径是否包含黑名单关键词
                     root_lower = root.lower()
                     if any(kw in root_lower for kw in blacklist_keywords):
-                        logger.info(f"[#update_log]跳过黑名单目录: {root}")
+                        logger.info(f"[#sys_log]跳过黑名单目录: {root}")
                         continue
                         
                     for file in files:
@@ -312,12 +312,12 @@ class Application:
                             zip_path = os.path.join(root, file)
                             # 检查文件名是否包含黑名单关键词
                             if any(kw in file.lower() for kw in blacklist_keywords):
-                                logger.info(f"[#update_log]跳过黑名单文件: {file}")
+                                logger.info(f"[#sys_log]跳过黑名单文件: {file}")
                                 continue
                                 
                             try:
                                 if not zipfile.is_zipfile(zip_path):
-                                    logger.warning(f"[#update_log]跳过无效的ZIP文件: {zip_path}")
+                                    logger.warning(f"[#sys_log]跳过无效的ZIP文件: {zip_path}")
                                     continue
                                     
                                 # 处理单个zip文件
@@ -348,16 +348,16 @@ class Application:
                     raise ValueError(f"不是有效的ZIP文件: {path}")
                     
                 # 去汉化模式特殊处理
-                if is_dehash_mode and not filter_instance.image_filter.hash_file:
-                    recruit_folder = r"E:\1EHV\[01杂]\zzz去图"
-                    hash_file = filter_instance.prepare_hash_file(recruit_folder)
-                    if not hash_file:
-                        raise RuntimeError("去汉化模式需要哈希文件，但准备失败")
-                        
+                if is_dehash_mode:
+                    if not filter_instance.image_filter.hash_file:
+                        logger.error("[#sys_log]❌ 去汉化模式需要哈希文件")
+                        return False, "去汉化模式需要哈希文件"
+                    logger.info("[#sys_log]✅ 使用去汉化模式处理")
+                
                 # 处理压缩包
                 return filter_instance.process_archive(
                     path,
-                    extract_mode=ExtractMode.RANGE,  # 默认使用RANGE模式
+                    extract_mode=ExtractMode.RANGE,
                     extract_params=extract_params,
                     is_dehash_mode=is_dehash_mode
                 )
@@ -387,7 +387,7 @@ class Application:
         try:
             return self._process_single_archive((directory, filter_instance, extract_params, is_dehash_mode))
         except Exception as e:
-            logger.error(f"[#update_log]处理失败 {directory}: {e}")
+            logger.error(f"[#sys_log]处理失败 {directory}: {e}")
             return False, "处理失败"
 
 def setup_cli_parser():
@@ -405,7 +405,7 @@ def setup_cli_parser():
                       help='水印关键词列表，不指定则使用默认列表')
     parser.add_argument('--duplicate-filter-mode', '-dfm', type=str,
                       choices=['quality', 'watermark', 'hash'],
-                      default='quality', help='重复过滤模式 (默认: quality)')
+                      help='重复过滤模式 (去汉化模式下默认为hash，去水印模式下默认为watermark)')
     parser.add_argument('--extract-mode', '-em', type=str, 
                       choices=[ExtractMode.ALL, ExtractMode.RANGE],
                       default=ExtractMode.ALL, help='解压模式 (默认: all)')
@@ -425,6 +425,10 @@ def setup_cli_parser():
 def run_application(args):
     """运行应用程序"""
     try:
+        # 在开始处添加模式判断的日志
+        logger.info(f"[#sys_log]运行模式: {'去汉化模式' if args.dehash_mode else '去水印模式'}")
+        logger.info(f"[#sys_log]过滤模式: {args.duplicate_filter_mode}")
+
         paths = InputHandler.get_input_paths(
             cli_paths=args.path,
             use_clipboard=args.clipboard,
@@ -432,16 +436,26 @@ def run_application(args):
         )
         
         if not paths:
-            logger.error("[#update_log]未提供任何有效路径")
+            logger.error("[#sys_log]未提供任何有效路径")
             return False
             
+        # 修改过滤器初始化逻辑
         filter_instance = RecruitCoverFilter(
             hash_file=args.hash_file,
             hamming_threshold=args.hamming_threshold,
-            watermark_keywords=args.watermark_keywords,
+            # 如果是去汉化模式，则不使用水印关键词
+            watermark_keywords=None if args.dehash_mode else args.watermark_keywords,
             max_workers=args.workers
         )
-        
+
+        # 如果是去汉化模式且没有指定哈希文件，自动准备哈希文件
+        if args.dehash_mode and not args.hash_file:
+            recruit_folder = r"E:\1EHV\[01杂]\zzz去图"
+            hash_file = filter_instance.prepare_hash_file(recruit_folder)
+            if not hash_file:
+                logger.error("[#sys_log]❌ 去汉化模式需要哈希文件，但准备失败")
+                return False
+
         # 准备解压参数
         extract_params = {
             'front_n': args.front_n,
@@ -455,9 +469,9 @@ def run_application(args):
         app = Application(max_workers=args.workers)
         
         # 记录处理参数
-        logger.info(f"[#update_log]处理参数: front_n={args.front_n}, back_n={args.back_n}, mode={args.extract_mode}")
+        logger.info(f"[#sys_log]处理参数: front_n={args.front_n}, back_n={args.back_n}, mode={args.extract_mode}")
         if args.extract_range:
-            logger.info(f"[#update_log]解压范围: {args.extract_range}")
+            logger.info(f"[#sys_log]解压范围: {args.extract_range}")
         
         total_count = len(paths)
         success_count = 0
@@ -515,20 +529,20 @@ def run_application(args):
                 logger.info(f"[@global_progress]总任务进度 ({completed}/{total_count}) {progress:.1f}%")
         
         # 输出最终统计信息
-        logger.info(f"[#update_log]处理完成 ✅成功: {success_count} ❌失败: {error_count} 总数: {total_count}")
+        logger.info(f"[#sys_log]处理完成 ✅成功: {success_count} ❌失败: {error_count} 总数: {total_count}")
         
         # 如果有错误，输出详细信息
         if error_details:
-            logger.info("[#update_log]错误详情:")
+            logger.info("[#sys_log]错误详情:")
             for i, error in enumerate(error_details, 1):
-                logger.info(f"[#update_log]{i}. {error}")
+                logger.info(f"[#sys_log]{i}. {error}")
         
         return True
         
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
-        logger.error(f"[#update_log]程序执行失败: {str(e)}\n{error_trace}")
+        logger.error(f"[#sys_log]程序执行失败: {str(e)}\n{error_trace}")
         return False
 
 def get_mode_config():
