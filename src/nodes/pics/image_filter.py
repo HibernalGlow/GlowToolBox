@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class ImageFilter:
     """图片过滤器，支持多种独立的过滤功能"""
     
-    def __init__(self, hash_file: str = None, cover_count: int = 3, hamming_threshold: int = 12):
+    def __init__(self, hash_file: str = None, cover_count: int = 3, hamming_threshold: int = 12, ref_hamming_threshold: int = None):
         """
         初始化过滤器
         
@@ -20,10 +20,12 @@ class ImageFilter:
             hash_file: 哈希文件路径
             cover_count: 处理的封面图片数量
             hamming_threshold: 汉明距离阈值
+            ref_hamming_threshold: 哈希文件过滤的汉明距离阈值，默认使用hamming_threshold
         """
         self.hash_file = hash_file
         self.cover_count = cover_count
         self.hamming_threshold = hamming_threshold
+        self.ref_hamming_threshold = ref_hamming_threshold if ref_hamming_threshold is not None else hamming_threshold
         self.hash_cache = self._load_hash_file()
         self.watermark_detector = WatermarkDetector()
         
@@ -116,6 +118,7 @@ class ImageFilter:
         min_size: int = 631,
         duplicate_filter_mode: str = 'quality',  # 'quality' or 'watermark'
         watermark_keywords: List[str] = None,  # 水印关键词列表
+        ref_hamming_threshold: int = None,  # 哈希文件过滤的汉明距离阈值
         **kwargs
     ) -> Tuple[Set[str], Dict[str, Dict]]:
         """
@@ -129,6 +132,7 @@ class ImageFilter:
             min_size: 最小图片尺寸
             duplicate_filter_mode: 重复图片过滤模式 ('quality' 或 'watermark')
             watermark_keywords: 水印关键词列表，None时使用默认列表
+            ref_hamming_threshold: 哈希文件过滤的汉明距离阈值，None时使用初始化时的值
             **kwargs: 其他可扩展的参数
             
         Returns:
