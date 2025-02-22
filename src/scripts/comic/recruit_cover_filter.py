@@ -143,8 +143,12 @@ class RecruitCoverFilter:
                 logger.error(f"[#update_log]强制删除失败: {temp_dir}")
                 raise
 
-    def process_archive(self, zip_path: str, extract_mode: str = ExtractMode.ALL, extract_params: dict = None, is_dehash_mode: bool = False) -> bool:
-        """处理单个压缩包"""
+    def process_archive(self, zip_path: str, extract_mode: str = ExtractMode.ALL, extract_params: dict = None, is_dehash_mode: bool = False) -> Tuple[bool, str]:
+        """处理单个压缩包
+        
+        Returns:
+            Tuple[bool, str]: (是否成功, 失败原因)
+        """
         logger.info(f"[#file_ops]开始处理压缩包: {zip_path}")
         
         # 列出压缩包内容并预先过滤图片文件
@@ -153,7 +157,7 @@ class RecruitCoverFilter:
         
         if not files:
             logger.info("[#file_ops]未找到图片文件")
-            return False
+            return False, "未找到图片文件"
             
         # 获取要解压的文件索引
         extract_params = extract_params or {}
@@ -163,7 +167,7 @@ class RecruitCoverFilter:
             
         if not selected_indices:
             logger.error("[#file_ops]未选择任何文件进行解压")
-            return False
+            return False, "未选择任何文件进行解压"
             
         # 生成解压目录名称
         zip_name = os.path.splitext(os.path.basename(zip_path))[0]
@@ -174,7 +178,7 @@ class RecruitCoverFilter:
         selected_files = [files[i] for i in selected_indices]
         success, extract_dir = ArchiveHandler.extract_files(zip_path, selected_files, extract_dir)
         if not success:
-            return False
+            return False, "解压文件失败"
             
         try:
             # 获取解压后的图片文件（使用列表推导式优化）
@@ -196,7 +200,7 @@ class RecruitCoverFilter:
             if not to_delete:
                 logger.info("[#file_ops]没有需要删除的图片")
                 self._robust_cleanup(extract_dir)
-                return False
+                return False, "没有需要删除的图片"
                 
             # 备份要删除的文件
             backup_results = BackupHandler.backup_removed_files(zip_path, to_delete, removal_reasons)
@@ -215,6 +219,7 @@ class RecruitCoverFilter:
                 logger.info(f"[#file_ops]✅ 源文件备份成功: {backup_path}")
             else:
                 logger.warning(f"[#file_ops]⚠️ 源文件备份失败: {backup_path}")
+                return False, "源文件备份失败"
 
             # 使用7z删除文件
             cmd = ['7z', 'd', zip_path, f'@{delete_list_file}']
@@ -224,16 +229,16 @@ class RecruitCoverFilter:
             if result.returncode != 0:
                 logger.error(f"[#file_ops]从压缩包删除文件失败: {result.stderr}")
                 self._robust_cleanup(extract_dir)
-                return False
+                return False, f"从压缩包删除文件失败: {result.stderr}"
                 
             logger.info(f"[#file_ops]成功处理压缩包: {zip_path}")
             self._robust_cleanup(extract_dir)
-            return True
+            return True, ""
             
         except Exception as e:
             logger.error(f"[#file_ops]处理压缩包失败 {zip_path}: {e}")
             self._robust_cleanup(extract_dir)
-            return False
+            return False, f"处理过程出错: {str(e)}"
 
 class Application:
     """应用程序类"""
@@ -248,113 +253,120 @@ class Application:
         self.archive_queue = Queue()
         
     def _process_single_archive(self, args):
-        """处理单个压缩包的包装函数
+        """处理单个压缩包或目录的包装函数
         
         Args:
-            args: 包含处理参数的元组 (zip_path, filter_instance, extract_params, is_dehash_mode)
+            args: 包含处理参数的元组 (path, filter_instance, extract_params, is_dehash_mode)
             
         Returns:
-            bool: 处理是否成功
+            Tuple[bool, str]: (是否成功, 失败原因)
         """
-        zip_path, filter_instance, extract_params, is_dehash_mode = args
+        path, filter_instance, extract_params, is_dehash_mode = args
         try:
-            # 检查文件是否存在
-            if not os.path.exists(zip_path):
-                raise FileNotFoundError(f"文件不存在: {zip_path}")
+            # 检查路径是否存在
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"路径不存在: {path}")
                 
-            # 检查文件是否可读
-            if not os.access(zip_path, os.R_OK):
-                raise PermissionError(f"文件无法读取: {zip_path}")
-                
-            # 检查是否为有效的压缩文件
-            if not zipfile.is_zipfile(zip_path):
-                raise ValueError(f"不是有效的ZIP文件: {zip_path}")
-                
-            # 去汉化模式特殊处理
-            if is_dehash_mode and not filter_instance.image_filter.hash_file:
-                recruit_folder = r"E:\1EHV\[01杂]\zzz去图"
-                hash_file = filter_instance.prepare_hash_file(recruit_folder)
-                if not hash_file:
-                    raise RuntimeError("去汉化模式需要哈希文件，但准备失败")
-                    
-            # 处理压缩包
-            success = filter_instance.process_archive(
-                zip_path,
-                extract_mode=ExtractMode.RANGE if extract_params.get('range_str') else ExtractMode.ALL,
-                extract_params=extract_params,
-                is_dehash_mode=is_dehash_mode
-            )
+            # 检查路径是否可访问
+            if not os.access(path, os.R_OK):
+                raise PermissionError(f"路径无法访问: {path}")
             
-            if not success:
-                logger.warning(f"[#file_ops]处理返回失败: {os.path.basename(zip_path)}")
-                
-            return success
-            
-        except FileNotFoundError as e:
-            logger.error(f"[#file_ops]文件不存在: {zip_path}")
-            raise
-        except PermissionError as e:
-            logger.error(f"[#file_ops]文件访问权限错误: {zip_path}")
-            raise
-        except zipfile.BadZipFile as e:
-            logger.error(f"[#file_ops]损坏的ZIP文件: {zip_path}")
-            raise
-        except Exception as e:
-            logger.error(f"[#file_ops]处理过程出错: {zip_path}: {str(e)}")
-            raise
-            
-    def process_directory(self, directory: str, filter_instance: RecruitCoverFilter, is_dehash_mode: bool = False, extract_params: dict = None):
-        """处理目录"""
-        try:
             # 定义黑名单关键词
             blacklist_keywords = ["画集", "CG", "图集"]
             
-            # 收集所有需要处理的压缩包
-            archives_to_process = []
-            
-            if os.path.isfile(directory):
-                if directory.lower().endswith('.zip'):
-                    archives_to_process.append(directory)
-            else:
-                for root, _, files in os.walk(directory):
+            # 如果是目录，递归处理目录下的所有zip文件
+            if os.path.isdir(path):
+                success = True
+                error_msg = ""
+                for root, _, files in os.walk(path):
                     # 检查当前目录路径是否包含黑名单关键词
                     root_lower = root.lower()
                     if any(kw in root_lower for kw in blacklist_keywords):
                         logger.info(f"[#file_ops]跳过黑名单目录: {root}")
                         continue
-                    
+                        
                     for file in files:
                         if file.lower().endswith('.zip'):
                             zip_path = os.path.join(root, file)
-                            archives_to_process.append(zip_path)
-            
-            if not archives_to_process:
-                return
+                            # 检查文件名是否包含黑名单关键词
+                            if any(kw in file.lower() for kw in blacklist_keywords):
+                                logger.info(f"[#file_ops]跳过黑名单文件: {file}")
+                                continue
+                                
+                            try:
+                                if not zipfile.is_zipfile(zip_path):
+                                    logger.warning(f"[#file_ops]跳过无效的ZIP文件: {zip_path}")
+                                    continue
+                                    
+                                # 处理单个zip文件
+                                file_success, file_error = filter_instance.process_archive(
+                                    zip_path,
+                                    extract_mode=ExtractMode.RANGE if extract_params.get('range_str') else ExtractMode.ALL,
+                                    extract_params=extract_params,
+                                    is_dehash_mode=is_dehash_mode
+                                )
+                                if not file_success:
+                                    logger.warning(f"[#file_ops]处理返回失败: {os.path.basename(zip_path)}, 原因: {file_error}")
+                                    error_msg = file_error
+                                success = success and file_success
+                            except Exception as e:
+                                error_msg = str(e)
+                                logger.error(f"[#file_ops]处理ZIP文件失败 {zip_path}: {error_msg}")
+                                success = False
+                return success, error_msg
                 
-            # 使用线程池并行处理压缩包
-            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                # 创建任务列表
-                future_to_archive = {
-                    executor.submit(
-                        self._process_single_archive, 
-                        (archive, filter_instance, extract_params, is_dehash_mode)
-                    ): archive for archive in archives_to_process
-                }
-                
-                # 等待所有任务完成
-                for future in as_completed(future_to_archive):
-                    archive = future_to_archive[future]
-                    try:
-                        success = future.result()
-                        if success:
-                            logger.info(f"[#file_ops]✅ 成功处理: {os.path.basename(archive)}")
-                        else:
-                            logger.warning(f"[#file_ops]⚠️ 处理失败: {os.path.basename(archive)}")
-                    except Exception as e:
-                        logger.error(f"[#file_ops]处理出错 {os.path.basename(archive)}: {e}")
+            # 如果是文件，确保是zip文件
+            elif path.lower().endswith('.zip'):
+                # 检查文件名是否包含黑名单关键词
+                if any(kw in os.path.basename(path).lower() for kw in blacklist_keywords):
+                    logger.info(f"[#file_ops]跳过黑名单文件: {os.path.basename(path)}")
+                    return False, "黑名单文件"
+                    
+                if not zipfile.is_zipfile(path):
+                    raise ValueError(f"不是有效的ZIP文件: {path}")
+                    
+                # 去汉化模式特殊处理
+                if is_dehash_mode and not filter_instance.image_filter.hash_file:
+                    recruit_folder = r"E:\1EHV\[01杂]\zzz去图"
+                    hash_file = filter_instance.prepare_hash_file(recruit_folder)
+                    if not hash_file:
+                        raise RuntimeError("去汉化模式需要哈希文件，但准备失败")
                         
+                # 处理压缩包
+                return filter_instance.process_archive(
+                    path,
+                    extract_mode=ExtractMode.RANGE if extract_params.get('range_str') else ExtractMode.ALL,
+                    extract_params=extract_params,
+                    is_dehash_mode=is_dehash_mode
+                )
+            else:
+                logger.warning(f"[#file_ops]跳过非ZIP文件: {path}")
+                return False, "非ZIP文件"
+            
+        except FileNotFoundError as e:
+            logger.error(f"[#file_ops]路径不存在: {path}")
+            raise
+        except PermissionError as e:
+            logger.error(f"[#file_ops]路径访问权限错误: {path}")
+            raise
         except Exception as e:
-            logger.error(f"[#update_log]处理目录失败 {directory}: {e}")
+            logger.error(f"[#file_ops]处理过程出错: {path}: {str(e)}")
+            raise
+            
+    def process_directory(self, directory: str, filter_instance: RecruitCoverFilter, is_dehash_mode: bool = False, extract_params: dict = None):
+        """处理目录或文件
+        
+        Args:
+            directory: 目录或文件路径
+            filter_instance: 过滤器实例
+            is_dehash_mode: 是否为去汉化模式
+            extract_params: 解压参数
+        """
+        try:
+            return self._process_single_archive((directory, filter_instance, extract_params, is_dehash_mode))
+        except Exception as e:
+            logger.error(f"[#update_log]处理失败 {directory}: {e}")
+            return False, "处理失败"
 
 def setup_cli_parser():
     """设置命令行参数解析器"""
@@ -444,13 +456,13 @@ def run_application(args):
             for future in as_completed(future_to_archive):
                 archive = future_to_archive[future]
                 try:
-                    success = future.result()
+                    success, error_msg = future.result()
                     if success:
                         success_count += 1
                         logger.info(f"[#file_ops]✅ 成功处理: {os.path.basename(archive)}")
                     else:
                         error_count += 1
-                        error_msg = f"处理返回失败: {os.path.basename(archive)}"
+                        error_msg = f"处理返回失败: {os.path.basename(archive)}, 原因: {error_msg}"
                         error_details.append(error_msg)
                         logger.warning(f"[#file_ops]⚠️ {error_msg}")
                 except Exception as e:
