@@ -19,6 +19,10 @@ from nodes.io.config_handler import ConfigHandler
 from nodes.io.path_handler import PathHandler, ExtractMode
 import platform
 import stat
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from queue import Queue
+import multiprocessing
 
 # 在文件开头添加常量
 SUPPORTED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif', '.heic', '.heif', '.jxl'}
@@ -75,14 +79,15 @@ def initialize_textual_logger(layout: dict, log_file: str) -> None:
 class RecruitCoverFilter:
     """封面图片过滤器"""
     
-    def __init__(self, hash_file: str = None, hamming_threshold: int = 16, watermark_keywords: List[str] = None):
+    def __init__(self, hash_file: str = None, hamming_threshold: int = 16, watermark_keywords: List[str] = None, max_workers: int = None):
         """初始化过滤器"""
         self.image_filter = ImageFilter(hash_file, hamming_threshold)
         self.watermark_keywords = watermark_keywords
+        self.max_workers = max_workers or multiprocessing.cpu_count()
         # 初始化日志系统（只初始化一次）
         initialize_textual_logger(TEXTUAL_LAYOUT, config_info['log_file'])
         
-    def prepare_hash_file(self, recruit_folder: str, workers: int = 4, force_update: bool = False) -> str:
+    def prepare_hash_file(self, recruit_folder: str, workers: int = 16, force_update: bool = False) -> str:
         """
         准备哈希文件
         
@@ -242,21 +247,36 @@ class RecruitCoverFilter:
 class Application:
     """应用程序类"""
     
+    def __init__(self, max_workers: int = None):
+        """初始化应用程序
+        
+        Args:
+            max_workers: 最大工作线程数，默认为CPU核心数
+        """
+        self.max_workers = max_workers or multiprocessing.cpu_count()
+        self.archive_queue = Queue()
+        
+    def _process_single_archive(self, args):
+        """处理单个压缩包的包装函数"""
+        zip_path, filter_instance, extract_params, is_dehash_mode = args
+        try:
+            return filter_instance.process_archive(zip_path, extract_params=extract_params, is_dehash_mode=is_dehash_mode)
+        except Exception as e:
+            logger.error(f"[#update_log]处理压缩包失败 {zip_path}: {e}")
+            return False
+    
     def process_directory(self, directory: str, filter_instance: RecruitCoverFilter, is_dehash_mode: bool = False, extract_params: dict = None):
         """处理目录"""
         try:
             # 定义黑名单关键词
             blacklist_keywords = ["画集", "CG", "图集"]
             
-            # 检查输入路径是否包含黑名单关键词（不区分大小写）
-            directory_lower = directory.lower()
-            if any(kw in directory_lower for kw in blacklist_keywords):
-                logger.info(f"[#file_ops]跳过黑名单路径: {directory}")
-                return
-
+            # 收集所有需要处理的压缩包
+            archives_to_process = []
+            
             if os.path.isfile(directory):
                 if directory.lower().endswith('.zip'):
-                    filter_instance.process_archive(directory, extract_params=extract_params, is_dehash_mode=is_dehash_mode)
+                    archives_to_process.append(directory)
             else:
                 for root, _, files in os.walk(directory):
                     # 检查当前目录路径是否包含黑名单关键词
@@ -268,7 +288,33 @@ class Application:
                     for file in files:
                         if file.lower().endswith('.zip'):
                             zip_path = os.path.join(root, file)
-                            filter_instance.process_archive(zip_path, extract_params=extract_params, is_dehash_mode=is_dehash_mode)
+                            archives_to_process.append(zip_path)
+            
+            if not archives_to_process:
+                return
+                
+            # 使用线程池并行处理压缩包
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                # 创建任务列表
+                future_to_archive = {
+                    executor.submit(
+                        self._process_single_archive, 
+                        (archive, filter_instance, extract_params, is_dehash_mode)
+                    ): archive for archive in archives_to_process
+                }
+                
+                # 等待所有任务完成
+                for future in as_completed(future_to_archive):
+                    archive = future_to_archive[future]
+                    try:
+                        success = future.result()
+                        if success:
+                            logger.info(f"[#file_ops]✅ 成功处理: {os.path.basename(archive)}")
+                        else:
+                            logger.warning(f"[#file_ops]⚠️ 处理失败: {os.path.basename(archive)}")
+                    except Exception as e:
+                        logger.error(f"[#file_ops]处理出错 {os.path.basename(archive)}: {e}")
+                        
         except Exception as e:
             logger.error(f"[#update_log]处理目录失败 {directory}: {e}")
 
@@ -301,6 +347,8 @@ def setup_cli_parser():
                       help='去汉化模式：处理前N张图片 (默认: 3)')
     parser.add_argument('--back-n', '-bn', type=int, default=5,
                       help='去汉化模式：处理后N张图片 (默认: 5)')
+    parser.add_argument('--workers', '-w', type=int, default=16,
+                      help='最大工作线程数，默认为CPU核心数')
     parser.add_argument('path', nargs='*', help='要处理的文件或目录路径')
     return parser
 
@@ -320,13 +368,13 @@ def run_application(args):
         filter_instance = RecruitCoverFilter(
             hash_file=args.hash_file,
             hamming_threshold=args.hamming_threshold,
-            watermark_keywords=args.watermark_keywords
+            watermark_keywords=args.watermark_keywords,
+            max_workers=args.workers  # 传递线程数参数
         )
         
         # 准备解压参数
         extract_params = {}
         if args.dehash_mode:
-            # 去汉化模式参数
             extract_params['front_n'] = args.front_n
             extract_params['back_n'] = args.back_n
         elif args.extract_mode in [ExtractMode.FIRST_N, ExtractMode.LAST_N]:
@@ -334,12 +382,12 @@ def run_application(args):
         elif args.extract_mode == ExtractMode.RANGE:
             extract_params['range_str'] = args.extract_range
             
-        app = Application()
+        # 创建应用程序实例，使用指定的线程数
+        app = Application(max_workers=args.workers)
+        
         for path in paths:
             if args.dehash_mode:
-                # 去汉化模式处理
                 if not filter_instance.image_filter.hash_file:
-                    # 如果没有提供哈希文件，尝试准备
                     recruit_folder = r"E:\1EHV\[01杂]\zzz去图"
                     hash_file = filter_instance.prepare_hash_file(recruit_folder)
                     if not hash_file:
@@ -373,33 +421,6 @@ def get_mode_config():
                     }
                 },
                 "2": {
-                    "name": "前N张模式",
-                    "description": "处理压缩包前N张图片",
-                    "base_args": ["-ht", "-em", "first_n", "-en"],
-                    "default_params": {
-                        "ht": "16",
-                        "en": "3"
-                    }
-                },
-                "3": {
-                    "name": "后N张模式",
-                    "description": "处理压缩包后N张图片",
-                    "base_args": ["-ht", "-em", "last_n", "-en"],
-                    "default_params": {
-                        "ht": "16",
-                        "en": "3"
-                    }
-                },
-                "4": {
-                    "name": "范围模式",
-                    "description": "处理指定范围的图片",
-                    "base_args": ["-ht", "-em", "range", "-er"],
-                    "default_params": {
-                        "ht": "16",
-                        "er": "0:3"
-                    }
-                },
-                "5": {
                     "name": "去汉化模式",
                     "description": "处理前后N张图片并使用哈希去重",
                     "base_args": ["-dm", "-ht", "-fn", "-bn"],
@@ -440,35 +461,9 @@ def get_mode_config():
                     "checkbox_options": ["clipboard"],
                     "input_values": {
                         "hamming_threshold": "16",
+                        "front_n": "3",
                         "duplicate_filter_mode": "watermark"
                     }
-                },
-                "前N张模式": {
-                    "description": "处理压缩包前N张图片",
-                    "checkbox_options": ["clipboard"],
-                    "input_values": {
-                        "hamming_threshold": "16",
-                        "extract_n": "3"
-                    },
-                    "extra_args": ["-em", "first_n"]
-                },
-                "后N张模式": {
-                    "description": "处理压缩包后N张图片",
-                    "checkbox_options": ["clipboard"],
-                    "input_values": {
-                        "hamming_threshold": "16",
-                        "extract_n": "3"
-                    },
-                    "extra_args": ["-em", "last_n"]
-                },
-                "范围模式": {
-                    "description": "处理指定范围的图片",
-                    "checkbox_options": ["clipboard"],
-                    "input_values": {
-                        "hamming_threshold": "16",
-                        "extract_range": "0:3"
-                    },
-                    "extra_args": ["-em", "range"]
                 },
                 "去汉化模式": {
                     "description": "处理前后N张图片并使用哈希去重",
