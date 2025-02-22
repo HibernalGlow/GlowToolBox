@@ -20,7 +20,7 @@ def extract_processed_paths(logs_dir: str, output_file: str):
                         print(f"正在处理日志文件: {log_path}")
                         
                         # 匹配压缩包路径
-                        paths = re.findall(r'(E:\\[\w\s]+EHV\\[^"\n<>|:]+?\.(zip|rar|7z))', content, re.IGNORECASE)
+                        paths = re.findall(r'(E:\\1EHV\\[^"\n<>|:]+?\.(zip|rar|7z))', content, re.IGNORECASE)
                         if paths:
                             print(f"在文件 {log_path} 中找到 {len(paths)} 个路径")
                             # 由于findall返回元组，我们只需要第一个元素
