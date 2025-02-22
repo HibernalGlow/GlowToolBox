@@ -24,20 +24,22 @@ class ImageFilter:
         self.hash_file = hash_file
         self.hamming_threshold = hamming_threshold
         self.ref_hamming_threshold = ref_hamming_threshold if ref_hamming_threshold is not None else hamming_threshold
-        self.hash_cache = self._load_hash_file()
+        self.hash_cache = {}  # 初始化空缓存
+        if hash_file:
+            self.hash_cache = self._load_hash_file()
         self.watermark_detector = WatermarkDetector()
         
     def _load_hash_file(self) -> Dict:
         """加载哈希文件"""
         try:
-            if os.path.exists(self.hash_file):
-                with open(self.hash_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                logger.info(f"成功加载哈希文件: {self.hash_file}")
-                return data.get('hashes', {})
-            else:
+            if not os.path.exists(self.hash_file):
                 logger.error(f"哈希文件不存在: {self.hash_file}")
                 return {}
+                
+            with open(self.hash_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            logger.info(f"成功加载哈希文件: {self.hash_file}")
+            return data.get('hashes', {})
         except Exception as e:
             logger.error(f"加载哈希文件失败: {e}")
             return {}
@@ -47,7 +49,12 @@ class ImageFilter:
         to_delete = set()
         removal_reasons = {}
         
-        small_images = self._filter_small_images(cover_files, min_size)
+        # 使用列表推导式优化
+        small_images = {
+            img for img in cover_files
+            if self._is_small_image(img, min_size)
+        }
+        
         for img in small_images:
             to_delete.add(img)
             removal_reasons[img] = {
@@ -58,12 +65,27 @@ class ImageFilter:
             
         return to_delete, removal_reasons
         
+    def _is_small_image(self, img_path: str, min_size: int) -> bool:
+        """检查图片是否小于最小尺寸"""
+        try:
+            with Image.open(img_path) as img:
+                width, height = img.size
+                return width < min_size or height < min_size
+        except Exception as e:
+            logger.error(f"检查图片尺寸失败 {img_path}: {e}")
+            return False
+
     def _process_grayscale_images(self, cover_files: List[str]) -> Tuple[Set[str], Dict[str, Dict]]:
         """处理黑白图过滤"""
         to_delete = set()
         removal_reasons = {}
         
-        grayscale_images = self._filter_grayscale_images(cover_files)
+        # 使用列表推导式优化
+        grayscale_images = {
+            img for img in cover_files
+            if self._is_grayscale_image(img)
+        }
+        
         for img in grayscale_images:
             to_delete.add(img)
             removal_reasons[img] = {
@@ -74,6 +96,25 @@ class ImageFilter:
             
         return to_delete, removal_reasons
         
+    def _is_grayscale_image(self, img_path: str) -> bool:
+        """检查图片是否为黑白图片"""
+        try:
+            with Image.open(img_path) as img:
+                if img.mode == "L":  # 直接是灰度图
+                    return True
+                if img.mode in ["RGB", "RGBA"]:
+                    # 优化：只检查部分像素点
+                    rgb_img = img.convert("RGB")
+                    pixels = list(rgb_img.getdata(0))  # 只获取R通道
+                    sample_size = min(1000, len(pixels))  # 最多检查1000个像素
+                    step = max(1, len(pixels) // sample_size)
+                    sampled_pixels = pixels[::step]
+                    return all(p == pixels[0] for p in sampled_pixels)
+            return False
+        except Exception as e:
+            logger.error(f"检查黑白图片失败 {img_path}: {e}")
+            return False
+
     def _process_watermark_images(self, group: List[str], watermark_keywords: List[str] = None) -> Tuple[Set[str], Dict[str, Dict]]:
         """处理水印过滤"""
         to_delete = set()
@@ -115,6 +156,15 @@ class ImageFilter:
         # 使用传入的阈值或默认值
         threshold = ref_hamming_threshold if ref_hamming_threshold is not None else self.ref_hamming_threshold
         
+        # 预先计算所有图片的哈希值
+        hash_values = {}
+        for img_path in group:
+            hash_value = self._get_image_hash(img_path)
+            if hash_value:
+                uri = PathURIGenerator.generate(img_path)
+                if uri:
+                    hash_values[img_path] = (uri, hash_value)
+        
         # 直接从哈希文件读取
         try:
             with open(self.hash_file, 'r', encoding='utf-8') as f:
@@ -123,19 +173,9 @@ class ImageFilter:
             logger.error(f"读取哈希文件失败: {e}")
             return to_delete, removal_reasons
         
-        for img_path in group:
-            hash_value = self._get_image_hash(img_path)
-            if not hash_value:
-                continue
-                
-            # 获取当前图片的URI
-            current_uri = PathURIGenerator.generate(img_path)
-            if not current_uri:
-                continue
-                
-            # 检查是否与哈希文件中的值相似
+        # 比较哈希值
+        for img_path, (current_uri, current_hash) in hash_values.items():
             for uri, ref_data in hash_data.items():
-                # 跳过自身比较
                 if uri == current_uri:
                     continue
                     
@@ -144,7 +184,7 @@ class ImageFilter:
                     continue
                     
                 try:
-                    distance = ImageHashCalculator.calculate_hamming_distance(hash_value, ref_hash)
+                    distance = ImageHashCalculator.calculate_hamming_distance(current_hash, ref_hash)
                     if distance <= threshold:
                         to_delete.add(img_path)
                         removal_reasons[img_path] = {
@@ -242,39 +282,6 @@ class ImageFilter:
                             removal_reasons.update(quality_reasons)
         
         return to_delete, removal_reasons
-
-    def _filter_small_images(self, images: List[str], min_size: int) -> Set[str]:
-        """小图过滤"""
-        small_images = set()
-        for img_path in images:
-            try:
-                with Image.open(img_path) as img:
-                    width, height = img.size
-                    if width < min_size or height < min_size:
-                        small_images.add(img_path)
-                        logger.info(f"发现小图: {os.path.basename(img_path)} ({width}x{height})")
-            except Exception as e:
-                logger.error(f"检查图片尺寸失败 {img_path}: {e}")
-        return small_images
-
-    def _filter_grayscale_images(self, images: List[str]) -> Set[str]:
-        """黑白图过滤"""
-        grayscale_images = set()
-        for img_path in images:
-            try:
-                with Image.open(img_path) as img:
-                    if img.mode == "L":  # 直接是灰度图
-                        grayscale_images.add(img_path)
-                        continue
-                    if img.mode in ["RGB", "RGBA"]:
-                        rgb_img = img.convert("RGB")
-                        pixels = list(rgb_img.getdata())
-                        if all(p[0] == p[1] == p[2] for p in pixels):
-                            grayscale_images.add(img_path)
-                            logger.info(f"发现黑白图片: {os.path.basename(img_path)}")
-            except Exception as e:
-                logger.error(f"检查黑白图片失败 {img_path}: {e}")
-        return grayscale_images
 
     def _find_similar_images(self, images: List[str]) -> List[List[str]]:
         """查找相似的图片组"""

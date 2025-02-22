@@ -20,7 +20,9 @@ from nodes.io.path_handler import PathHandler, ExtractMode
 import platform
 import stat
 
- 
+# 在文件开头添加常量
+SUPPORTED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif', '.heic', '.heif', '.jxl'}
+
 config = {
     'script_name': 'recruit_cover_filter',
     'console_enabled': False,
@@ -69,6 +71,7 @@ def initialize_textual_logger(layout: dict, log_file: str) -> None:
         logger.info("[#update_log]✅ 日志系统初始化完成")
     except Exception as e:
         print(f"❌ 日志系统初始化失败: {e}") 
+
 class RecruitCoverFilter:
     """封面图片过滤器"""
     
@@ -76,6 +79,8 @@ class RecruitCoverFilter:
         """初始化过滤器"""
         self.image_filter = ImageFilter(hash_file, hamming_threshold)
         self.watermark_keywords = watermark_keywords
+        # 初始化日志系统（只初始化一次）
+        initialize_textual_logger(TEXTUAL_LAYOUT, config_info['log_file'])
         
     def prepare_hash_file(self, recruit_folder: str, workers: int = 4, force_update: bool = False) -> str:
         """
@@ -113,6 +118,7 @@ class RecruitCoverFilter:
             try:
                 os.chmod(path, stat.S_IWRITE)
                 os.unlink(path)
+                logger.info(f"[#file_ops]成功删除 {path}")
             except Exception as e:
                 logger.warning(f"[#file_ops]无法删除 {path}: {e}")
 
@@ -132,19 +138,13 @@ class RecruitCoverFilter:
                 raise
 
     def process_archive(self, zip_path: str, extract_mode: str = ExtractMode.ALL, extract_params: dict = None, is_dehash_mode: bool = False) -> bool:
-        """处理单个压缩包
-        
-        Args:
-            zip_path: 压缩包路径
-            extract_mode: 解压模式
-            extract_params: 解压参数
-            is_dehash_mode: 是否为去汉化模式
-        """
-        initialize_textual_logger(TEXTUAL_LAYOUT, config_info['log_file'])
+        """处理单个压缩包"""
         logger.info(f"[#file_ops]开始处理压缩包: {zip_path}")
         
-        # 列出压缩包内容
-        files = ArchiveHandler.list_archive_contents(zip_path)
+        # 列出压缩包内容并预先过滤图片文件
+        files = [f for f in ArchiveHandler.list_archive_contents(zip_path)
+                if PathHandler.get_file_extension(f).lower() in SUPPORTED_EXTENSIONS]
+        
         if not files:
             logger.info("[#file_ops]未找到图片文件")
             return False
@@ -157,13 +157,11 @@ class RecruitCoverFilter:
             front_n = extract_params.get('front_n', 3)  # 默认前3张
             back_n = extract_params.get('back_n', 5)    # 默认后5张
             
-            # 获取前N张的索引
-            front_indices = list(range(min(front_n, len(files))))
-            # 获取后N张的索引
-            back_indices = list(range(max(0, len(files) - back_n), len(files)))
-            # 合并并去重
-            selected_indices = sorted(set(front_indices + back_indices))
-            logger.info(f"[#file_ops]去汉化模式：选择前{front_n}张和后{back_n}张图片")
+            # 直接计算索引，避免多次列表操作
+            total_files = len(files)
+            front_indices = range(min(front_n, total_files))
+            back_indices = range(max(0, total_files - back_n), total_files)
+            selected_indices = sorted(set(front_indices) | set(back_indices))
         else:
             selected_indices = ExtractMode.get_selected_indices(extract_mode, len(files), extract_params)
             
@@ -183,12 +181,13 @@ class RecruitCoverFilter:
             return False
             
         try:
-            # 获取解压后的图片文件
-            image_files = []
-            for root, _, files in os.walk(extract_dir):
-                for file in files:
-                    if PathHandler.get_file_extension(file) in {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif', '.heic', '.heif', '.jxl'}:
-                        image_files.append(PathHandler.join_paths(root, file))
+            # 获取解压后的图片文件（使用列表推导式优化）
+            image_files = [
+                PathHandler.join_paths(root, file)
+                for root, _, files in os.walk(extract_dir)
+                for file in files
+                if PathHandler.get_file_extension(file).lower() in SUPPORTED_EXTENSIONS
+            ]
                         
             # 处理图片
             to_delete, removal_reasons = self.image_filter.process_images(
@@ -206,18 +205,13 @@ class RecruitCoverFilter:
             # 备份要删除的文件
             backup_results = BackupHandler.backup_removed_files(zip_path, to_delete, removal_reasons)
             
-            # 从压缩包中删除文件
-            files_to_delete = []
-            for file_path in to_delete:
-                # 获取文件在压缩包中的相对路径
-                rel_path = os.path.relpath(file_path, extract_dir)
-                files_to_delete.append(rel_path)
+            # 从压缩包中删除文件（使用列表推导式优化）
+            files_to_delete = [os.path.relpath(file_path, extract_dir) for file_path in to_delete]
                 
             # 使用7z删除文件
             delete_list_file = os.path.join(extract_dir, '@delete.txt')
             with open(delete_list_file, 'w', encoding='utf-8') as f:
-                for file_path in files_to_delete:
-                    f.write(file_path + '\n')
+                f.write('\n'.join(files_to_delete))
                     
             # 在执行删除操作前备份原始压缩包
             backup_success, backup_path = BackupHandler.backup_source_file(zip_path)
@@ -237,7 +231,6 @@ class RecruitCoverFilter:
                 return False
                 
             logger.info(f"[#file_ops]成功处理压缩包: {zip_path}")
-            logger.info("[#cur_progress]正在分析图片相似度...")
             self._robust_cleanup(extract_dir)
             return True
             
