@@ -1,0 +1,15 @@
+{
+  "d:\\1VSCODE\\GlowToolBox\\src\\scripts\\comic\\recruit_cover_filter.py": {
+    "mode": "2",
+    "args": [
+      "-cc",
+      "3",
+      "-ht",
+      "12",
+      "-em",
+      "first_n",
+      "-en",
+      "3"
+    ]
+  }
+}

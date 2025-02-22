@@ -117,19 +117,30 @@ class RecruitCoverFilter:
             # 备份要删除的文件
             backup_results = BackupHandler.backup_removed_files(zip_path, to_delete, removal_reasons)
             
-            # 删除标记的文件
-            delete_results = BackupHandler.remove_files(to_delete)
-            
-            # 创建新的压缩包
-            new_zip = zip_path + '.new'
-            if not ArchiveHandler.create_archive(new_zip, temp_dir, delete_source=True):
-                return False
+            # 从压缩包中删除文件
+            files_to_delete = []
+            for file_path in to_delete:
+                # 获取文件在压缩包中的相对路径
+                rel_path = os.path.relpath(file_path, temp_dir)
+                files_to_delete.append(rel_path)
                 
-            # 替换原有压缩包
-            if not ArchiveHandler.replace_archive(zip_path, new_zip):
+            # 使用7z删除文件
+            delete_list_file = os.path.join(temp_dir, '@delete.txt')
+            with open(delete_list_file, 'w', encoding='utf-8') as f:
+                for file_path in files_to_delete:
+                    f.write(file_path + '\n')
+                    
+            cmd = ['7z', 'd', zip_path, f'@{delete_list_file}']
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            os.remove(delete_list_file)
+            
+            if result.returncode != 0:
+                logger.error(f"[#file_ops]从压缩包删除文件失败: {result.stderr}")
+                shutil.rmtree(temp_dir)
                 return False
                 
             logger.info(f"[#file_ops]成功处理压缩包: {zip_path}")
+            shutil.rmtree(temp_dir)
             return True
             
         except Exception as e:

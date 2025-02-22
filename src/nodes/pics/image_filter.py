@@ -101,12 +101,14 @@ class ImageFilter:
                 
         return similar_groups
         
-    def process_images(self, image_files: List[str]) -> Tuple[Set[str], Dict[str, Dict]]:
+    def process_images(self, image_files: List[str], enable_watermark_filter: bool = True, enable_quality_filter: bool = True) -> Tuple[Set[str], Dict[str, Dict]]:
         """
         处理图片列表，返回要删除的图片和删除原因
         
         Args:
             image_files: 图片文件路径列表
+            enable_watermark_filter: 是否启用水印过滤
+            enable_quality_filter: 是否启用质量过滤（保留质量更好的图片）
             
         Returns:
             Tuple[Set[str], Dict[str, Dict]]: (要删除的文件集合, 删除原因字典)
@@ -124,35 +126,56 @@ class ImageFilter:
         removal_reasons = {}
         
         for group in similar_groups:
+            if len(group) <= 1:
+                continue
+                
+            # 检测每张图片的水印和获取文件大小
             watermark_results = {}
+            file_sizes = {}
             for img_path in group:
-                has_watermark, texts = self.watermark_detector.detect_watermark(img_path)
-                watermark_results[img_path] = (has_watermark, texts)
-                logger.info(f"图片 {os.path.basename(img_path)} OCR结果: {texts}")
+                # 获取文件大小
+                file_sizes[img_path] = os.path.getsize(img_path)
+                
+                # 检测水印
+                if enable_watermark_filter:
+                    has_watermark, texts = self.watermark_detector.detect_watermark(img_path)
+                    watermark_results[img_path] = (has_watermark, texts)
+                    logger.info(f"图片 {os.path.basename(img_path)} OCR结果: {texts}")
             
-            clean_images = [img for img, (has_mark, _) in watermark_results.items() 
-                          if not has_mark]
+            # 处理相似图片组
+            if enable_watermark_filter and watermark_results:
+                # 找出无水印的图片
+                clean_images = [img for img, (has_mark, texts) in watermark_results.items() 
+                              if not (has_mark and texts)]  # 只有当确实检测到水印文字时才认为有水印
+                
+                if clean_images:
+                    # 如果有无水印图片，保留其中最大的一张
+                    keep_image = max(clean_images, key=lambda x: file_sizes[x])
+                    logger.info(f"保留无水印图片: {os.path.basename(keep_image)}")
+                    
+                    # 删除其他有水印的图片
+                    for img in group:
+                        if img != keep_image and watermark_results[img][0] and watermark_results[img][1]:
+                            to_delete.add(img)
+                            removal_reasons[img] = {
+                                'reason': 'watermark',
+                                'watermark_texts': watermark_results[img][1]
+                            }
+                            logger.info(f"标记删除有水印图片: {os.path.basename(img)}")
+                    continue  # 跳过质量过滤
             
-            if clean_images:
-                keep_image = clean_images[0]
-                logger.info(f"保留无水印图片: {os.path.basename(keep_image)}")
+            # 质量过滤：保留最大的文件
+            if enable_quality_filter:
+                keep_image = max(group, key=lambda x: file_sizes[x])
+                logger.info(f"保留最大图片: {os.path.basename(keep_image)} ({file_sizes[keep_image]} bytes)")
+                
                 for img in group:
                     if img != keep_image:
                         to_delete.add(img)
                         removal_reasons[img] = {
-                            'reason': 'recruit_cover',
-                            'watermark_texts': watermark_results[img][1]
+                            'reason': 'quality',
+                            'size_diff': f"{file_sizes[keep_image] - file_sizes[img]} bytes"
                         }
-                        logger.info(f"标记删除有水印图片: {os.path.basename(img)}")
-            else:
-                keep_image = group[0]
-                logger.info(f"保留第一张图片: {os.path.basename(keep_image)}")
-                for img in group[1:]:
-                    to_delete.add(img)
-                    removal_reasons[img] = {
-                        'reason': 'recruit_cover',
-                        'watermark_texts': watermark_results[img][1]
-                    }
-                    logger.info(f"标记删除重复图片: {os.path.basename(img)}")
+                        logger.info(f"标记删除较小图片: {os.path.basename(img)} ({file_sizes[img]} bytes)")
         
         return to_delete, removal_reasons 
