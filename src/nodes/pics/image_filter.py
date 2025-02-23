@@ -8,6 +8,9 @@ from io import BytesIO
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import multiprocessing
+from nodes.hash.hash_accelerator import HashAccelerator
+import mmap
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +35,9 @@ class ImageFilter:
             self.hash_cache = self._load_hash_file()
         self.watermark_detector = WatermarkDetector()
         self.max_workers = max_workers or multiprocessing.cpu_count()
+        self.file_cache = {}  # 添加文件缓存
+        self.cache_size_limit = 100 * 1024 * 1024  # 100MB缓存限制
+        self.current_cache_size = 0
         
     def _load_hash_file(self) -> Dict:
         """加载哈希文件"""
@@ -48,27 +54,98 @@ class ImageFilter:
             logger.error(f"加载哈希文件失败: {e}")
             return {}
 
+    def _read_file_optimized(self, file_path: str) -> bytes:
+        """优化的文件读取方法
+        
+        使用多种策略读取文件:
+        1. 首先检查内存缓存
+        2. 对于小文件(<10MB)使用普通读取
+        3. 对于大文件使用mmap
+        4. 维护缓存大小限制
+        """
+        try:
+            # 检查缓存
+            if file_path in self.file_cache:
+                return self.file_cache[file_path]
+
+            file_size = os.path.getsize(file_path)
+            
+            # 小文件直接读取
+            if file_size < 10 * 1024 * 1024:  # 10MB
+                with open(file_path, 'rb') as f:
+                    data = f.read()
+            else:
+                # 大文件使用mmap
+                with open(file_path, 'rb') as f:
+                    with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                        data = mm.read()
+
+            # 缓存管理
+            if self.current_cache_size + file_size <= self.cache_size_limit:
+                self.file_cache[file_path] = data
+                self.current_cache_size += file_size
+            elif len(self.file_cache) > 0:
+                # 如果缓存满了，移除最早的项目
+                oldest_file = next(iter(self.file_cache))
+                oldest_size = len(self.file_cache[oldest_file])
+                del self.file_cache[oldest_file]
+                self.current_cache_size -= oldest_size
+                
+                # 尝试缓存新文件
+                if self.current_cache_size + file_size <= self.cache_size_limit:
+                    self.file_cache[file_path] = data
+                    self.current_cache_size += file_size
+
+            return data
+            
+        except Exception as e:
+            logger.error(f"读取文件失败 {file_path}: {e}")
+            return None
+
     def _process_small_images(self, cover_files: List[str], min_size: int) -> Tuple[Set[str], Dict[str, Dict]]:
         """处理小图过滤"""
         to_delete = set()
         removal_reasons = {}
         
-        for img_path in cover_files:
-            try:
-                with open(img_path, 'rb') as f:
-                    img_data = f.read()
-                result, reason = self.detect_small_image(img_data, {'min_size': min_size})
-                if reason == 'small_image':
-                    to_delete.add(img_path)
-                    removal_reasons[img_path] = {
-                        'reason': 'small_image',
-                        'details': f'小于{min_size}像素'
-                    }
-                    logger.info(f"标记删除小图: {os.path.basename(img_path)}")
-            except Exception as e:
-                logger.error(f"处理小图检测失败 {img_path}: {e}")
+        # 使用线程池并行处理
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_file = {
+                executor.submit(self._process_single_image, img_path, min_size): img_path
+                for img_path in cover_files
+            }
+            
+            for future in as_completed(future_to_file):
+                img_path = future_to_file[future]
+                try:
+                    result = future.result()
+                    if result:
+                        should_delete, reason = result
+                        if should_delete:
+                            to_delete.add(img_path)
+                            removal_reasons[img_path] = {
+                                'reason': 'small_image',
+                                'details': f'小于{min_size}像素'
+                            }
+                            logger.info(f"标记删除小图: {os.path.basename(img_path)}")
+                except Exception as e:
+                    logger.error(f"处理小图检测失败 {img_path}: {e}")
                 
         return to_delete, removal_reasons
+
+    def _process_single_image(self, img_path: str, min_size: int) -> Tuple[bool, str]:
+        """处理单个图片"""
+        try:
+            # 使用优化的文件读取
+            img_data = self._read_file_optimized(img_path)
+            if img_data is None:
+                return False, None
+                
+            result, reason = self.detect_small_image(img_data, {'min_size': min_size})
+            return reason == 'small_image', reason
+            
+        except Exception as e:
+            logger.error(f"处理图片失败 {img_path}: {e}")
+            return False, None
 
     def _process_grayscale_images(self, cover_files: List[str]) -> Tuple[Set[str], Dict[str, Dict]]:
         """处理黑白图过滤"""
@@ -220,6 +297,11 @@ class ImageFilter:
                                    hash_data: Dict, threshold: int) -> Tuple[str, int]:
         """比较哈希值与参考哈希值"""
         try:
+            # 使用加速器进行批量比较
+            ref_hashes = []
+            uri_map = {}
+            
+            # 收集参考哈希值
             for uri, ref_data in hash_data.items():
                 if uri == current_uri:
                     continue
@@ -228,9 +310,22 @@ class ImageFilter:
                 if not ref_hash:
                     continue
                     
-                distance = ImageHashCalculator.calculate_hamming_distance(current_hash, ref_hash)
-                if distance <= threshold:
-                    return uri, distance
+                ref_hashes.append(ref_hash)
+                uri_map[ref_hash] = uri
+            
+            # 使用加速器查找相似哈希
+            similar_hashes = HashAccelerator.find_similar_hashes(
+                current_hash,
+                ref_hashes,
+                uri_map,
+                threshold
+            )
+            
+            # 如果找到相似哈希,返回第一个(最相似的)
+            if similar_hashes:
+                ref_hash, uri, distance = similar_hashes[0]
+                return uri, distance
+                
             return None
             
         except Exception as e:
@@ -343,40 +438,33 @@ class ImageFilter:
                 except Exception as e:
                     logger.error(f"计算哈希值失败 {img}: {e}")
         
-        # 使用计算好的哈希值进行比较
-        for i, img1 in enumerate(images):
-            if img1 in processed or img1 not in hash_values:
-                continue
+        # 使用加速器进行批量比较
+        target_hashes = list(hash_values.values())
+        img_by_hash = {hash_val: img for img, hash_val in hash_values.items()}
+        
+        # 批量查找相似哈希
+        similar_results = HashAccelerator.batch_find_similar_hashes(
+            target_hashes,
+            target_hashes,
+            img_by_hash,
+            self.hamming_threshold
+        )
+        
+        # 处理结果,构建相似图片组
+        for target_hash, similar_hashes in similar_results.items():
+            if target_hash not in processed:
+                current_group = [img_by_hash[target_hash]]
+                processed.add(target_hash)
                 
-            hash1 = hash_values[img1]
-            current_group = [img1]
-            
-            # 并行比较剩余图片
-            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                future_to_comparison = {
-                    executor.submit(
-                        self._compare_hashes,
-                        hash1, hash_values.get(img2), img2,
-                        self.hamming_threshold
-                    ): img2
-                    for img2 in images[i+1:]
-                    if img2 not in processed and img2 in hash_values
-                }
+                for similar_hash, uri, distance in similar_hashes:
+                    if similar_hash not in processed:
+                        current_group.append(img_by_hash[similar_hash])
+                        processed.add(similar_hash)
+                        logger.info(f"找到相似图片: {os.path.basename(uri)} (距离: {distance})")
                 
-                # 收集结果
-                for future in as_completed(future_to_comparison):
-                    img2 = future_to_comparison[future]
-                    try:
-                        is_similar = future.result()
-                        if is_similar:
-                            current_group.append(img2)
-                    except Exception as e:
-                        logger.error(f"比较哈希值失败 {img1} vs {img2}: {e}")
-            
-            if len(current_group) > 1:
-                similar_groups.append(current_group)
-                processed.update(current_group)
-                logger.info(f"找到相似图片组: {len(current_group)}张")
+                if len(current_group) > 1:
+                    similar_groups.append(current_group)
+                    logger.info(f"找到相似图片组: {len(current_group)}张")
                 
         return similar_groups
 
@@ -385,11 +473,14 @@ class ImageFilter:
         try:
             if not hash2:
                 return False
-            distance = ImageHashCalculator.calculate_hamming_distance(hash1, hash2)
-            if distance <= threshold:
-                logger.info(f"找到相似图片: {os.path.basename(img2)} (距离: {distance})")
+                
+            # 使用加速器计算汉明距离
+            distances = HashAccelerator.calculate_hamming_distances(hash1, [hash2])
+            if distances.size > 0 and distances[0] <= threshold:
+                logger.info(f"找到相似图片: {os.path.basename(img2)} (距离: {distances[0]})")
                 return True
             return False
+            
         except Exception as e:
             logger.error(f"比较哈希值失败: {e}")
             return False
@@ -415,8 +506,13 @@ class ImageFilter:
                     return hash_data.get('hash')
                 return str(hash_data)  # 兼容旧版本字符串格式
 
+            # 使用优化的文件读取
+            img_data = self._read_file_optimized(image_path)
+            if img_data is None:
+                return None
+
             # 计算新哈希
-            hash_value = ImageHashCalculator.calculate_phash(image_path)
+            hash_value = ImageHashCalculator.calculate_phash(BytesIO(img_data))
             if not hash_value:
                 logger.error(f"计算图片哈希失败: {image_path}")
                 return None
