@@ -287,16 +287,27 @@ def process_corrupted_archives(directory, skip_checked=True, max_workers=4):
 
     def process_single_file(file_path):
         nonlocal processed
-        logger.info(f"[#current_progress]正在检测: {file_path}")
-        is_valid = check_archive(file_path)
-        processed += 1
-        progress = (processed / total) * 100 if total > 0 else 0
-        logger.info(f"[@current_progress]检测中 ({processed}/{total}) {progress:.1f}%")
-        return {
-            'path': file_path,
-            'valid': is_valid,
-            'timestamp': datetime.now().isoformat()
-        }
+        try:
+            logger.info(f"[#current_progress]正在检测: {file_path}")
+            is_valid = check_archive(file_path)
+            return {
+                'path': file_path,
+                'valid': is_valid,
+                'timestamp': datetime.now().isoformat(),
+                'error': None
+            }
+        except Exception as e:
+            logger.info(f"[#update_log]检测过程中发生异常: {str(e)}")
+            return {
+                'path': file_path,
+                'valid': False,
+                'timestamp': datetime.now().isoformat(),
+                'error': str(e)
+            }
+        finally:
+            processed += 1
+            progress = (processed / total) * 100 if total > 0 else 0
+            logger.info(f"[@current_progress]检测中 ({processed}/{total}) {progress:.1f}%")
 
     # 使用线程池处理文件
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -307,7 +318,12 @@ def process_corrupted_archives(directory, skip_checked=True, max_workers=4):
         
         # 处理结果
         for future in concurrent.futures.as_completed(futures):
-            result = future.result()
+            try:
+                result = future.result()
+            except Exception as e:
+                logger.info(f"[#update_log]任务执行失败: {str(e)}")
+                continue
+            
             file_path = result['path']
             is_valid = result['valid']
             

@@ -72,8 +72,8 @@
     "start_time": "2025-02-23T15:54:32.829030"
   },
   "30108": {
-    "thread_count": 1,
-    "batch_size": 1,
+    "thread_count": 16,
+    "batch_size": 16,
     "start_time": "2025-02-23T16:10:07.526593"
   }
 }
