@@ -105,7 +105,7 @@ FULL_LAYOUT_CONFIG = {
 }
 
 # 添加黑名单关键词常量
-BLACKLIST_KEYWORDS = ['temp', '画集', '00不需要', '动画']
+BLACKLIST_KEYWORDS = ['temp', 'trash', '画集', '图集', 'cg', '00不需要', '动画']
 
 @dataclass
 class ProcessResult:
