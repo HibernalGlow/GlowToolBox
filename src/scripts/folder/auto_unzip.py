@@ -52,7 +52,8 @@ TEXTUAL_LAYOUT = {
 }
 
 # 初始化布局
-TextualLoggerManager.set_layout(TEXTUAL_LAYOUT, config_info['log_file'])
+def init_textuallogger():
+    TextualLoggerManager.set_layout(TEXTUAL_LAYOUT, config_info['log_file'])
 
 # 清理旧日志
 
@@ -95,7 +96,6 @@ class Config:
         self.source_directories = []
         
         # 初始化日志
-        self._setup_logging()
         
     def parse_args(self, args=None):
         """解析命令行参数并更新配置"""
