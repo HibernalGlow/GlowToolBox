@@ -21,11 +21,11 @@ import difflib
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from tui.config import create_config_app
+from nodes.tui.textual_preset import create_config_app
 
 # 导入自定义工具
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.rich_logger import RichProgressHandler  # 使用全局日志系统
+from nodes.tui.rich_logger import RichProgressHandler
 # from utils.file_operation_monitor import init_file_monitor  # 使用全局文件监控
 
 # # 初始化文件监控器

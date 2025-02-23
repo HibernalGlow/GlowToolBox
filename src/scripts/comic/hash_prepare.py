@@ -35,6 +35,7 @@ from nodes.tui.textual_preset import create_config_app
 from nodes.pics.calculate_hash_custom import ImageHashCalculator
 from nodes.tui.textual_logger import TextualLoggerManager
 from nodes.record.logger_config import setup_logger
+from nodes.archive.group_archives import group_archives
 
 # 在全局配置部分添加以下内容
 # ================= 日志配置 =================
@@ -550,6 +551,19 @@ def process_single_file(path: Path, config: dict, lock: threading.Lock, extract_
     file_size = path.stat().st_size / (1024 * 1024)
     logging.info(f"[@hash_progress] 进度 0% ")  # 初始进度
     
+    # 检查是否需要进行分组过滤
+    if config.get('use_groups') and path.suffix.lower() in ['.zip']:
+        # 获取文件所在目录的分组信息
+        groups = group_archives(str(path.parent))
+        if str(path.name) in groups:
+            group_type, _ = groups[str(path.name)]
+            if group_type == 'multi_other':
+                logging.info(f"[#hash_calc]跳过多文件组次要文件: {path}")
+                return results
+            elif group_type in ('single', 'multi_main'):
+                logging.info(f"[#hash_calc]处理{group_type}文件: {path}")
+    
+    # 继续原有的处理逻辑
     if path.suffix.lower() in ['.zip']:
         results = process_single_zip(path, extract_dir, lock, config['force_update'])
     elif path.suffix.lower() in ['.jpg', '.jpeg', '.png', '.webp', '.jxl', '.avif', '.bmp']:
@@ -751,6 +765,7 @@ def main():
         parser.add_argument('--path', type=str, help='要处理的文件夹路径')
         parser.add_argument('--paths', type=str, nargs='+', help='要处理的多个文件夹路径')
         parser.add_argument('--hash-size', type=int, default=10, help='哈希大小 (默认: 10)')
+        parser.add_argument('--use-groups', action='store_true', help='启用压缩包分组功能，只处理主文件')
 
         print("解析命令行参数...", flush=True)
         args = parser.parse_args()
@@ -805,6 +820,14 @@ def main():
         # 更新哈希参数
         params['hash_size'] = args.hash_size
         
+        # 更新配置
+        config = {
+            'max_workers': args.workers,
+            'force_update': args.force,
+            'dry_run': args.dry_run,
+            'use_groups': args.use_groups  # 添加分组配置
+        }
+        
         # 处理所有路径
         success_count = 0
         total_paths = len(valid_paths)
@@ -822,11 +845,6 @@ def main():
             try:
                 # 更新处理日志
                 logging.info(f"[#hash_calc]开始处理路径: {path}")
-                config = {
-                    'max_workers': args.workers,
-                    'force_update': args.force,
-                    'dry_run': args.dry_run
-                }
                 results = process_path(path, config)
                 
                 if results:
