@@ -17,6 +17,7 @@ import sys
 from nodes.tui.textual_logger import TextualLoggerManager
 from nodes.record.logger_config import setup_logger
 from nodes.tui.textual_preset import create_config_app
+from nodes.tui.mode_manager import create_mode_manager
 # 设置日志记录器
 config = {
     'script_name': 'name',
@@ -487,92 +488,137 @@ class BatchProcessor:
                 # 更新总体进度
                 logger.info(f"[#current_stats]已处理: {completed}/{total_folders}")
 
+def create_cli_parser():
+    """创建命令行参数解析器"""
+    parser = argparse.ArgumentParser(description='文件解压缩工具')
+    parser.add_argument('-c', '--clipboard', action='store_true', help='从剪贴板读取路径')
+    parser.add_argument('-i', '--include', nargs='+', help='包含的文件格式列表 (例如: jpg png)')
+    parser.add_argument('-e', '--exclude', nargs='+', help='排除的文件格式列表 (例如: gif mp4)')
+    parser.add_argument('-m', '--mode', choices=['1', '2'], help='处理模式 (1:解压, 2:压缩)')
+    parser.add_argument('-d', '--disable-zipfile', action='store_true', help='禁用zipfile检查')
+    parser.add_argument('-a', '--archive-types', nargs='+', 
+                      choices=['zip', 'cbz', 'rar', 'cbr', '7z'],
+                      help='指定要处理的压缩包格式 (例如: zip cbz)')
+    return parser
+
+def run_application(args):
+    """运行应用程序"""
+    # 创建配置对象
+    config = Config()
+    config.args = args
+    
+    # 更新配置
+    config.include_formats = args.include if args.include else []
+    config.exclude_formats = args.exclude if args.exclude else []
+    config.disable_zipfile = args.disable_zipfile
+    config.archive_types = config._get_archive_types()
+    
+    # 获取源目录
+    config.source_directories = config._get_multiple_paths()
+    
+    # 执行处理
+    processor = BatchProcessor(config)
+    processor.process_all('decompress' if args.mode == '1' else 'compress')
+    return True
 
 def main():
     """主函数"""
-    # 创建配置对象
-    config = Config()
-    
-    # 检查是否有命令行参数（除了程序名称外的参数）
-    has_args = len(sys.argv) > 1
-    
-    if has_args:
-        # 解析命令行参数
-        config.parse_args()
-        
-        # 如果指定了模式，直接使用；否则通过对话框选择
-        mode = config.mode
-        # 直接执行处理
-        processor = BatchProcessor(config)
-        processor.process_all('decompress' if mode == '1' else 'compress')
-        return
-    
-    # 没有命令行参数时启动TUI界面
-
-    # 定义复选框选项
-    checkbox_options = [
-        ("从剪贴板读取路径", "clipboard", "--clipboard", True),
-        ("禁用zipfile检查", "disable_zipfile", "--disable-zipfile", False),
-    ]
-
-    # 定义输入框选项
-    input_options = [
-        ("处理模式", "mode", "--mode", "1", "1:解压 2:压缩"),
-        ("包含格式", "include", "--include", "", "例如: jpg png"),
-        ("排除格式", "exclude", "--exclude", "", "例如: gif mp4"),
-        ("压缩包格式", "archive_types", "--archive-types", "", "zip/cbz/rar/cbr/7z"),
-    ]
-
-    # 预设配置
-    preset_configs = {
-        "解压-全部": {
-            "description": "解压所有支持的压缩包",
-            "checkbox_options": ["clipboard"],
-            "input_values": {
-                "mode": "1",
-                "include": "",
-                "exclude": "",
-                "archive_types": ""
+    # 定义配置
+    mode_config = {
+        'tui_config': {
+            'checkbox_options': [
+                ("从剪贴板读取路径", "--clipboard", "-c", True),
+                ("禁用zipfile检查", "--disable-zipfile", "-d", False),
+            ],
+            'input_options': [
+                ("处理模式", "--mode", "-m", "1", "1:解压 2:压缩"),
+                ("包含格式", "--include", "-i", "", "例如: jpg png"),
+                ("排除格式", "--exclude", "-e", "", "例如: gif mp4"),
+                ("压缩包格式", "--archive-types", "-a", "", "zip/cbz/rar/cbr/7z"),
+            ],
+            'title': "压缩包处理配置",
+            'preset_configs': {
+                "解压-全部": {
+                    "description": "解压所有支持的压缩包",
+                    "checkbox_options": ["--clipboard"],
+                    "input_values": {
+                        "--mode": "1",
+                        "--include": "",
+                        "--exclude": "",
+                        "--archive-types": ""
+                    }
+                },
+                "压缩-标准": {
+                    "description": "压缩带[#a]前缀的文件夹",
+                    "checkbox_options": ["--clipboard"],
+                    "input_values": {
+                        "--mode": "2",
+                        "--include": "",
+                        "--exclude": "",
+                        "--archive-types": ""
+                    }
+                },
+                "解压-cbz": {
+                    "description": "解压cbz压缩包",
+                    "checkbox_options": ["--clipboard"],
+                    "input_values": {
+                        "--mode": "1",
+                        "--archive-types": "cbz"
+                    }
+                },
+                "解压-cbr": {
+                    "description": "解压cbr压缩包",
+                    "checkbox_options": ["--clipboard"],
+                    "input_values": {
+                        "--mode": "1",
+                        "--archive-types": "cbr"
+                    }
+                }
             }
         },
-        "压缩-标准": {
-            "description": "压缩带[#a]前缀的文件夹",
-            "checkbox_options": ["clipboard"],
-            "input_values": {
-                "mode": "2",
-                "include": "",
-                "exclude": "",
-                "archive_types": ""
-            }
-        },
-        "解压-cbz": {
-            "description": "解压cbz压缩包",
-            "checkbox_options": ["clipboard"],
-            "input_values": {
-                "mode": "1",
-                "archive_types": "cbz"
-            }
-        },
-        "解压-cbr": {
-            "description": "解压cbz压缩包",
-            "checkbox_options": ["clipboard"],
-            "input_values": {
-                "mode": "1",
-                "archive_types": "cbr"
+        'debug_config': {
+            'base_modes': {
+                "1": {
+                    "name": "解压所有",
+                    "base_args": ["--mode", "1", "--clipboard"],
+                    "default_params": {}
+                },
+                "2": {
+                    "name": "压缩所有",
+                    "base_args": ["--mode", "2", "--clipboard"],
+                    "default_params": {}
+                },
+                "3": {
+                    "name": "解压CBZ",
+                    "base_args": ["--mode", "1", "--clipboard", "--archive-types"],
+                    "default_params": {"archive_types": "cbz"}
+                },
+                "4": {
+                    "name": "解压CBR",
+                    "base_args": ["--mode", "1", "--clipboard", "--archive-types"],
+                    "default_params": {"archive_types": "cbr"}
+                }
             }
         }
     }
 
-    # 创建配置界面
-    app = create_config_app(
-        program=f'"{os.path.abspath(__file__)}"',  # 使用绝对路径并用引号包裹
-        checkbox_options=checkbox_options,
-        input_options=input_options,
-        title="压缩包处理配置",
-        preset_configs=preset_configs
+    # 创建并运行模式管理器
+    
+    manager = create_mode_manager(
+        config=mode_config,
+        cli_parser_setup=create_cli_parser,
+        application_runner=run_application
     )
     
-    app.run()
+    # 检查是否有命令行参数
+    has_args = len(sys.argv) > 1
+    
+    if has_args:
+        # 直接运行命令行模式
+        manager.run_cli(sys.argv[1:])
+    else:
+        # 运行TUI模式
+        manager.run_tui()
 
 if __name__ == "__main__":
     main()
