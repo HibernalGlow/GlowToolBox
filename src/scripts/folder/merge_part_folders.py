@@ -9,8 +9,8 @@ import pyperclip
 
 def get_base_name(folder_name):
     """获取文件夹的基本名称（去掉part部分）"""
-    # 匹配类似 'name part 1', 'name part1', 'name_part1' 等格式
-    pattern = r'^(.+?)(?:[-_ ]*part[-_ ]*\d+)$'
+    # 修改后的正则表达式，支持 part/p 两种前缀格式
+    pattern = r'^(.+?)(?:[-_ ]*(?:part|p)[-_ ]*\d+)$'
     match = re.match(pattern, folder_name, re.IGNORECASE)
     return match.group(1).strip() if match else None
 
@@ -33,12 +33,12 @@ def merge_part_folders(base_path):
         if len(folders) <= 1:
             continue
             
-        # 找到part 1文件夹作为目标文件夹
+        # 找到part/p 1文件夹作为目标文件夹
         target_folder = None
         other_folders = []
         
         for folder in folders:
-            if re.search(r'part[-_ ]*1$', folder.name, re.IGNORECASE):
+            if re.search(r'(?:part|p)[-_ ]*1$', folder.name, re.IGNORECASE):
                 target_folder = folder
             else:
                 other_folders.append(folder)
