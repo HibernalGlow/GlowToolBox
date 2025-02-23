@@ -58,3 +58,4 @@ error.log
 src/nodes/pics/ocr_cache.json
 
 *.txt
+src/nodes/config/performance_config.json

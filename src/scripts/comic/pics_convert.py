@@ -513,21 +513,6 @@ class Converter:
             logger.info(f"[#image]图片转换错误: {str(e)}")
             return (None, 'processing_error')
 
-    def has_processed_comment(self, zip_path, comment='Processed'):
-        try:
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                return zip_ref.comment.decode('utf-8') == comment
-        except Exception as e:
-            logger.info(f"[#file]Error checking comment in {zip_path}: {e}")
-            return False
-
-    def add_processed_comment(self, zip_path, comment='Processed'):
-        try:
-            with zipfile.ZipFile(zip_path, 'a') as zip_ref:
-                zip_ref.comment = comment.encode('utf-8')
-            logger.info(f"[#archive]Added comment '{comment}' to {zip_path}")
-        except Exception as e:
-            logger.info(f"[#archive]Error adding comment to {zip_path}: {e}")
 
 class BatchProcessor:
     """批量处理类"""
