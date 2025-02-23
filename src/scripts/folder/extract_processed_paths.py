@@ -70,8 +70,8 @@ if __name__ == '__main__':
     
     # 根据模式设置输出文件
     if mode == '1':
-        output_file = r"D:\1VSCODE\GlowToolBox\data\processed_archives.txt"
+        output_file = r"D:\1VSCODE\GlowToolBox\src\nodes\refactor\txt\processed_archives.txt"
         extract_paths(logs_dir, output_file, 'archive')
     else:
-        output_file = r"D:\1VSCODE\GlowToolBox\data\processed_folders.txt"
+        output_file = r"D:\1VSCODE\GlowToolBox\src\nodes\refactor\txt\processed_folders.txt"
         extract_paths(logs_dir, output_file, 'folder') 

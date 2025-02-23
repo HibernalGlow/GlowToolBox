@@ -57,5 +57,5 @@ def filter_archive_paths(ehv_dir: str, output_file: str):
 
 if __name__ == '__main__':
     ehv_dir = r"E:\999EHV"
-    output_file = r"D:\1VSCODE\GlowToolBox\data\filtered_archive_paths.txt"
+    output_file = r"D:\1VSCODE\GlowToolBox\src\nodes\refactor\txt\filtered_archive_paths.txt"
     filter_archive_paths(ehv_dir, output_file)
