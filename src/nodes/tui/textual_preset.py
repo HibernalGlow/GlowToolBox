@@ -727,10 +727,10 @@ class ConfigTemplate(App[None]):
             cmd_args.extend(self.extra_args)
 
         # 构建完整的命令
-        python_cmd = f'python "{self.program}" {" ".join(cmd_args[1:])}'
+        python_cmd = f'python "{os.path.normpath(self.program)}" {" ".join(cmd_args[1:])}'
         
         # 从程序路径获取脚本名称
-        script_path = self.app.program  # 获取完整路径
+        script_path = os.path.normpath(self.program)  # 获取完整路径并规范化
         script_name = os.path.splitext(os.path.basename(script_path))[0]  # 去除扩展名
 
         # 尝试使用Windows Terminal
@@ -744,12 +744,12 @@ class ConfigTemplate(App[None]):
                 'powershell.exe', 
                 '-NoExit', 
                 '-Command', 
-                python_cmd
+                f"& {{python '{script_path}' {' '.join(cmd_args[1:])}}}"  # 修改PowerShell命令格式
             ], check=True, timeout=10, shell=True)
         except (subprocess.CalledProcessError, FileNotFoundError):
             # 保底方案：直接使用PowerShell
             subprocess.run(
-                ['powershell.exe', '-NoExit', '-Command', f'& {python_cmd}'],
+                ['powershell.exe', '-NoExit', '-Command', f"& {{python '{script_path}' {' '.join(cmd_args[1:])}}}"],  # 修改PowerShell命令格式
                 check=True,
                 shell=True
             )

@@ -58,7 +58,7 @@ def init_textuallogger():
 # 清理旧日志
 
 class Config:
-    # python 'D:\1VSCODE\1ehv\archive\012-自动解压 真.py' -i nov
+    # 示例: python auto_unzip.py -i jpg png
     def __init__(self):
         # 添加命令行参数解析
         parser = argparse.ArgumentParser(description='文件解压缩工具')
@@ -75,7 +75,6 @@ class Config:
         self.parser = parser
         
         # 基本配置
-        self.log_file = "process_log.log"
         self.yaml_file = r"E:\1EHV\file_timestamps.yaml"
         self.compress_prefix = "[#a]"
         self.error_prefix = "[#e]"
