@@ -59,3 +59,5 @@ src/nodes/pics/ocr_cache.json
 
 *.txt
 src/nodes/config/performance_config.json
+
+src\scripts\folder\archive_check_history.yaml

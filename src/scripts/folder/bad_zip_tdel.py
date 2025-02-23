@@ -10,7 +10,7 @@ import pyperclip
 from pathlib import Path
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.rich_logger import RichProgressHandler
+from nodes.tui.rich_logger import RichProgressHandler
 
 # 获取脚本所在目录
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
