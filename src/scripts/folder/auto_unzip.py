@@ -1,5 +1,5 @@
 import os
-import logger
+import logging
 import subprocess
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
