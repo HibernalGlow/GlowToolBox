@@ -65,6 +65,7 @@ class Config:
         parser.add_argument('-e', '--exclude', nargs='+', help='排除的文件格式列表 (例如: gif mp4)')
         parser.add_argument('-m', '--mode', choices=['1', '2'], help='处理模式 (1:解压, 2:压缩)')
         parser.add_argument('-d', '--disable-zipfile', action='store_true', help='禁用zipfile检查')
+        parser.add_argument('-n', '--no-prefix', action='store_true', help='解压时不添加前缀')
         parser.add_argument('-a', '--archive-types', nargs='+', 
                           choices=['zip', 'cbz', 'rar', 'cbr', '7z'],
                           help='指定要处理的压缩包格式 (例如: zip cbz)')
@@ -281,7 +282,7 @@ class ArchiveProcessor:
                 base_name = base_name.replace(ext, '')
             extract_path = os.path.join(
                 os.path.dirname(archive_path), 
-                f"{self.config.compress_prefix}{base_name}"
+                f"{self.config.compress_prefix}{base_name}" if not self.config.args.no_prefix else base_name
             )
             
             logger.info(f"[#process]📂 解压目标路径: {extract_path}")
@@ -497,6 +498,7 @@ def create_cli_parser():
     parser.add_argument('-e', '--exclude', nargs='+', help='排除的文件格式列表 (例如: gif mp4)')
     parser.add_argument('-m', '--mode', choices=['1', '2'], help='处理模式 (1:解压, 2:压缩)')
     parser.add_argument('-d', '--disable-zipfile', action='store_true', help='禁用zipfile检查')
+    parser.add_argument('-n', '--no-prefix', action='store_true', help='解压时不添加前缀')
     parser.add_argument('-a', '--archive-types', nargs='+', 
                       choices=['zip', 'cbz', 'rar', 'cbr', '7z'],
                       help='指定要处理的压缩包格式 (例如: zip cbz)')
@@ -530,6 +532,7 @@ def main():
             'checkbox_options': [
                 ("从剪贴板读取路径", "--clipboard", "-c", True),
                 ("禁用zipfile检查", "--disable-zipfile", "-d", False),
+                ("解压时不添加前缀", "--no-prefix", "-n", False),
             ],
             'input_options': [
                 ("处理模式", "--mode", "-m", "1", "1:解压 2:压缩"),
@@ -573,6 +576,13 @@ def main():
                     "input_values": {
                         "--mode": "1",
                         "--archive-types": "cbr"
+                    }
+                },
+                "解压-无前缀": {
+                    "description": "解压压缩包时，不添加前缀",
+                    "checkbox_options": ["--clipboard", "--no-prefix"],
+                    "input_values": {
+                        "--mode": "1"
                     }
                 }
             }
