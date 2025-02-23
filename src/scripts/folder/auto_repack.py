@@ -197,7 +197,7 @@ class ZipCompressor:
                             compressed_size = final_zip_path.stat().st_size
                             self._cleanup_empty_folder(folder_path)
                             compression_ratio = (compressed_size / original_size) * 100 if original_size > 0 else 0
-                            logger.info(f"[#cur_stats]📊 压缩率: {compression_ratio:.1f} ({compressed_size/1024/1024:.2f}MB / {original_size/1024/1024:.2f}MB)")
+                            logger.info(f"[#cur_progress] 压缩率: {compression_ratio:.1f} ({compressed_size/1024/1024:.2f}MB / {original_size/1024/1024:.2f}MB)")
                             return CompressionResult(True, original_size, compressed_size)
                 
                 logger.info(f"[#file_ops]❌ 压缩失败: {result.stderr}")
@@ -671,7 +671,7 @@ def process_folders(base_path: str, exclude_keywords: List[str]) -> List[Path]:
                 finally:
                     processed_folders += 1
                     percentage = (processed_folders / total_folders) * 100
-                    logger.info(f"[#cur_progress]📊 总进度: {processed_folders}/{total_folders} ({percentage:.1f}%)")
+                    logger.info(f"[#cur_stats] 总进度: ({processed_folders}/{total_folders}){percentage:.1f}%")
                     
                     # 更新当前统计信息
                     if stats.total_original_size > 0:
