@@ -3,6 +3,8 @@ from nodes.config.import_bundles import *
 # 导入日志配置
 from nodes.record.logger_config import setup_logger
 
+import mmap  # 添加在文件顶部
+
 config = {
     'script_name': 'comic_img_filter',
     'console_enabled': False
@@ -172,24 +174,28 @@ class ImageProcessor:
             logger.info( f"❌ 处理目录中的图片时出错: {e}")
             return (set(), set())
 
-    def process_single_image(self, file_path, rel_path, existing_file_names, params, lock): 
-        """处理单个图片文件"""
+    def process_single_image(self, file_path, rel_path, existing_file_names, params, lock):
+        """处理单个图片文件（优化读取版本）"""
         try:
+            # 预检查
             if not file_path or not os.path.exists(file_path):
                 logger.info(f"[#file_ops]❌ 文件不存在: {file_path}")
                 return (None, None, None, 'file_not_found')
-                            
+
+            # 使用内存映射加速大文件读取
             try:
                 with open(file_path, 'rb') as f:
-                    file_data = f.read()
-                    logger.info(f"[#file_ops]📷读图: {file_path}")  # 添加面板标识
+                    # Windows 需要指定 access=mmap.ACCESS_READ
+                    with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mmap_obj:
+                        file_data = mmap_obj.read()
+                        logger.info(f"[#file_ops]🚀 快速读图: {file_path}")  # 修改日志标识
             except (IOError, OSError) as e:
                 logger.info(f"[#file_ops]❌ 图片文件损坏或无法读取 {rel_path}: {e}")
                 return (None, None, None, 'corrupted_image')
             except Exception as e:
                 logger.info(f"[#file_ops]❌ 读取文件失败 {rel_path}: {e}")
                 return (None, None, None, 'read_error')
-                
+
             if file_path.lower().endswith(('png', 'webp', 'jxl', 'avif', 'jpg', 'jpeg', 'bmp', 'tiff', 'tif', 'heic', 'heif', 'bmp')):
                 # === 独立处理步骤 ===
                 processed_data = file_data
