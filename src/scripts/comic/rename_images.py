@@ -9,7 +9,6 @@ import sys
 import subprocess
 import time  # 添加time模块导入
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
-from nodes.pics.watermark_detector import WatermarkDetector
 
 class InputHandler:
     """输入处理类"""
@@ -87,9 +86,41 @@ def backup_file(file_path, original_path, input_base_path):
     except Exception as e:
         print(f"备份失败 {original_path}: {e}")
 
+def is_ad_image(filename):
+    """检查文件名是否匹配广告图片模式"""
+    # 广告图片的关键词模式
+    ad_patterns = [
+        r'招募',
+        r'credit',
+        r'广告',
+        r'[Cc]redit[s]?',
+        r'宣传',
+        r'招新',
+        r'ver\.\d+\.\d+',
+    ]
+    
+    # 合并所有模式为一个正则表达式
+    combined_pattern = '|'.join(ad_patterns)
+    return bool(re.search(combined_pattern, filename))
+
+def handle_ad_file(file_path, input_base_path):
+    """处理广告文件：备份并删除"""
+    try:
+        print(f"⚠️ 检测到广告图片: {os.path.basename(file_path)}")
+        # 备份文件
+        backup_file(file_path, file_path, input_base_path)
+        # 删除文件
+        os.remove(file_path)
+        print(f"✅ 已删除广告图片")
+        return True
+    except Exception as e:
+        print(f"❌ 删除广告图片失败: {str(e)}")
+        return False
+
 def rename_images_in_directory(dir_path):
     processed_count = 0
     skipped_count = 0
+    removed_ads_count = 0  # 新增广告图片计数
     
     # 获取总文件数
     total_files = sum(1 for root, _, files in os.walk(dir_path) 
@@ -108,6 +139,14 @@ def rename_images_in_directory(dir_path):
             for filename in files:
                 if filename.lower().endswith(('.jpg', '.png', '.avif', '.jxl', 'webp')):
                     progress.update(task, description=f"处理: {filename}")
+                    
+                    # 检查是否为广告图片
+                    file_path = os.path.join(root, filename)
+                    if is_ad_image(filename):
+                        if handle_ad_file(file_path, dir_path):
+                            removed_ads_count += 1
+                        progress.advance(task)
+                        continue
                     
                     # 匹配文件名中的 [hash-xxxxxx] 模式
                     new_filename = re.sub(r'\[hash-[0-9a-fA-F]+\]', '', filename)
@@ -146,101 +185,94 @@ def rename_images_in_directory(dir_path):
     
     print(f"\n📊 处理完成:")
     print(f"   - 成功处理: {processed_count} 个文件")
+    print(f"   - 删除广告: {removed_ads_count} 个文件")
     print(f"   - 跳过处理: {skipped_count} 个文件")
 
 def has_hash_files_in_zip(zip_path):
     """快速检查压缩包中是否有包含[hash-]的文件"""
     try:
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            # 只获取文件名列表并检查，不读取文件内容
-            for name in zip_ref.namelist():
-                if '[hash-' in name:
-                    return True
-        return False
+        # 使用7z列出文件
+        list_cmd = ['7z', 'l', zip_path]
+        result = subprocess.run(list_cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            print(f"⚠️ 检查压缩包失败 {zip_path}: {result.stderr}")
+            return True  # 如果检查失败，仍然继续处理
+            
+        # 检查文件名中是否包含[hash-]
+        return '[hash-' in result.stdout
+        
     except Exception as e:
-        print(f"检查压缩包失败 {zip_path}: {e}")
-        return False
+        print(f"⚠️ 检查压缩包失败 {zip_path}: {e}")
+        return True  # 如果出现异常，仍然继续处理
 
 def rename_images_in_zip(zip_path, input_base_path):
     if not has_hash_files_in_zip(zip_path):
         return
 
-    new_zip_path = None  # 初始化变量
-    detector = WatermarkDetector()  # 创建水印检测器实例
-    
     try:
-        # 创建新的压缩包路径
-        original_dir = os.path.dirname(zip_path)
-        file_name = os.path.splitext(os.path.basename(zip_path))[0]
-        timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
-        new_zip_path = os.path.join(original_dir, f'{file_name}.new.zip')
-        
-        # 备份原始文件（使用完整路径）
+        # 备份原始文件
         backup_file(zip_path, zip_path, input_base_path)
-
-        # 定义需要过滤的关键词
-        filter_keywords = ['招募', 'ver', 'zz', '众筹', 'credit']
-        filtered_files = []
-
-        # 创建临时目录用于存放解压的图片
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # 使用7z重命名文件
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                with zipfile.ZipFile(new_zip_path, 'w', zipfile.ZIP_DEFLATED) as new_zip:
-                    for item in zip_ref.infolist():
-                        # 检查文件名是否包含过滤关键词
-                        if any(keyword in item.filename for keyword in filter_keywords):
-                            filtered_files.append(item.filename)
-                            print(f"基于文件名过滤: {item.filename}")
-                            continue
-
-                        # 检查是否为图片文件
-                        if item.filename.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.avif', '.jxl')):
-                            # 解压到临时目录
-                            temp_path = os.path.join(temp_dir, os.path.basename(item.filename))
-                            with zip_ref.open(item) as source, open(temp_path, 'wb') as target:
-                                shutil.copyfileobj(source, target)
-                            
-                            # 检测水印
-                            has_watermark, watermark_texts = detector.detect_watermark(temp_path)
-                            if has_watermark:
-                                filtered_files.append(item.filename)
-                                print(f"基于OCR过滤: {item.filename}")
-                                print(f"检测到的水印文字: {watermark_texts}")
-                                continue
-
-                        # 读取原始文件内容
-                        with zip_ref.open(item.filename) as source:
-                            data = source.read()
-                            
-                        # 处理文件名
-                        new_filename = re.sub(r'\[hash-[0-9a-fA-F]+\]', '', item.filename)
-                        
-                        # 如果文件名没有变化，直接写入
-                        if new_filename == item.filename:
-                            new_zip.writestr(item, data)
-                        else:
-                            # 创建新的ZipInfo对象以保留原始文件属性
-                            new_info = zipfile.ZipInfo(new_filename)
-                            new_info.date_time = item.date_time
-                            new_info.compress_type = item.compress_type
-                            new_info.create_system = item.create_system
-                            new_info.external_attr = item.external_attr
-                            new_zip.writestr(new_info, data)
-                            print(f"重命名: {item.filename} -> {new_filename}")
-
-        # 替换原始文件
-        os.replace(new_zip_path, zip_path)
-        if filtered_files:
-            print(f"已过滤 {len(filtered_files)} 个文件")
-        print(f"压缩包处理完成：{zip_path}")
         
+        # 使用7z列出文件
+        list_cmd = ['7z', 'l', '-slt', zip_path]
+        result = subprocess.run(list_cmd, capture_output=True, text=True)
+        
+        # 解析文件列表
+        files_to_delete = []
+        current_file = None
+        for line in result.stdout.split('\n'):
+            if line.startswith('Path = '):
+                current_file = line[7:].strip()
+                if current_file and is_ad_image(current_file):
+                    files_to_delete.append(current_file)
+                    print(f"⚠️ 检测到广告图片: {current_file}")
+        
+        if files_to_delete:
+            # 构建删除命令
+            delete_cmd = ['7z', 'd', zip_path] + files_to_delete
+            delete_result = subprocess.run(delete_cmd, capture_output=True, text=True)
+            
+            if delete_result.returncode == 0:
+                print(f"✅ 已从压缩包中删除 {len(files_to_delete)} 个广告图片")
+            else:
+                print(f"❌ 删除文件失败: {delete_result.stderr}")
+        
+        # 处理hash文件名
+        # 使用7z重命名文件
+        temp_dir = tempfile.mkdtemp()
+        try:
+            # 解压文件
+            extract_cmd = ['7z', 'x', zip_path, f'-o{temp_dir}', '*']
+            subprocess.run(extract_cmd, check=True)
+            
+            # 重命名文件
+            renamed = False
+            for root, _, files in os.walk(temp_dir):
+                for filename in files:
+                    new_filename = re.sub(r'\[hash-[0-9a-fA-F]+\]', '', filename)
+                    if new_filename != filename:
+                        old_path = os.path.join(root, filename)
+                        new_path = os.path.join(root, new_filename)
+                        os.rename(old_path, new_path)
+                        print(f"重命名: {filename} -> {new_filename}")
+                        renamed = True
+            
+            if renamed:
+                # 重新打包
+                create_cmd = ['7z', 'a', '-tzip', zip_path, f'{temp_dir}\\*']
+                subprocess.run(create_cmd, check=True)
+                print(f"✅ 压缩包处理完成：{zip_path}")
+            
+        finally:
+            # 清理临时目录
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            
+    except subprocess.CalledProcessError as e:
+        print(f"❌ 7z命令执行失败: {str(e)}")
     except Exception as e:
         print(f"❌ 处理压缩包时出错: {str(e)}")
-        if new_zip_path and os.path.exists(new_zip_path):
-            os.remove(new_zip_path)
-        print("继续处理下一个文件...")
-        return  # 返回继续处理下一个文件
+    print("继续处理下一个文件...")
 
 if __name__ == "__main__":
     # 获取输入路径
