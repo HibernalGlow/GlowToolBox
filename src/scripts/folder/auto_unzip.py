@@ -8,9 +8,6 @@ import yaml
 from datetime import datetime
 import warnings
 import argparse
-from prompt_toolkit import prompt
-from prompt_toolkit.shortcuts import radiolist_dialog
-from prompt_toolkit.styles import Style
 import pyperclip
 import zipfile
 from pathlib import Path
@@ -490,26 +487,6 @@ class BatchProcessor:
                 # 更新总体进度
                 logger.info(f"[#current_stats]已处理: {completed}/{total_folders}")
 
-def select_mode():
-    """使用 prompt_toolkit 的 radiolist_dialog 选择模式"""
-    style = Style.from_dict({
-        'dialog': 'bg:#4444ff #ffffff',
-        'dialog frame.label': 'bg:#ffffff #000000',
-        'dialog.body': 'bg:#ffffff #000000',
-        'dialog shadow': 'bg:#000000',
-    })
-
-    result = radiolist_dialog(
-        title='选择操作模式',
-        text='请选择要执行的操作:',
-        values=[
-            ('1', '解压模式'),
-            ('2', '压缩模式'),
-        ],
-        style=style
-    ).run()
-    
-    return result
 
 def main():
     """主函数"""
@@ -524,10 +501,7 @@ def main():
         config.parse_args()
         
         # 如果指定了模式，直接使用；否则通过对话框选择
-        mode = config.args.mode if config.args.mode else select_mode()
-        if mode is None:  # 用户取消
-            return
-            
+        mode = config.mode
         # 直接执行处理
         processor = BatchProcessor(config)
         processor.process_all('decompress' if mode == '1' else 'compress')
