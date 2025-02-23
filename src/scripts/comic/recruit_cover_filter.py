@@ -31,6 +31,9 @@ SUPPORTED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif
 config = {
     'script_name': 'recruit_cover_filter',
     'console_enabled': False,
+    'backup': {
+        'enabled': True,  # 是否启用备份功能
+    }
 }
 logger, config_info = setup_logger(config)
 DEBUG_MODE = False
@@ -230,14 +233,18 @@ class RecruitCoverFilter:
             delete_list_file = os.path.join(extract_dir, '@delete.txt')
             with open(delete_list_file, 'w', encoding='utf-8') as f:
                 f.write('\n'.join(files_to_delete))
-                    
+            
             # 在执行删除操作前备份原始压缩包
-            backup_success, backup_path = BackupHandler.backup_source_file(zip_path)
-            if backup_success:
-                logger.info(f"[#sys_log]✅ 源文件备份成功: {backup_path}")
+            if config['backup']['enabled']:
+                backup_success, backup_path = BackupHandler.backup_source_file(zip_path)
+                if backup_success:
+                    logger.info(f"[#sys_log]✅ 源文件备份成功: {backup_path}")
+                else:
+                    logger.warning(f"[#sys_log]⚠️ 源文件备份失败: {backup_path}")
+                    return False, "源文件备份失败"
             else:
-                logger.warning(f"[#sys_log]⚠️ 源文件备份失败: {backup_path}")
-                return False, "源文件备份失败"
+                logger.info("[#sys_log]ℹ️ 备份功能已禁用，跳过备份")
+                backup_success = True
 
             # 使用7z删除文件
             cmd = ['7z', 'd', zip_path, f'@{delete_list_file}']
