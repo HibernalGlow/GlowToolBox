@@ -58,7 +58,7 @@ MAX_WORKERS = 4  # 并行处理的最大工作线程数
 
 # 不需要压缩的文件类型
 UNWANTED_EXTENSIONS: Set[str] = {
-    '.url', '.txt', '.tsd', '.db', '.js', '.htm', '.html', '.docx'
+    '.url', '.txt', '.tsd', '.db', '.js', '.htm', '.html', '.docx', '.psd', '.pdf', '.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.nov', '.rmvb', '.mp3', '.wav', '.flac', '.m4a', '.ogg', '.aac', '.wma', '.opus', '.ape', '.alac','.psd', '.ai', '.cdr', '.eps', '.svg', '.raw', '.cr2', '.nef', '.arw', '.dng', '.tif', '.tiff'
 }
 
 # 黑名单关键词
@@ -1217,13 +1217,13 @@ def main():
     # 检查是否有命令行参数
     if len(sys.argv) > 1:
         parser = argparse.ArgumentParser(description='文件处理和压缩工具')
-        parser.add_argument('--clipboard', action='store_true', help='从剪贴板读取路径')
-        parser.add_argument('--organize-media', action='store_true', help='整理媒体文件')
-        parser.add_argument('--move-unwanted', action='store_true', help='移动不需要的文件')
-        parser.add_argument('--compress', action='store_true', help='压缩文件夹')
-        parser.add_argument('--process-scattered', action='store_true', help='处理散图')
-        parser.add_argument('--all', action='store_true', help='执行所有操作')
-        parser.add_argument('--path', type=str, help='指定处理路径')
+        parser.add_argument('--clipboard', '-c', action='store_true', help='从剪贴板读取路径')
+        parser.add_argument('--organize-media', '-om', action='store_true', help='整理媒体文件')
+        parser.add_argument('--move-unwanted', '-mu', action='store_true', help='移动不需要的文件')
+        parser.add_argument('--compress', '-cm', action='store_true', help='压缩文件夹')
+        parser.add_argument('--process-scattered', '-ps', action='store_true', help='处理散图')
+        parser.add_argument('--all', '-a', action='store_true', help='执行所有操作')
+        parser.add_argument('--path', '-p', type=str, help='指定处理路径')
         
         try:
             args = parser.parse_args()
