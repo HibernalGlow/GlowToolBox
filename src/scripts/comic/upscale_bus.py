@@ -8,6 +8,7 @@ import concurrent.futures
 import send2trash  # 添加send2trash库用于将文件移动到回收站
 from nodes.record.logger_config import setup_logger
 from nodes.tui.textual_logger import TextualLoggerManager
+from nodes.error.error_handler import handle_file_operation
 
 # 在文件顶部添加布局配置
 TEXTUAL_LAYOUT = {
@@ -86,6 +87,7 @@ def count_files_in_zip(zip_path):
         logger.info(f"[#process_log]读取zip文件失败 {zip_path}: {str(e)}")
         return 0
 
+@handle_file_operation(skip_errors=True)
 def compare_and_copy_archives(source_dir, target_dir, is_move=False):
     # 新增：统计总文件数
     total_files = sum(
@@ -285,6 +287,7 @@ def process_corrupted_archives(directory, skip_checked=True, max_workers=4):
         logger.info("[#process_log]没有需要处理的文件")
         return
 
+    @handle_file_operation(skip_errors=True)
     def process_single_file(file_path):
         nonlocal processed
         try:
