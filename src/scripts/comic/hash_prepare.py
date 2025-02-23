@@ -551,17 +551,26 @@ def process_single_file(path: Path, config: dict, lock: threading.Lock, extract_
     file_size = path.stat().st_size / (1024 * 1024)
     logging.info(f"[@hash_progress] 进度 0% ")  # 初始进度
     
-    # 检查是否需要进行分组过滤
+    # 检查是否需要使用分组信息
     if config.get('use_groups') and path.suffix.lower() in ['.zip']:
-        # 获取文件所在目录的分组信息
-        groups = group_archives(str(path.parent))
-        if str(path.name) in groups:
-            group_type, _ = groups[str(path.name)]
-            if group_type == 'multi_other':
-                logging.info(f"[#hash_calc]跳过多文件组次要文件: {path}")
-                return results
-            elif group_type in ('single', 'multi_main'):
-                logging.info(f"[#hash_calc]处理{group_type}文件: {path}")
+        # 尝试读取分组信息
+        group_info_path = os.path.join(path.parent, 'group_info.json')
+        if os.path.exists(group_info_path):
+            try:
+                with open(group_info_path, 'r', encoding='utf-8') as f:
+                    group_info = json.load(f)
+                    
+                # 检查当前文件的分组信息
+                rel_path = str(path.name)
+                if rel_path in group_info:
+                    file_info = group_info[rel_path]
+                    if file_info['type'] == 'multi_other':
+                        logging.info(f"[#hash_calc]跳过多文件组次要文件: {path}")
+                        return results
+                    else:
+                        logging.info(f"[#hash_calc]处理{file_info['type']}文件: {path}")
+            except Exception as e:
+                logging.error(f"[#hash_calc]读取分组信息失败: {e}")
     
     # 继续原有的处理逻辑
     if path.suffix.lower() in ['.zip']:
@@ -765,7 +774,7 @@ def main():
         parser.add_argument('--path', type=str, help='要处理的文件夹路径')
         parser.add_argument('--paths', type=str, nargs='+', help='要处理的多个文件夹路径')
         parser.add_argument('--hash-size', type=int, default=10, help='哈希大小 (默认: 10)')
-        parser.add_argument('--use-groups', action='store_true', help='启用压缩包分组功能，只处理主文件')
+        parser.add_argument('--use-groups', action='store_true', help='使用已有的分组信息JSON文件过滤文件')
 
         print("解析命令行参数...", flush=True)
         args = parser.parse_args()

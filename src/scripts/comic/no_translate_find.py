@@ -16,6 +16,7 @@ from functools import partial
 import random
 import zipfile
 import win32com.client  # 用于创建快捷方式
+import json
 
 # 第三方库导入
 import pyperclip
@@ -882,11 +883,22 @@ def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, re
     # 添加组详情到报告
     report_generator.add_group_detail(group_base_name, group_details)
 
-def process_directory(directory: str, report_generator: ReportGenerator, dry_run: bool = False, create_shortcuts: bool = False) -> None:
-    """处理单个目录"""
+def process_directory(directory: str, report_generator: ReportGenerator, dry_run: bool = False, create_shortcuts: bool = False, only_group: bool = False) -> Dict[str, Dict]:
+    """处理单个目录
+    
+    Args:
+        directory: 目录路径
+        report_generator: 报告生成器
+        dry_run: 是否预演模式
+        create_shortcuts: 是否创建快捷方式
+        only_group: 是否只进行分组而不移动文件
+        
+    Returns:
+        Dict: 如果only_group为True，返回分组信息
+    """
     # 创建trash目录
     trash_dir = os.path.join(directory, 'trash')
-    if not dry_run:
+    if not dry_run and not only_group:
         os.makedirs(trash_dir, exist_ok=True)
     
     # 收集所有压缩文件
@@ -900,16 +912,13 @@ def process_directory(directory: str, report_generator: ReportGenerator, dry_run
             continue
             
         for file in files:
-            # 使用新定义的ARCHIVE_EXTENSIONS
             if os.path.splitext(file.lower())[1] in ARCHIVE_EXTENSIONS:
                 rel_path = os.path.relpath(os.path.join(root, file), directory)
                 all_files.append(rel_path)
-                # 更新扫描进度
-                logger.info("[@process] 扫描进度: %d/%d", len(all_files), len(all_files))
     
     if not all_files:
         logger.info("[#error_log] ⚠️ 目录 %s 中未找到压缩文件", directory)
-        return
+        return {} if only_group else None
         
     # 更新报告统计
     report_generator.update_stats('total_files', len(all_files))
@@ -920,6 +929,49 @@ def process_directory(directory: str, report_generator: ReportGenerator, dry_run
     
     # 更新报告统计
     report_generator.update_stats('total_groups', len(groups))
+
+    if only_group:
+        # 只返回分组信息
+        group_info = {}
+        for group_name, group_files in groups.items():
+            if len(group_files) == 1:
+                # 单文件组
+                group_info[group_files[0]] = {
+                    'type': 'single',
+                    'group': group_files
+                }
+            else:
+                # 多文件组
+                chinese_versions = [f for f in group_files if is_chinese_version(f)]
+                if chinese_versions:
+                    main_file = max(chinese_versions, 
+                                  key=lambda x: os.path.getsize(os.path.join(directory, x)))
+                else:
+                    main_file = max(group_files, 
+                                  key=lambda x: os.path.getsize(os.path.join(directory, x)))
+                
+                # 记录主文件和其他文件
+                group_info[main_file] = {
+                    'type': 'multi_main',
+                    'group': group_files
+                }
+                for other in group_files:
+                    if other != main_file:
+                        group_info[other] = {
+                            'type': 'multi_other',
+                            'group': group_files
+                        }
+        
+        # 保存分组信息到JSON
+        group_info_path = os.path.join(directory, 'group_info.json')
+        try:
+            with open(group_info_path, 'w', encoding='utf-8') as f:
+                json.dump(group_info, f, ensure_ascii=False, indent=2)
+            logger.info("[#file_ops] ✅ 分组信息已保存到: %s", group_info_path)
+        except Exception as e:
+            logger.error("[#error_log] ❌ 保存分组信息失败: %s", str(e))
+        
+        return group_info
     
     # 创建进程池进行并行处理
     logger.info("[#process] 🔄 开始处理文件组...")
@@ -1040,8 +1092,6 @@ def create_shortcut(src_path: str, dst_path: str) -> bool:
         return False
 
 def main():
-
-    
     parser = argparse.ArgumentParser(description='处理重复压缩包文件')
     group = parser.add_mutually_exclusive_group()
     group.add_argument('-c', '--clipboard', action='store_true', help='从剪贴板读取路径')
@@ -1050,11 +1100,11 @@ def main():
     parser.add_argument('--dry-run', action='store_true', help='预演模式，不实际修改文件')
     parser.add_argument('--create-shortcuts', action='store_true', help='在dryrun模式下创建快捷方式而不是移动文件')
     parser.add_argument('--report', type=str, help='指定报告文件名（默认为"处理报告_时间戳.md"）')
+    parser.add_argument('--only-group', action='store_true', help='只进行分组而不移动文件')
+    
     args = parser.parse_args()
     
-    # 设置日志
-
-        # 获取要处理的路径
+    # 获取要处理的路径
     paths = []
     
     # 从剪贴板读取
@@ -1096,7 +1146,7 @@ def main():
     # 处理每个路径
     for path in valid_paths:
         logger.info("[#process] 🚀 开始处理目录: %s", path)
-        process_directory(path, report_generator, args.dry_run, args.create_shortcuts)
+        process_directory(path, report_generator, args.dry_run, args.create_shortcuts, args.only_group)
         logger.info("[#process] ✨ 目录处理完成: %s", path)
         
         # 生成并保存报告
