@@ -123,7 +123,13 @@ def compare_and_copy_archives(source_dir, target_dir, is_move=False):
                 
                 # 如果是cbz，改名为zip
                 if file.endswith('.cbz'):
-                    os.rename(source_path, temp_source)
+                    try:
+                        os.rename(source_path, temp_source)
+                    except OSError as e:
+                        logger.info(f"[#update_log]重命名失败,跳过处理: {source_path} -> {temp_source}")
+                        logger.info(f"[#process_log]错误信息: {str(e)}")
+                        skip_count += 1
+                        continue
                 
                 try:
                     # 处理前更新进度
@@ -133,13 +139,19 @@ def compare_and_copy_archives(source_dir, target_dir, is_move=False):
                     
                     # 如果目标文件不存在，直接复制或移动
                     if not os.path.exists(target_path):
-                        if is_move:
-                            shutil.move(temp_source, target_path)
-                            logger.info(f"[#process_log]移动文件: {file} -> {target_file}")
-                        else:
-                            shutil.copy2(temp_source, target_path)
-                            logger.info(f"[#process_log]新文件复制: {file} -> {target_file}")
-                        success_count += 1
+                        try:
+                            if is_move:
+                                shutil.move(temp_source, target_path)
+                                logger.info(f"[#process_log]移动文件: {file} -> {target_file}")
+                            else:
+                                shutil.copy2(temp_source, target_path)
+                                logger.info(f"[#process_log]新文件复制: {file} -> {target_file}")
+                            success_count += 1
+                        except OSError as e:
+                            logger.info(f"[#update_log]文件操作失败,跳过: {temp_source} -> {target_path}")
+                            logger.info(f"[#process_log]错误信息: {str(e)}")
+                            skip_count += 1
+                            continue
                     else:
                         # 比较文件数量（忽略特定类型文件）
                         source_count = count_files_in_zip(temp_source)
