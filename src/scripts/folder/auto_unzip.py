@@ -8,7 +8,6 @@ import yaml
 from datetime import datetime
 import warnings
 import argparse
-from logging.handlers import RotatingFileHandler
 from prompt_toolkit import prompt
 from prompt_toolkit.shortcuts import radiolist_dialog
 from prompt_toolkit.styles import Style
@@ -18,18 +17,45 @@ from pathlib import Path
 import sys
 
 # 添加项目根目录到Python路径
-from utils.rich_logger import RichProgressHandler
+from nodes.tui.textual_logger import TextualLoggerManager
+from nodes.record.logger_config import setup_logger, clean_old_logs
+from nodes.tui.textual_preset import create_config_app
+# 设置日志记录器
+config = {
+    'script_name': 'name',
+    'console_enabled': False
+}
+logger, config_info = setup_logger(config)
 
-# 设置日志处理器，限制单个日志文件大小为45MB，最多保留3个备份
-log_handler = RotatingFileHandler(
-    'rename.log',
-    maxBytes=45*1024*1024,  # 45MB
-    backupCount=3,
-    encoding='utf-8'
-)
+# 定义布局配置
+TEXTUAL_LAYOUT = {
+    "current_stats": {  # 总体进度面板
+        "ratio": 2,     
+        "title": "📊 总体进度",  
+        "style": "lightyellow"  
+    },
+    "current_progress": {  # 当前进度面板
+        "ratio": 2,
+        "title": "🔄 当前进度",
+        "style": "lightcyan"
+    },
+    "process": {  # 处理日志面板
+        "ratio": 3,
+        "title": "📝 处理日志",
+        "style": "lightmagenta"
+    },
+    "update": {  # 更新日志面板
+        "ratio": 2,
+        "title": "ℹ️ 更新日志",
+        "style": "lightblue"
+    }
+}
 
-logger = logging.getLogger()
-logger.addHandler(log_handler)
+# 初始化布局
+TextualLoggerManager.set_layout(TEXTUAL_LAYOUT, config_info['log_file'])
+
+# 清理旧日志
+clean_old_logs()
 
 class Config:
     # python 'D:\1VSCODE\1ehv\archive\012-自动解压 真.py' -i nov
@@ -102,38 +128,39 @@ class Config:
                             normalized_path = os.path.normpath(path)
                             if os.path.exists(normalized_path):
                                 paths.append(normalized_path)
-                                print(f"📎 从剪贴板读取路径: {normalized_path}")
+                                logging.info(f"[#process]📎 从剪贴板读取路径: {normalized_path}")
                         except Exception as e:
-                            print(f"⚠️ 警告: 路径处理失败 - {path}")
-                            print(f"❌ 错误信息: {str(e)}")
+                            logging.warning(f"[#update]⚠️ 警告: 路径处理失败 - {path}")
+                            logging.error(f"[#update]❌ 错误信息: {str(e)}")
                 else:
-                    print("⚠️ 剪贴板为空")
+                    logging.warning("[#update]⚠️ 剪贴板为空")
             except Exception as e:
-                print(f"⚠️ 警告: 剪贴板读取失败: {str(e)}")
+                logging.warning(f"[#update]⚠️ 警告: 剪贴板读取失败: {str(e)}")
         
-        # 如果没有使用剪贴板或剪贴板为空，使用rich_logger的多行输入
+        # 如果没有使用剪贴板或剪贴板为空，使用简单的input输入
         if not paths:
-            from utils.rich_logger import get_multiline_input
-            input_paths = get_multiline_input(
-                prompt="请输入目录或压缩包路径（输入空行结束）:",
-                title="📝 路径输入"
-            )
-            
-            for path in input_paths:
+            logging.info("[#process]📝 请输入目录或压缩包路径（每行一个，输入空行结束）:")
+            while True:
+                path = input().strip().strip('"')
+                if not path:  # 空行结束输入
+                    break
+                    
                 try:
                     path = path.strip().strip('"')
                     normalized_path = os.path.normpath(path)
                     
                     if os.path.exists(normalized_path):
                         paths.append(normalized_path)
+                        logging.info(f"[#process]✅ 已添加路径: {normalized_path}")
                     else:
-                        print(f"⚠️ 警告: 路径不存在 - {path}")
+                        logging.warning(f"[#update]⚠️ 警告: 路径不存在 - {path}")
                 except Exception as e:
-                    print(f"⚠️ 警告: 路径处理失败 - {path}")
-                    print(f"❌ 错误信息: {str(e)}")
+                    logging.warning(f"[#update]⚠️ 警告: 路径处理失败 - {path}")
+                    logging.error(f"[#update]❌ 错误信息: {str(e)}")
 
         if not paths:
-            raise ValueError("❌ 未输入有效路径")
+            logging.error("[#update]❌ 未输入有效路径")
+            raise ValueError("未输入有效路径")
         return paths
 
     def _get_archive_types(self):
@@ -155,19 +182,6 @@ class Config:
             # 默认支持所有格式
             return ['.zip', '.cbz', '.rar', '.cbr', '.7z']
 
-    def _setup_logging(self):
-        logger = logging.getLogger()
-        logger.setLevel(logging.INFO)
-        
-        # 文件处理器（带大小限制）
-        file_handler = RotatingFileHandler(
-            self.log_file,
-            maxBytes=45*1024*1024,  # 45MB
-            backupCount=3,
-            encoding='utf-8'
-        )
-        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-        logger.addHandler(file_handler)
 
 class TimestampManager:
     def __init__(self, yaml_file):
@@ -197,11 +211,10 @@ class TimestampManager:
             logging.warning(f"未找到时间戳记录: {file_path}")
 
 class ArchiveProcessor:
-    def __init__(self, config, rich_handler):
+    def __init__(self, config):
         self.config = config
         self.lock = Lock()
         self.timestamp_manager = TimestampManager(config.yaml_file)
-        self.rich_handler = rich_handler
         warnings.filterwarnings('ignore', message='File is not a zip file')
         self.supported_extensions = ['.zip', '.cbz','.rar','.cbr']
         
@@ -216,7 +229,7 @@ class ArchiveProcessor:
                 
                 # 如果同时设置了包含和排除格式，优先使用包含模式
                 if self.config.include_formats and self.config.exclude_formats:
-                    self.rich_handler.add_warning_log(f"⚠️ 同时设置了包含和排除格式，将优先使用包含模式")
+                    logging.warning("[#update]⚠️ 同时设置了包含和排除格式，将优先使用包含模式")
                     self.exclude_formats = []
                 
                 # 检查是否存在排除格式
@@ -226,8 +239,8 @@ class ArchiveProcessor:
                         if file.lower().endswith(tuple(f'.{fmt.lower()}' for fmt in self.config.exclude_formats))
                     ]
                     if exclude_files:
-                        self.rich_handler.add_warning_log(
-                            f"⏭️ 跳过包含排除格式的压缩包: {archive_path}\n"
+                        logging.warning(
+                            f"[#update]⏭️ 跳过包含排除格式的压缩包: {archive_path}\n"
                             f"   发现排除文件: {', '.join(exclude_files[:3])}{'...' if len(exclude_files) > 3 else ''}"
                         )
                         return False
@@ -239,23 +252,23 @@ class ArchiveProcessor:
                         if file.lower().endswith(tuple(f'.{fmt.lower()}' for fmt in self.config.include_formats))
                     ]
                     if not include_files:
-                        self.rich_handler.add_warning_log(
-                            f"⏭️ 跳过不包含指定格式的压缩包: {archive_path}\n"
+                        logging.warning(
+                            f"[#update]⏭️ 跳过不包含指定格式的压缩包: {archive_path}\n"
                             f"   需要包含以下格式之一: {', '.join(self.config.include_formats)}"
                         )
                         return False
                     else:
-                        self.rich_handler.add_status_log(
-                            f"✅ 发现目标文件: {', '.join(include_files[:3])}{'...' if len(include_files) > 3 else ''}"
+                        logging.info(
+                            f"[#process]✅ 发现目标文件: {', '.join(include_files[:3])}{'...' if len(include_files) > 3 else ''}"
                         )
                     
                 return True
                 
         except zipfile.BadZipFile:
-            self.rich_handler.add_error_log(f"❌ 损坏的压缩包: {archive_path}")
+            logging.error(f"[#update]❌ 损坏的压缩包: {archive_path}")
             return False
         except Exception as e:
-            self.rich_handler.add_error_log(f"❌ 检查压缩包出错: {archive_path}, 错误: {str(e)}")
+            logging.error(f"[#update]❌ 检查压缩包出错: {archive_path}, 错误: {str(e)}")
             return False
 
     def decompress(self, archive_path):
@@ -263,7 +276,7 @@ class ArchiveProcessor:
             if not self.should_process_archive(archive_path):
                 return
                 
-            self.rich_handler.add_status_log(f"🔄 开始解压: {archive_path}")
+            logging.info(f"[#process]🔄 开始解压: {archive_path}")
             self.timestamp_manager.record_timestamp(archive_path)
             
             # 准备解压路径
@@ -275,7 +288,7 @@ class ArchiveProcessor:
                 f"{self.config.compress_prefix}{base_name}"
             )
             
-            self.rich_handler.add_status_log(f"📂 解压目标路径: {extract_path}")
+            logging.info(f"[#process]📂 解压目标路径: {extract_path}")
             
             # 使用7-Zip解压
             cmd = f'"{self.config.seven_zip_path}" x "{archive_path}" -o"{extract_path}"'
@@ -288,9 +301,9 @@ class ArchiveProcessor:
                     with self.lock:
                         if not os.path.exists(damaged_path):
                             os.rename(archive_path, damaged_path)
-                            self.rich_handler.add_error_log(f"❌ 文件损坏: {archive_path} -> {damaged_path}")
+                            logging.error(f"[#update]❌ 文件损坏: {archive_path} -> {damaged_path}")
                 elif "cannot open" in error_msg:
-                    self.rich_handler.add_error_log(f"❌ 文件被占用，跳过: {archive_path}")
+                    logging.error(f"[#update]❌ 文件被占用，跳过: {archive_path}")
                 else:
                     raise Exception(f"解压失败: {result.stderr}")
                 return
@@ -300,7 +313,7 @@ class ArchiveProcessor:
                 with self.lock:
                     self._delete_file(archive_path)
             
-            self.rich_handler.add_success_log(f"✅ 解压完成: {archive_path} -> {extract_path}")
+            logging.info(f"[#update]✅ 解压完成: {archive_path} -> {extract_path}")
             
         except Exception as e:
             if self.config.mark_failed:
@@ -311,30 +324,30 @@ class ArchiveProcessor:
                 with self.lock:
                     if not os.path.exists(error_path):
                         os.rename(archive_path, error_path)
-                        self.rich_handler.add_error_log(f"❌ 处理失败并已标记: {archive_path} -> {error_path}")
+                        logging.error(f"[#update]❌ 处理失败并已标记: {archive_path} -> {error_path}")
             else:
-                self.rich_handler.add_error_log(f"❌ 处理失败: {archive_path}")
-            self.rich_handler.add_error_log(f"❌ 错误详情: {str(e)}")
+                logging.error(f"[#update]❌ 处理失败: {archive_path}")
+            logging.error(f"[#update]❌ 错误详情: {str(e)}")
 
     def _delete_file(self, file_path):
         """安全删除文件"""
         try:
             if self.config.use_recycle_bin and hasattr(self, 'send2trash'):
                 self.send2trash(file_path)
-                self.rich_handler.add_status_log(f"🗑️ 已将文件移至回收站: {file_path}")
+                logging.info(f"[#process]🗑️ 已将文件移至回收站: {file_path}")
             else:
                 os.remove(file_path)
-                self.rich_handler.add_status_log(f"🗑️ 已永久删除文件: {file_path}")
+                logging.info(f"[#process]🗑️ 已永久删除文件: {file_path}")
         except Exception as e:
-            self.rich_handler.add_error_log(f"❌ 删除文件失败: {file_path}, 错误: {str(e)}")
+            logging.error(f"[#update]❌ 删除文件失败: {file_path}, 错误: {str(e)}")
 
     def compress(self, folder_path):
         try:
-            self.rich_handler.add_status_log(f"🔄 开始压缩: {folder_path}")
+            logging.info(f"[#process]🔄 开始压缩: {folder_path}")
             folder_name = os.path.basename(folder_path).replace(self.config.compress_prefix, '')
             archive_path = os.path.join(os.path.dirname(folder_path), f"{folder_name}.zip")
             
-            self.rich_handler.add_status_log(f"📦 压缩目标路径: {archive_path}")
+            logging.info(f"[#process]📦 压缩目标路径: {archive_path}")
             
             cmd = f'"{self.config.seven_zip_path}" a -tzip "{archive_path}" "{folder_path}\\*" -r -sdel'
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
@@ -348,13 +361,13 @@ class ArchiveProcessor:
                     if self.config.delete_source:
                         if self.config.use_recycle_bin and hasattr(self, 'send2trash'):
                             self.send2trash(folder_path)
-                            self.rich_handler.add_status_log(f"🗑️ 已将空文件夹移至回收站: {folder_path}")
+                            logging.info(f"[#process]🗑️ 已将空文件夹移至回收站: {folder_path}")
                         else:
                             os.rmdir(folder_path)
-                            self.rich_handler.add_status_log(f"🗑️ 已删除空文件夹: {folder_path}")
+                            logging.info(f"[#process]🗑️ 已删除空文件夹: {folder_path}")
             
             self.timestamp_manager.restore_timestamp(archive_path)
-            self.rich_handler.add_success_log(f"✅ 压缩完成: {folder_path} -> {archive_path}")
+            logging.info(f"[#update]✅ 压缩完成: {folder_path} -> {archive_path}")
             
         except Exception as e:
             if self.config.mark_failed:
@@ -365,31 +378,29 @@ class ArchiveProcessor:
                 with self.lock:
                     if not os.path.exists(error_path):
                         os.rename(folder_path, error_path)
-                        self.rich_handler.add_error_log(f"❌ 压缩失败并已标记: {folder_path} -> {error_path}")
+                        logging.error(f"[#update]❌ 压缩失败并已标记: {folder_path} -> {error_path}")
             else:
-                self.rich_handler.add_error_log(f"❌ 压缩失败: {folder_path}")
-            self.rich_handler.add_error_log(f"❌ 错误详情: {str(e)}")
+                logging.error(f"[#update]❌ 压缩失败: {folder_path}")
+            logging.error(f"[#update]❌ 错误详情: {str(e)}")
 
 class BatchProcessor:
     def __init__(self, config):
         self.config = config
-        self.rich_handler = RichProgressHandler()
-        self.processor = ArchiveProcessor(config, self.rich_handler)
+        self.processor = ArchiveProcessor(config)
         
     def process_all(self, mode='decompress'):
-        with self.rich_handler:
-            if mode == 'decompress':
-                self._process_zips()
-            else:
-                self._process_folders()
+        if mode == 'decompress':
+            self._process_zips()
+        else:
+            self._process_folders()
             
     def _process_zips(self):
         archive_files = []
-        self.rich_handler.add_status_log("🔍 正在扫描压缩文件...")
+        logging.info("[#process]🔍 正在扫描压缩文件...")
         
         # 显示当前支持的格式
-        self.rich_handler.add_status_log(
-            f"📦 当前处理的压缩包格式: {', '.join(fmt.lstrip('.') for fmt in self.config.archive_types)}"
+        logging.info(
+            f"[#process]📦 当前处理的压缩包格式: {', '.join(fmt.lstrip('.') for fmt in self.config.archive_types)}"
         )
         
         for path in self.config.source_directories:
@@ -397,9 +408,9 @@ class BatchProcessor:
                 ext = os.path.splitext(path)[1].lower()
                 if ext in self.config.archive_types:
                     archive_files.append(path)
-                    self.rich_handler.add_status_log(f"📄 找到压缩文件: {path}")
+                    logging.info(f"[#process]📄 找到压缩文件: {path}")
                 else:
-                    self.rich_handler.add_warning_log(f"⏭️ 跳过不支持的格式: {path}")
+                    logging.warning(f"[#update]⏭️ 跳过不支持的格式: {path}")
             elif os.path.isdir(path):
                 for root, _, files in os.walk(path):
                     for file in files:
@@ -407,37 +418,44 @@ class BatchProcessor:
                         if ext in self.config.archive_types:
                             full_path = os.path.join(root, file)
                             archive_files.append(full_path)
-                            self.rich_handler.add_status_log(f"📄 找到压缩文件: {full_path}")
+                            logging.info(f"[#process]📄 找到压缩文件: {full_path}")
         
         total_files = len(archive_files)
         if not archive_files:
-            self.rich_handler.add_warning_log("⚠️ 未找到符合条件的压缩文件")
+            logging.warning("[#update]⚠️ 未找到符合条件的压缩文件")
             return
             
-        self.rich_handler.add_status_log(f"📊 共找到 {total_files} 个压缩文件待处理")
+        logging.info(f"[#process]📊 共找到 {total_files} 个压缩文件待处理")
         
-        # 创建进度任务
-        task_id = self.rich_handler.create_progress_task(total_files, "解压进度")
+        # 更新总体进度
+        logging.info(f"[#current_stats]总文件数: {total_files}")
         
+        # 处理文件
         with ThreadPoolExecutor() as executor:
             futures = [
                 executor.submit(self.processor.decompress, archive_path)
                 for archive_path in archive_files
             ]
             
-            for i, future in enumerate(as_completed(futures)):
-                self.rich_handler.progress.update(task_id, completed=i+1)
+            completed = 0
+            for future in as_completed(futures):
+                completed += 1
+                # 更新进度条
+                percentage = (completed / total_files) * 100
+                logging.info(f"[@current_progress]解压进度 ({completed}/{total_files}) {percentage:.1f}%")
                 future.result()
+                # 更新总体进度
+                logging.info(f"[#current_stats]已处理: {completed}/{total_files}")
                     
     def _process_folders(self):
         folders = []
-        self.rich_handler.add_status_log("🔍 正在扫描待压缩文件夹...")
+        logging.info("[#process]🔍 正在扫描待压缩文件夹...")
         
         for path in self.config.source_directories:
             if os.path.isdir(path):
                 if os.path.basename(path).startswith(self.config.compress_prefix):
                     folders.append(path)
-                    self.rich_handler.add_status_log(f"📁 找到待压缩文件夹: {path}")
+                    logging.info(f"[#process]📁 找到待压缩文件夹: {path}")
                     continue
                 
                 for root, dirs, _ in os.walk(path):
@@ -445,27 +463,34 @@ class BatchProcessor:
                         if dir_name.startswith(self.config.compress_prefix):
                             full_path = os.path.join(root, dir_name)
                             folders.append(full_path)
-                            self.rich_handler.add_status_log(f"📁 找到待压缩文件夹: {full_path}")
+                            logging.info(f"[#process]📁 找到待压缩文件夹: {full_path}")
         
         total_folders = len(folders)
         if not folders:
-            self.rich_handler.add_warning_log("⚠️ 未找到需要处理的文件夹")
+            logging.warning("[#update]⚠️ 未找到需要处理的文件夹")
             return
             
-        self.rich_handler.add_status_log(f"📊 共找到 {total_folders} 个文件夹待处理")
+        logging.info(f"[#process]📊 共找到 {total_folders} 个文件夹待处理")
         
-        # 创建进度任务
-        task_id = self.rich_handler.create_progress_task(total_folders, "压缩进度")
+        # 更新总体进度
+        logging.info(f"[#current_stats]总文件夹数: {total_folders}")
         
+        # 处理文件夹
         with ThreadPoolExecutor() as executor:
             futures = [
                 executor.submit(self.processor.compress, folder_path)
                 for folder_path in folders
             ]
             
-            for i, future in enumerate(as_completed(futures)):
-                self.rich_handler.progress.update(task_id, completed=i+1)
+            completed = 0
+            for future in as_completed(futures):
+                completed += 1
+                # 更新进度条
+                percentage = (completed / total_folders) * 100
+                logging.info(f"[@current_progress]压缩进度 ({completed}/{total_folders}) {percentage:.1f}%")
                 future.result()
+                # 更新总体进度
+                logging.info(f"[#current_stats]已处理: {completed}/{total_folders}")
 
 def select_mode():
     """使用 prompt_toolkit 的 radiolist_dialog 选择模式"""
@@ -511,7 +536,6 @@ def main():
         return
     
     # 没有命令行参数时启动TUI界面
-    from tui.config import create_config_app
 
     # 定义复选框选项
     checkbox_options = [

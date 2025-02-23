@@ -3,7 +3,14 @@ from datetime import datetime
 from pathlib import Path
 import os
 import dotenv
+'''用法
+config = {
+    'script_name': 'name',
+    'console_enabled': False
+}
+logger, config_info = setup_logger(config)
 
+'''
 # 定义工作目录
 WORKING_DIR = r"D:\1VSCODE\GlowToolBox"
 
