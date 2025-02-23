@@ -18,7 +18,7 @@ import sys
 
 # 添加项目根目录到Python路径
 from nodes.tui.textual_logger import TextualLoggerManager
-from nodes.record.logger_config import setup_logger, clean_old_logs
+from nodes.record.logger_config import setup_logger
 from nodes.tui.textual_preset import create_config_app
 # 设置日志记录器
 config = {
@@ -55,7 +55,6 @@ TEXTUAL_LAYOUT = {
 TextualLoggerManager.set_layout(TEXTUAL_LAYOUT, config_info['log_file'])
 
 # 清理旧日志
-clean_old_logs()
 
 class Config:
     # python 'D:\1VSCODE\1ehv\archive\012-自动解压 真.py' -i nov
