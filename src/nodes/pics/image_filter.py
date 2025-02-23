@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import List, Set, Dict, Tuple
+from typing import List, Set, Dict, Tuple, Union
 from .calculate_hash_custom import ImageHashCalculator, PathURIGenerator
 from .watermark_detector import WatermarkDetector
 from PIL import Image
@@ -53,71 +53,48 @@ class ImageFilter:
         to_delete = set()
         removal_reasons = {}
         
-        # 使用列表推导式优化
-        small_images = {
-            img for img in cover_files
-            if self._is_small_image(img, min_size)
-        }
-        
-        for img in small_images:
-            to_delete.add(img)
-            removal_reasons[img] = {
-                'reason': 'small_image',
-                'details': f'小于{min_size}像素'
-            }
-            logger.info(f"标记删除小图: {os.path.basename(img)}")
-            
+        for img_path in cover_files:
+            try:
+                with open(img_path, 'rb') as f:
+                    img_data = f.read()
+                result, reason = self.detect_small_image(img_data, {'min_size': min_size})
+                if reason == 'small_image':
+                    to_delete.add(img_path)
+                    removal_reasons[img_path] = {
+                        'reason': 'small_image',
+                        'details': f'小于{min_size}像素'
+                    }
+                    logger.info(f"标记删除小图: {os.path.basename(img_path)}")
+            except Exception as e:
+                logger.error(f"处理小图检测失败 {img_path}: {e}")
+                
         return to_delete, removal_reasons
-        
-    def _is_small_image(self, img_path: str, min_size: int) -> bool:
-        """检查图片是否小于最小尺寸"""
-        try:
-            with Image.open(img_path) as img:
-                width, height = img.size
-                return width < min_size or height < min_size
-        except Exception as e:
-            logger.error(f"检查图片尺寸失败 {img_path}: {e}")
-            return False
 
     def _process_grayscale_images(self, cover_files: List[str]) -> Tuple[Set[str], Dict[str, Dict]]:
         """处理黑白图过滤"""
         to_delete = set()
         removal_reasons = {}
         
-        # 使用列表推导式优化
-        grayscale_images = {
-            img for img in cover_files
-            if self._is_grayscale_image(img)
-        }
-        
-        for img in grayscale_images:
-            to_delete.add(img)
-            removal_reasons[img] = {
-                'reason': 'grayscale',
-                'details': '黑白图片'
-            }
-            logger.info(f"标记删除黑白图片: {os.path.basename(img)}")
-            
+        for img_path in cover_files:
+            try:
+                with open(img_path, 'rb') as f:
+                    img_data = f.read()
+                result, reason = self.detect_grayscale_image(img_data)
+                if reason in ['grayscale', 'pure_white', 'pure_black']:
+                    to_delete.add(img_path)
+                    removal_reasons[img_path] = {
+                        'reason': reason,
+                        'details': {
+                            'grayscale': '灰度图片',
+                            'pure_white': '纯白图片',
+                            'pure_black': '纯黑图片'
+                        }.get(reason, '黑白图片')
+                    }
+                    logger.info(f"标记删除{removal_reasons[img_path]['details']}: {os.path.basename(img_path)}")
+            except Exception as e:
+                logger.error(f"处理灰度图检测失败 {img_path}: {e}")
+                
         return to_delete, removal_reasons
-        
-    def _is_grayscale_image(self, img_path: str) -> bool:
-        """检查图片是否为黑白图片"""
-        try:
-            with Image.open(img_path) as img:
-                if img.mode == "L":  # 直接是灰度图
-                    return True
-                if img.mode in ["RGB", "RGBA"]:
-                    # 优化：只检查部分像素点
-                    rgb_img = img.convert("RGB")
-                    pixels = list(rgb_img.getdata(0))  # 只获取R通道
-                    sample_size = min(1000, len(pixels))  # 最多检查1000个像素
-                    step = max(1, len(pixels) // sample_size)
-                    sampled_pixels = pixels[::step]
-                    return all(p == pixels[0] for p in sampled_pixels)
-            return False
-        except Exception as e:
-            logger.error(f"检查黑白图片失败 {img_path}: {e}")
-            return False
 
     def _process_watermark_images(self, group: List[str], watermark_keywords: List[str] = None) -> Tuple[Set[str], Dict[str, Dict]]:
         """处理水印过滤"""
@@ -498,3 +475,115 @@ class ImageFilter:
                 to_delete.append((img, size_diff))
                 
         return to_delete
+
+    def detect_small_image(self, image_data, params):
+        """独立的小图检测
+        
+        Args:
+            image_data: PIL.Image对象或图片字节数据
+            params: 参数字典，包含min_size等配置
+            
+        Returns:
+            Tuple[Union[bytes, None], Union[str, None]]: (处理后的图片数据, 错误原因)
+        """
+        try:
+            # 统一转换为PIL Image对象
+            if isinstance(image_data, Image.Image):
+                img = image_data
+            else:
+                img = Image.open(BytesIO(image_data))
+                
+            # 获取图片尺寸
+            width, height = img.size
+            min_size = params.get('min_size', 631)
+            
+            # 检查尺寸
+            if width < min_size or height < min_size:
+                logger.info(f"[#image_processing]🖼️ 图片尺寸: {width}x{height} 小于最小尺寸 {min_size}")
+                return None, 'small_image'
+                
+            logger.info(f"[#image_processing]🖼️ 图片尺寸: {width}x{height} 大于最小尺寸 {min_size}")
+            
+            # 如果输入是字节数据，返回字节数据；如果是PIL Image，返回原对象
+            if isinstance(image_data, Image.Image):
+                return image_data, None
+            else:
+                img_byte_arr = BytesIO()
+                img.save(img_byte_arr, format=img.format or 'PNG')
+                return img_byte_arr.getvalue(), None
+                
+        except Exception as e:
+            logger.error(f"检测图片尺寸时发生错误: {str(e)}")
+            return None, 'size_detection_error'
+
+    def detect_grayscale_image(self, image_data):
+        """独立的灰度图和纯色图检测
+        
+        Args:
+            image_data: PIL.Image对象或图片字节数据
+            
+        Returns:
+            Tuple[Union[bytes, None], Union[str, None]]: (处理后的图片数据, 错误原因)
+        """
+        try:
+            # 统一转换为PIL Image对象
+            if isinstance(image_data, Image.Image):
+                img = image_data
+            else:
+                img = Image.open(BytesIO(image_data))
+            
+            # 转换为RGB模式
+            if img.mode not in ["RGB", "RGBA", "L"]:
+                img = img.convert("RGB")
+            
+            # 1. 检查是否为原始灰度图
+            if img.mode == "L":
+                logger.info("[#image_processing]🖼️ 检测到原始灰度图")
+                return None, 'grayscale'
+            
+            # 2. 获取图片的采样点进行分析
+            width, height = img.size
+            sample_points = [
+                (x, y) 
+                for x in range(0, width, max(1, width//10))
+                for y in range(0, height, max(1, height//10))
+            ][:100]  # 最多取100个采样点
+            
+            # 获取采样点的像素值
+            pixels = [img.getpixel(point) for point in sample_points]
+            
+            # 3. 检查是否为纯白图
+            if all(all(v > 240 for v in (pixel if isinstance(pixel, tuple) else (pixel,))) 
+                   for pixel in pixels):
+                logger.info("[#image_processing]🖼️ 检测到纯白图")
+                return None, 'pure_white'
+            
+            # 4. 检查是否为纯黑图
+            if all(all(v < 15 for v in (pixel if isinstance(pixel, tuple) else (pixel,))) 
+                   for pixel in pixels):
+                logger.info("[#image_processing]🖼️ 检测到纯黑图")
+                return None, 'pure_black'
+            
+            # 5. 检查是否为灰度图
+            if img.mode in ["RGB", "RGBA"]:
+                is_grayscale = all(
+                    abs(pixel[0] - pixel[1]) < 5 and 
+                    abs(pixel[1] - pixel[2]) < 5 and
+                    abs(pixel[0] - pixel[2]) < 5 
+                    for pixel in pixels
+                )
+                if is_grayscale:
+                    logger.info("[#image_processing]🖼️ 检测到灰度图(RGB接近)")
+                    return None, 'grayscale'
+            
+            # 返回原始数据
+            if isinstance(image_data, Image.Image):
+                return image_data, None
+            else:
+                img_byte_arr = BytesIO()
+                img.save(img_byte_arr, format=img.format or 'PNG')
+                return img_byte_arr.getvalue(), None
+                
+        except Exception as e:
+            logger.error(f"检测灰度图时发生错误: {str(e)}")
+            return None, 'grayscale_detection_error'
