@@ -162,7 +162,7 @@ def rename_images_in_directory(dir_path):
                         if os.path.exists(new_path):
                             try:
                                 print(f"⚠️ 目标文件已存在，进行备份...")
-                                backup_file(new_path, new_path, dir_path)
+                                backup_file(new_path, new_path)
                                 os.remove(new_path)
                             except Exception as e:
                                 print(f"❌ 处理已存在的文件失败: {str(e)}")
@@ -171,7 +171,7 @@ def rename_images_in_directory(dir_path):
                         
                         try:
                             # 备份原文件
-                            backup_file(old_path, old_path, dir_path)
+                            backup_file(old_path, old_path)
                             # 直接重命名
                             os.rename(old_path, new_path)
                             processed_count += 1

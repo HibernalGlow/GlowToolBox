@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 import os
 import dotenv
+from .log_cleaner import clean_logs
 '''用法
 config = {
     'script_name': 'name',
@@ -71,6 +72,9 @@ def setup_logger(config=None):
             'config': dict    # 完整配置
         }
     """
+    # 清理旧日志
+    clean_logs(cfg['log_path'] if config and 'log_path' in config else DEFAULT_CONFIG['log_path'])
+    
     # 合并配置
     cfg = DEFAULT_CONFIG.copy()
     if config:
