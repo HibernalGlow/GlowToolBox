@@ -385,6 +385,7 @@ class BatchProcessor:
         self.processor = ArchiveProcessor(config)
         
     def process_all(self, mode='decompress'):
+        init_textuallogger()
         if mode == 'decompress':
             self._process_zips()
         else:
