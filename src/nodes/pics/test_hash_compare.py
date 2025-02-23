@@ -37,43 +37,49 @@ class HashCompare:
             return None, 0
 
     def new_phash(self, image_path):
-        """使用标准pHash算法实现
+        """使用与imagehash库完全一致的pHash实现
         
         步骤：
-        1. 将图像缩放为32x32的灰度图
+        1. 将图像缩放为 hash_size*8 的灰度图
         2. 对图像进行DCT变换
-        3. 取DCT的左上角8x8的低频部分
-        4. 计算这64个DCT系数的均值(不包括第一个直流分量)
-        5. 将64个DCT系数与均值进行比较得到64位的哈希值
+        3. 取DCT的左上角hash_size*hash_size的低频部分
+        4. 计算这些DCT系数的中值(不包括第一个直流分量)
+        5. 将DCT系数与中值进行比较得到二进制哈希值
         """
         try:
             start_time = time.time()
             
-            # 1. 图片预处理 - 缩放为32x32并转换为灰度图
-            img = Image.open(image_path).convert('L')
-            img = img.resize((32, 32), Image.Resampling.BILINEAR)
+            # 1. 图片预处理 - 缩放为hash_size*8并转换为灰度图
+            img_size = self.hash_size * 8
+            img = Image.open(image_path).convert('L').resize(
+                (img_size, img_size), Image.Resampling.LANCZOS
+            )
             
             # 2. 转换为NumPy数组并进行DCT变换
             pixels = np.asarray(img, dtype=np.float64)
             dct = cv2.dct(pixels)
             
-            # 3. 取DCT的左上角8x8的低频部分
-            dct_low = dct[:8, :8]
+            # 3. 取DCT的左上角hash_size*hash_size的低频部分
+            dct_low = dct[:self.hash_size, :self.hash_size]
             
-            # 4. 计算均值 (不包括第一个直流分量)
-            dct_avg = np.mean(dct_low[1:])
+            # 4. 计算中值 (不包括第一个直流分量)
+            # 注意：imagehash使用中值而不是均值
+            dct_flat = dct_low[1:].flatten()  # 排除直流分量
+            med = np.median(dct_flat)
             
             # 5. 生成哈希值
-            # 将大于平均值的设为1，小于等于平均值的设为0
-            hash_bits = (dct_low > dct_avg)
+            # 将大于中值的设为1，小于等于中值的设为0
+            hash_bits = (dct_low > med)
             
             # 6. 转换为十六进制字符串
             hash_int = 0
             for bit in hash_bits.flatten():
                 hash_int = (hash_int << 1) | int(bit)
             
-            # 生成16位十六进制字符串(64位二进制)
-            hex_str = format(hash_int, '016x')
+            # 生成与hash_size对应的十六进制字符串
+            bits_length = self.hash_size * self.hash_size
+            hex_length = (bits_length + 3) // 4
+            hex_str = format(hash_int, f'0{hex_length}x')
             
             duration = time.time() - start_time
             return hex_str, duration
@@ -84,9 +90,10 @@ class HashCompare:
     def calculate_hamming_distance(self, hash1, hash2):
         """计算两个哈希值的汉明距离"""
         try:
-            # pHash标准使用64位，所以固定使用64位
-            bin1 = bin(int(hash1, 16))[2:].zfill(64)
-            bin2 = bin(int(hash2, 16))[2:].zfill(64)
+            # 使用实际的哈希位数
+            bits_length = self.hash_size * self.hash_size
+            bin1 = bin(int(hash1, 16))[2:].zfill(bits_length)
+            bin2 = bin(int(hash2, 16))[2:].zfill(bits_length)
             return sum(b1 != b2 for b1, b2 in zip(bin1, bin2))
         except Exception as e:
             logger.error(f"计算汉明距离失败: {e}")
