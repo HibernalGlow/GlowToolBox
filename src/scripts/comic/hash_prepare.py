@@ -47,7 +47,7 @@ logger, config_info = setup_logger(config)
 
 # 添加默认配置常量
 DEFAULT_PROCESS_CONFIG = {
-    'max_workers': 4,        # 最大工作线程数
+    'max_workers': 16,        # 最大工作线程数
     'force_update': False,   # 是否强制更新
     'dry_run': False,        # 是否仅预览
     'extract_dir': r"E:\2400EHV\extracted_archives",  # 解压目录

@@ -193,13 +193,20 @@ class HashCompare:
 def main():
     # 测试文件路径
     test_files = [
-        r"D:\1VSCODE\1ehv\pics\test\0.jpg",  # 替换为实际的测试图片路径
-        r"D:\1VSCODE\1ehv\pics\test\1.jpg",
-        r"D:\1VSCODE\1ehv\pics\test\2.jpg"
+        r"D:\1VSCODE\GlowToolBox\src\nodes\pics\test\0.jpg",  # 替换为实际的测试图片路径
+        r"D:\1VSCODE\GlowToolBox\src\nodes\pics\test\1.jpg",
+        r"D:\1VSCODE\GlowToolBox\src\nodes\pics\test\2.jpg"
+        r"D:\1VSCODE\GlowToolBox\src\nodes\pics\test\3.jpg",
+        r"D:\1VSCODE\GlowToolBox\src\nodes\pics\test\4.jpg",
+        r"D:\1VSCODE\GlowToolBox\src\nodes\pics\test\5.jpg",
+        r"D:\1VSCODE\GlowToolBox\src\nodes\pics\test\6.jpg",
+        r"D:\1VSCODE\GlowToolBox\src\nodes\pics\test\7.jpg",
+        r"D:\1VSCODE\GlowToolBox\src\nodes\pics\test\8.jpg",
+        r"D:\1VSCODE\GlowToolBox\src\nodes\pics\test\9.jpg"
     ]
     
     # 批量测试目录
-    test_dir = r"D:\1VSCODE\1ehv\pics\test"  # 替换为实际的测试目录
+    test_dir = r"D:\1VSCODE\GlowToolBox\src\nodes\pics\test"  # 替换为实际的测试目录
     
     # 创建比较器实例
     hash_compare = HashCompare(hash_size=10)
