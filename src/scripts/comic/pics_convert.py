@@ -4,12 +4,19 @@ import fsspec
 
 import importlib.util
 import tempfile
+import sys
+import os
+import dotenv
+dotenv.load_dotenv()
+from pathlib import Path
+BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent  # 根据实际目录结构调整
+CONFIG_RELATIVE = os.getenv('CONFIG_PATH', 'src/nodes/config')
+VIPSHOME_RELATIVE = os.getenv('VIPSHOME_PATH', 'src/packages/vips/bin')
 # ----
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 spec = importlib.util.spec_from_file_location(
     "performance_config",
-    # os.path.join(os.path.dirname(__file__), "configs/performance_config.py")
-    r"D:\1VSCODE\GlowToolBox\src\nodes\config\performance_config.py"
+    os.path.join(BASE_DIR, CONFIG_RELATIVE, "performance_config.py")
 )
 performance_config = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(performance_config)
@@ -17,7 +24,7 @@ from nodes.config.performance_config import *
 # ---
 ConfigGUI = performance_config.ConfigGUI
 from nodes.tui.textual_logger import TextualLoggerManager
-vipshome = Path(r'D:\1VSCODE\GlowToolBox\src\packages\vips\bin')
+vipshome = Path(os.path.join(BASE_DIR, VIPSHOME_RELATIVE))
 if hasattr(os, 'add_dll_directory'):
     os.add_dll_directory(str(vipshome))
 os.environ['PATH'] = str(vipshome) + ';' + os.environ['PATH']
@@ -117,8 +124,9 @@ EFFICIENCY_CHECK_CONFIG = {
 }
 
 # 添加cjxl路径到全局配置
-CJXL_PATH = Path(r'D:\1VSCODE\1ehv\exe\jxl\cjxl.exe')
-DJXL_PATH = Path(r'D:\1VSCODE\1ehv\exe\jxl\djxl.exe')
+EXE_RELATIVE = os.getenv('EXE_PATH', 'exe/jxl')
+CJXL_PATH = Path(os.path.join(BASE_DIR, EXE_RELATIVE, 'cjxl.exe'))
+DJXL_PATH = Path(os.path.join(BASE_DIR, EXE_RELATIVE, 'djxl.exe'))
 
 # 更新布局配置
 LAYOUT_CONFIG = {
