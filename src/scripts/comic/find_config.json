@@ -1,0 +1,53 @@
+{
+  "tui_config": {
+    "title": "重复文件查找配置",
+    "checkbox_options": [
+      ["预演模式", "dry_run", "--dry-run"],
+      ["创建快捷方式", "create_shortcuts", "--create-shortcuts"],
+      ["只记录分组", "only_group", "--only-group"]
+    ],
+    "input_options": [
+      ["目录路径", "paths", "--paths"],
+      ["报告文件名", "report", "--report"],
+      ["样本数量", "sample_count", "-s"]
+    ],
+    "preset_configs": {
+      "仅分组": {
+        "description": "只记录分组信息不移动文件",
+        "extra_args": ["--only-group"]
+      },
+      "预演模式": {
+        "description": "预演模式,显示将要执行的操作",
+        "extra_args": ["--dry-run"]
+      },
+      "快捷方式": {
+        "description": "创建快捷方式而不移动文件",
+        "extra_args": ["--create-shortcuts", "--dry-run"]
+      }
+    }
+  },
+  "debug_config": {
+    "base_modes": {
+      "1": {
+        "name": "仅分组",
+        "base_args": ["--only-group"],
+        "default_params": {}
+      },
+      "2": {
+        "name": "预演模式",
+        "base_args": ["--dry-run"],
+        "default_params": {}
+      },
+      "3": {
+        "name": "快捷方式",
+        "base_args": ["--create-shortcuts", "--dry-run"],
+        "default_params": {}
+      },
+      "4": {
+        "name": "正常模式",
+        "base_args": [],
+        "default_params": {}
+      }
+    }
+  }
+} 

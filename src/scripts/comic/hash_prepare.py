@@ -564,8 +564,11 @@ def process_single_file(path: Path, config: dict, lock: threading.Lock, extract_
                 rel_path = str(path.name)
                 if rel_path in group_info:
                     file_info = group_info[rel_path]
-                    if file_info['type'] == 'multi_other':
-                        logging.info(f"[#hash_calc]跳过多文件组次要文件: {path}")
+                    if file_info['type'] == 'trash':
+                        logging.info(f"[#hash_calc]跳过trash文件: {path}")
+                        return results
+                    elif file_info['type'] == 'multi' and not file_info.get('is_main', False):
+                        logging.info(f"[#hash_calc]跳过非主要multi文件: {path}")
                         return results
                     else:
                         logging.info(f"[#hash_calc]处理{file_info['type']}文件: {path}")

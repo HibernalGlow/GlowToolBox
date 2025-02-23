@@ -32,6 +32,7 @@ from nodes.record.logger_config import setup_logger
 from nodes.pics.calculate_hash_custom import ImageClarityEvaluator
 from nodes.tui.textual_logger import TextualLoggerManager
 from nodes.utils.number_shortener import shorten_number_cn
+from nodes.tui.mode_manager import create_mode_manager
 
 config = {
     'script_name': 'no_translate_find',
@@ -604,6 +605,92 @@ def safe_move_file(src_path: str, dst_path: str, max_retries: int = 3, delay: fl
                 
     return False
 
+def safe_copy_file(src_path: str, dst_path: str, max_retries: int = 3, delay: float = 1.0) -> bool:
+    """
+    安全地复制文件，包含重试机制和完整性检查
+    
+    Args:
+        src_path: 源文件路径
+        dst_path: 目标文件路径
+        max_retries: 最大重试次数
+        delay: 重试延迟时间(秒)
+        
+    Returns:
+        bool: 复制是否成功
+    """
+    import time
+    import os
+    import shutil
+    
+    # 确保源文件存在
+    if not os.path.exists(src_path):
+        logger.info("[#error_log] ❌ 源文件不存在: %s", src_path)
+        return False
+        
+    # 确保源文件可读
+    if not os.access(src_path, os.R_OK):
+        logger.info("[#error_log] ❌ 源文件无法读取: %s", src_path)
+        return False
+        
+    # 确保目标目录存在
+    dst_dir = os.path.dirname(dst_path)
+    try:
+        os.makedirs(dst_dir, exist_ok=True)
+    except Exception as e:
+        logger.info("[#error_log] ❌ 创建目标目录失败: %s, 错误: %s", dst_dir, str(e))
+        return False
+        
+    # 检查目标目录是否可写
+    if not os.access(dst_dir, os.W_OK):
+        logger.info("[#error_log] ❌ 目标目录无写入权限: %s", dst_dir)
+        return False
+        
+    # 获取源文件大小
+    try:
+        src_size = os.path.getsize(src_path)
+    except Exception as e:
+        logger.info("[#error_log] ❌ 无法获取源文件大小: %s, 错误: %s", src_path, str(e))
+        return False
+        
+    # 重试机制
+    for attempt in range(max_retries):
+        try:
+            # 如果目标文件已存在，先尝试删除
+            if os.path.exists(dst_path):
+                try:
+                    os.remove(dst_path)
+                except Exception as e:
+                    logger.info("[#error_log] ⚠️ 无法删除已存在的目标文件: %s, 错误: %s", dst_path, str(e))
+                    if attempt < max_retries - 1:
+                        time.sleep(delay)
+                        continue
+                    return False
+            
+            # 执行复制操作
+            shutil.copy2(src_path, dst_path)  # copy2保持文件的元数据
+            
+            # 验证复制后的文件
+            if not os.path.exists(dst_path):
+                raise Exception("目标文件不存在")
+                
+            # 检查文件大小是否一致
+            dst_size = os.path.getsize(dst_path)
+            if dst_size != src_size:
+                raise Exception(f"文件大小不匹配: 源文件 {src_size} 字节, 目标文件 {dst_size} 字节")
+                
+            return True
+            
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.info("[#error_log] ⚠️ 复制文件失败，尝试重试 (%d/%d): %s", attempt + 1, max_retries, str(e))
+                time.sleep(delay)
+                continue
+            else:
+                logger.info("[#error_log] ❌ 复制文件失败，已达到最大重试次数: %s", str(e))
+                return False
+                
+    return False
+
 def process_file_with_count(file_path: str) -> Tuple[str, str, int, float]:
     """处理单个文件，返回原始路径、新路径、宽度和清晰度"""
     full_path = file_path
@@ -654,7 +741,29 @@ def process_file_with_count(file_path: str) -> Tuple[str, str, int, float]:
     new_path = os.path.join(dir_name, new_name) if dir_name else new_name
     return file_path, new_path, width, clarity_score
 
-def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, report_generator: ReportGenerator, dry_run: bool = False, create_shortcuts: bool = False, sample_count: int = 3) -> None:
+def save_group_info(base_dir: str, file_info: Dict[str, Dict]) -> None:
+    """保存分组信息到JSON文件
+    
+    Args:
+        base_dir: 基础目录
+        file_info: 文件信息字典 {文件名: {'type': 类型, 'is_main': 是否主文件}}
+    """
+    group_info_path = os.path.join(base_dir, 'group_info.json')
+    try:
+        # 如果文件已存在，读取并更新
+        if os.path.exists(group_info_path):
+            with open(group_info_path, 'r', encoding='utf-8') as f:
+                existing_info = json.load(f)
+                existing_info.update(file_info)
+                file_info = existing_info
+        
+        with open(group_info_path, 'w', encoding='utf-8') as f:
+            json.dump(file_info, f, ensure_ascii=False, indent=2)
+        logger.info("[#file_ops] ✅ 已更新分组信息")
+    except Exception as e:
+        logger.error("[#error_log] ❌ 保存分组信息失败: %s", str(e))
+
+def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, report_generator: ReportGenerator, dry_run: bool = False, create_shortcuts: bool = False, only_group: bool = False, keep_multi_main: bool = False) -> None:
     """处理一组相似文件"""
     # 获取组的基础名称
     group_base_name, _ = clean_filename(group_files[0])
@@ -690,6 +799,135 @@ def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, re
             other_versions = [f for f in other_versions if not has_original_keywords(f)]
             logger.info("[#file_ops] 📝 将%d个包含原版关键词的文件归入保留列表", len(original_keyword_versions))
     
+    # 记录分组信息
+    group_info = {}
+    if chinese_versions:
+        if len(chinese_versions) > 1:
+            # 多个汉化版本，移动到multi
+            multi_dir = os.path.join(base_dir, 'multi')
+            if not dry_run:
+                os.makedirs(multi_dir, exist_ok=True)
+            
+            # 找出最大的文件并保留在原位置（如果启用了keep_multi_main）
+            main_file = max(chinese_versions, key=lambda x: os.path.getsize(os.path.join(base_dir, x)))
+            if keep_multi_main and not dry_run:
+                # 为主文件添加[multi-main]标记
+                main_file_path = os.path.join(base_dir, main_file)
+                name, ext = os.path.splitext(main_file)
+                new_main_name = f"{name}[multi-main]{ext}"
+                new_main_path = os.path.join(base_dir, new_main_name)
+                try:
+                    os.rename(main_file_path, new_main_path)
+                    logger.info("[#file_ops] ✅ 已标记主文件: %s -> %s", main_file, new_main_name)
+                    group_details['actions'].append(f"标记主文件: {main_file} -> {new_main_name}")
+                    main_file = new_main_name
+                    
+                    # 复制原始文件（不带标记）到multi目录
+                    src_path = os.path.join(base_dir, new_main_path)
+                    rel_path = os.path.relpath(main_file_path, base_dir)  # 使用原始文件名
+                    dst_path = os.path.join(multi_dir, rel_path)
+                    if not dry_run:
+                        logger.info("[#file_ops] 🔄 正在复制主文件到multi: %s", main_file)
+                        if safe_copy_file(src_path, dst_path):
+                            logger.info("[#file_ops] ✅ 已复制主文件到multi: %s", main_file)
+                            group_details['actions'].append(f"复制主文件到multi: {main_file}")
+                    else:
+                        logger.info("[#file_ops] 🔄 [DRY RUN] 将复制主文件到multi: %s", main_file)
+                        group_details['actions'].append(f"[DRY RUN] 将复制主文件到multi: {main_file}")
+                except Exception as e:
+                    logger.error("[#error_log] ❌ 标记主文件失败: %s", str(e))
+
+            for file in chinese_versions:
+                if keep_multi_main and file == main_file:
+                    continue  # 主文件已经在前面处理过了
+
+                # 移动其他文件到multi
+                src_path = os.path.join(base_dir, file)
+                rel_path = os.path.relpath(src_path, base_dir)
+                dst_path = os.path.join(multi_dir, rel_path)
+                if not dry_run:
+                    logger.info("[#file_ops] 🔄 正在移动到multi: %s", file)
+                    if safe_move_file(src_path, dst_path):
+                        logger.info("[#file_ops] ✅ 已移动到multi: %s", file)
+                        group_details['actions'].append(f"移动到multi: {file}")
+                        report_generator.update_stats('moved_to_multi')
+                else:
+                    logger.info("[#file_ops] 🔄 [DRY RUN] 将移动到multi: %s", file)
+                    group_details['actions'].append(f"[DRY RUN] 将移动到multi: {file}")
+        else:
+            # 单个汉化版本，保持原位置
+            for file in chinese_versions:
+                group_info[file] = {
+                    'type': 'pass',
+                    'group': group_files
+                }
+            for file in other_versions:
+                group_info[file] = {
+                    'type': 'trash',
+                    'group': group_files
+                }
+    else:
+        if len(other_versions) > 1:
+            # 多个原版，移动到multi
+            multi_dir = os.path.join(base_dir, 'multi')
+            if not dry_run:
+                os.makedirs(multi_dir, exist_ok=True)
+                
+            # 找出最大的文件并保留在原位置（如果启用了keep_multi_main）
+            main_file = max(other_versions, key=lambda x: os.path.getsize(os.path.join(base_dir, x)))
+            if keep_multi_main and not dry_run:
+                # 为主文件添加[multi-main]标记
+                main_file_path = os.path.join(base_dir, main_file)
+                name, ext = os.path.splitext(main_file)
+                new_main_name = f"{name}[multi-main]{ext}"
+                new_main_path = os.path.join(base_dir, new_main_name)
+                try:
+                    os.rename(main_file_path, new_main_path)
+                    logger.info("[#file_ops] ✅ 已标记主文件: %s -> %s", main_file, new_main_name)
+                    group_details['actions'].append(f"标记主文件: {main_file} -> {new_main_name}")
+                    main_file = new_main_name
+                    
+                    # 复制原始文件（不带标记）到multi目录
+                    src_path = os.path.join(base_dir, new_main_path)
+                    rel_path = os.path.relpath(main_file_path, base_dir)  # 使用原始文件名
+                    dst_path = os.path.join(multi_dir, rel_path)
+                    if not dry_run:
+                        logger.info("[#file_ops] 🔄 正在复制主文件到multi: %s", main_file)
+                        if safe_copy_file(src_path, dst_path):
+                            logger.info("[#file_ops] ✅ 已复制主文件到multi: %s", main_file)
+                            group_details['actions'].append(f"复制主文件到multi: {main_file}")
+                    else:
+                        logger.info("[#file_ops] 🔄 [DRY RUN] 将复制主文件到multi: %s", main_file)
+                        group_details['actions'].append(f"[DRY RUN] 将复制主文件到multi: {main_file}")
+                except Exception as e:
+                    logger.error("[#error_log] ❌ 标记主文件失败: %s", str(e))
+
+            for file in other_versions:
+                if keep_multi_main and file == main_file:
+                    continue  # 主文件已经在前面处理过了
+
+                # 移动其他文件到multi
+                src_path = os.path.join(base_dir, file)
+                rel_path = os.path.relpath(src_path, base_dir)
+                dst_path = os.path.join(multi_dir, rel_path)
+                if not dry_run:
+                    logger.info("[#file_ops] 🔄 正在移动到multi: %s", file)
+                    if safe_move_file(src_path, dst_path):
+                        logger.info("[#file_ops] ✅ 已移动到multi: %s", file)
+                        group_details['actions'].append(f"移动到multi: {file}")
+                        report_generator.update_stats('moved_to_multi')
+                else:
+                    logger.info("[#file_ops] 🔄 [DRY RUN] 将移动到multi: %s", file)
+                    group_details['actions'].append(f"[DRY RUN] 将移动到multi: {file}")
+
+    # 保存分组信息
+    save_group_info(base_dir, group_info)
+    
+    # 如果只是记录分组信息，到此结束
+    if only_group:
+        logger.info("[#group_info] 🔍 组[%s]处理: 已记录分组信息，跳过文件操作", group_base_name)
+        return
+
     # 为每个文件添加图片数量标记和计算宽度
     def process_file_with_count(file_path: str) -> Tuple[str, str, int, float]:
         """处理单个文件，返回原始路径、新路径、宽度和清晰度"""
@@ -786,7 +1024,41 @@ def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, re
             multi_dir = os.path.join(base_dir, 'multi')
             if not dry_run:
                 os.makedirs(multi_dir, exist_ok=True)
+            
+            # 找出最大的文件并保留在原位置（如果启用了keep_multi_main）
+            main_file = max(chinese_versions, key=lambda x: os.path.getsize(os.path.join(base_dir, x)))
+            if keep_multi_main and not dry_run:
+                # 为主文件添加[multi-main]标记
+                main_file_path = os.path.join(base_dir, main_file)
+                name, ext = os.path.splitext(main_file)
+                new_main_name = f"{name}[multi-main]{ext}"
+                new_main_path = os.path.join(base_dir, new_main_name)
+                try:
+                    os.rename(main_file_path, new_main_path)
+                    logger.info("[#file_ops] ✅ 已标记主文件: %s -> %s", main_file, new_main_name)
+                    group_details['actions'].append(f"标记主文件: {main_file} -> {new_main_name}")
+                    main_file = new_main_name
+                    
+                    # 复制原始文件（不带标记）到multi目录
+                    src_path = os.path.join(base_dir, new_main_path)
+                    rel_path = os.path.relpath(main_file_path, base_dir)  # 使用原始文件名
+                    dst_path = os.path.join(multi_dir, rel_path)
+                    if not dry_run:
+                        logger.info("[#file_ops] 🔄 正在复制主文件到multi: %s", main_file)
+                        if safe_copy_file(src_path, dst_path):
+                            logger.info("[#file_ops] ✅ 已复制主文件到multi: %s", main_file)
+                            group_details['actions'].append(f"复制主文件到multi: {main_file}")
+                    else:
+                        logger.info("[#file_ops] 🔄 [DRY RUN] 将复制主文件到multi: %s", main_file)
+                        group_details['actions'].append(f"[DRY RUN] 将复制主文件到multi: {main_file}")
+                except Exception as e:
+                    logger.error("[#error_log] ❌ 标记主文件失败: %s", str(e))
+
             for file in chinese_versions:
+                if keep_multi_main and file == main_file:
+                    continue  # 主文件已经在前面处理过了
+
+                # 移动其他文件到multi
                 src_path = os.path.join(base_dir, file)
                 rel_path = os.path.relpath(src_path, base_dir)
                 dst_path = os.path.join(multi_dir, rel_path)
@@ -799,32 +1071,6 @@ def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, re
                 else:
                     logger.info("[#file_ops] 🔄 [DRY RUN] 将移动到multi: %s", file)
                     group_details['actions'].append(f"[DRY RUN] 将移动到multi: {file}")
-            
-            # 移动其他非原版到trash
-            for other_file in other_versions:
-                src_path = os.path.join(base_dir, other_file)
-                rel_path = os.path.relpath(src_path, base_dir)
-                dst_path = os.path.join(trash_dir, rel_path)
-                if not dry_run:
-                    logger.info("[#file_ops] 🔄 正在移动到trash: %s", other_file)
-                    if create_shortcuts:
-                        shortcut_path = os.path.splitext(dst_path)[0]
-                        if create_shortcut(src_path, shortcut_path):
-                            logger.info("[#file_ops] ✅ 已创建快捷方式: %s", other_file)
-                            group_details['actions'].append(f"创建快捷方式: {other_file}")
-                            report_generator.update_stats('created_shortcuts')
-                    else:
-                        if safe_move_file(src_path, dst_path):
-                            logger.info("[#file_ops] ✅ 已移动到trash: %s", other_file)
-                            group_details['actions'].append(f"移动到trash: {other_file}")
-                            report_generator.update_stats('moved_to_trash')
-                else:
-                    if create_shortcuts:
-                        logger.info("[#file_ops] 🔄 [DRY RUN] 将创建快捷方式: %s", other_file)
-                        group_details['actions'].append(f"[DRY RUN] 将创建快捷方式: {other_file}")
-                    else:
-                        logger.info("[#file_ops] 🔄 [DRY RUN] 将移动到trash: %s", other_file)
-                        group_details['actions'].append(f"[DRY RUN] 将移动到trash: {other_file}")
         else:
             # 只有一个需要保留的版本
             logger.info("[#group_info] 🔍 组[%s]处理: 发现1个需要保留的版本，保持原位置", group_base_name)
@@ -861,7 +1107,41 @@ def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, re
             multi_dir = os.path.join(base_dir, 'multi')
             if not dry_run:
                 os.makedirs(multi_dir, exist_ok=True)
+                
+            # 找出最大的文件并保留在原位置（如果启用了keep_multi_main）
+            main_file = max(other_versions, key=lambda x: os.path.getsize(os.path.join(base_dir, x)))
+            if keep_multi_main and not dry_run:
+                # 为主文件添加[multi-main]标记
+                main_file_path = os.path.join(base_dir, main_file)
+                name, ext = os.path.splitext(main_file)
+                new_main_name = f"{name}[multi-main]{ext}"
+                new_main_path = os.path.join(base_dir, new_main_name)
+                try:
+                    os.rename(main_file_path, new_main_path)
+                    logger.info("[#file_ops] ✅ 已标记主文件: %s -> %s", main_file, new_main_name)
+                    group_details['actions'].append(f"标记主文件: {main_file} -> {new_main_name}")
+                    main_file = new_main_name
+                    
+                    # 复制原始文件（不带标记）到multi目录
+                    src_path = os.path.join(base_dir, new_main_path)
+                    rel_path = os.path.relpath(main_file_path, base_dir)  # 使用原始文件名
+                    dst_path = os.path.join(multi_dir, rel_path)
+                    if not dry_run:
+                        logger.info("[#file_ops] 🔄 正在复制主文件到multi: %s", main_file)
+                        if safe_copy_file(src_path, dst_path):
+                            logger.info("[#file_ops] ✅ 已复制主文件到multi: %s", main_file)
+                            group_details['actions'].append(f"复制主文件到multi: {main_file}")
+                    else:
+                        logger.info("[#file_ops] 🔄 [DRY RUN] 将复制主文件到multi: %s", main_file)
+                        group_details['actions'].append(f"[DRY RUN] 将复制主文件到multi: {main_file}")
+                except Exception as e:
+                    logger.error("[#error_log] ❌ 标记主文件失败: %s", str(e))
+
             for file in other_versions:
+                if keep_multi_main and file == main_file:
+                    continue  # 主文件已经在前面处理过了
+
+                # 移动其他文件到multi
                 src_path = os.path.join(base_dir, file)
                 rel_path = os.path.relpath(src_path, base_dir)
                 dst_path = os.path.join(multi_dir, rel_path)
@@ -883,22 +1163,11 @@ def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, re
     # 添加组详情到报告
     report_generator.add_group_detail(group_base_name, group_details)
 
-def process_directory(directory: str, report_generator: ReportGenerator, dry_run: bool = False, create_shortcuts: bool = False, only_group: bool = False) -> Dict[str, Dict]:
-    """处理单个目录
-    
-    Args:
-        directory: 目录路径
-        report_generator: 报告生成器
-        dry_run: 是否预演模式
-        create_shortcuts: 是否创建快捷方式
-        only_group: 是否只进行分组而不移动文件
-        
-    Returns:
-        Dict: 如果only_group为True，返回分组信息
-    """
+def process_directory(directory: str, report_generator: ReportGenerator, dry_run: bool = False, create_shortcuts: bool = False, only_group: bool = False, keep_multi_main: bool = False) -> None:
+    """处理单个目录"""
     # 创建trash目录
     trash_dir = os.path.join(directory, 'trash')
-    if not dry_run and not only_group:
+    if not dry_run:
         os.makedirs(trash_dir, exist_ok=True)
     
     # 收集所有压缩文件
@@ -912,13 +1181,16 @@ def process_directory(directory: str, report_generator: ReportGenerator, dry_run
             continue
             
         for file in files:
+            # 使用新定义的ARCHIVE_EXTENSIONS
             if os.path.splitext(file.lower())[1] in ARCHIVE_EXTENSIONS:
                 rel_path = os.path.relpath(os.path.join(root, file), directory)
                 all_files.append(rel_path)
+                # 更新扫描进度
+                logger.info("[@process] 扫描进度: %d/%d", len(all_files), len(all_files))
     
     if not all_files:
         logger.info("[#error_log] ⚠️ 目录 %s 中未找到压缩文件", directory)
-        return {} if only_group else None
+        return
         
     # 更新报告统计
     report_generator.update_stats('total_files', len(all_files))
@@ -929,49 +1201,6 @@ def process_directory(directory: str, report_generator: ReportGenerator, dry_run
     
     # 更新报告统计
     report_generator.update_stats('total_groups', len(groups))
-
-    if only_group:
-        # 只返回分组信息
-        group_info = {}
-        for group_name, group_files in groups.items():
-            if len(group_files) == 1:
-                # 单文件组
-                group_info[group_files[0]] = {
-                    'type': 'single',
-                    'group': group_files
-                }
-            else:
-                # 多文件组
-                chinese_versions = [f for f in group_files if is_chinese_version(f)]
-                if chinese_versions:
-                    main_file = max(chinese_versions, 
-                                  key=lambda x: os.path.getsize(os.path.join(directory, x)))
-                else:
-                    main_file = max(group_files, 
-                                  key=lambda x: os.path.getsize(os.path.join(directory, x)))
-                
-                # 记录主文件和其他文件
-                group_info[main_file] = {
-                    'type': 'multi_main',
-                    'group': group_files
-                }
-                for other in group_files:
-                    if other != main_file:
-                        group_info[other] = {
-                            'type': 'multi_other',
-                            'group': group_files
-                        }
-        
-        # 保存分组信息到JSON
-        group_info_path = os.path.join(directory, 'group_info.json')
-        try:
-            with open(group_info_path, 'w', encoding='utf-8') as f:
-                json.dump(group_info, f, ensure_ascii=False, indent=2)
-            logger.info("[#file_ops] ✅ 分组信息已保存到: %s", group_info_path)
-        except Exception as e:
-            logger.error("[#error_log] ❌ 保存分组信息失败: %s", str(e))
-        
-        return group_info
     
     # 创建进程池进行并行处理
     logger.info("[#process] 🔄 开始处理文件组...")
@@ -988,7 +1217,9 @@ def process_directory(directory: str, report_generator: ReportGenerator, dry_run
                     trash_dir,
                     report_generator,
                     dry_run,
-                    create_shortcuts
+                    create_shortcuts,
+                    only_group,
+                    keep_multi_main
                 )
                 futures.append(future)
         
@@ -1091,74 +1322,102 @@ def create_shortcut(src_path: str, dst_path: str) -> bool:
         logger.error("[#error_log] 创建快捷方式失败: %s", str(e))
         return False
 
-def main():
+def create_cli_parser():
+    """创建命令行参数解析器"""
     parser = argparse.ArgumentParser(description='处理重复压缩包文件')
     group = parser.add_mutually_exclusive_group()
     group.add_argument('-c', '--clipboard', action='store_true', help='从剪贴板读取路径')
     group.add_argument('-p', '--paths', nargs='+', help='要处理的目录路径')
     parser.add_argument('-s', '--sample-count', type=int, default=3, help='每个压缩包抽取的图片样本数量（默认3）')
-    parser.add_argument('--dry-run', action='store_true', help='预演模式，不实际修改文件')
+    parser.add_argument('--dry-run', action='store_true', help='预演模式,不实际修改文件')
     parser.add_argument('--create-shortcuts', action='store_true', help='在dryrun模式下创建快捷方式而不是移动文件')
+    parser.add_argument('--only-group', action='store_true', help='只记录分组信息，不移动文件')
+    parser.add_argument('--keep-multi-main', action='store_true', help='保留multi组中最大的文件在原位置并标记[multi-main]')
     parser.add_argument('--report', type=str, help='指定报告文件名（默认为"处理报告_时间戳.md"）')
-    parser.add_argument('--only-group', action='store_true', help='只进行分组而不移动文件')
-    
-    args = parser.parse_args()
-    
-    # 获取要处理的路径
-    paths = []
-    
-    # 从剪贴板读取
-    if args.clipboard:
-        paths.extend(get_paths_from_clipboard())
-    # 从命令行参数读取
-    elif args.paths:
-        paths.extend(args.paths)
-    # 默认从终端输入
-    else:
-        # 使用普通input提示，不使用日志面板
-        print("请输入要处理的路径（每行一个，输入空行结束）：")
-        while True:
-            try:
-                line = input().strip()
-                if not line:  # 空行结束输入
+    return parser
+
+def run_application(args):
+    """运行应用程序"""
+    try:
+        # 设置标准流编码
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+        
+        # 获取要处理的路径
+        paths = []
+        
+        # 从剪贴板读取
+        if args.clipboard:
+            paths.extend(get_paths_from_clipboard())
+        # 从命令行参数读取
+        elif args.paths:
+            paths.extend(args.paths)
+        # 默认从终端输入
+        else:
+            print("请输入要处理的路径（每行一个，输入空行结束）：")
+            while True:
+                try:
+                    line = input().strip()
+                    if not line:  # 空行结束输入
+                        break
+                    paths.append(line)
+                except EOFError:
                     break
-                paths.append(line)
-            except EOFError:
-                break
-            except KeyboardInterrupt:
-                print("用户取消输入")
-                return
+                except KeyboardInterrupt:
+                    print("用户取消输入")
         
-    if not paths:
-        logger.info("[#error_log] ❌ 未提供任何路径")
-        return
-        
-    # 处理和验证所有路径
-    valid_paths = process_paths(paths)
-    
-    if not valid_paths:
-        logger.info("[#error_log] ❌ 没有有效的路径可处理")
-        return
-    
-    # 创建报告生成器
-    report_generator = ReportGenerator()
-    
-    # 处理每个路径
-    for path in valid_paths:
-        logger.info("[#process] 🚀 开始处理目录: %s", path)
-        process_directory(path, report_generator, args.dry_run, args.create_shortcuts, args.only_group)
-        logger.info("[#process] ✨ 目录处理完成: %s", path)
-        
-        # 生成并保存报告
-        if args.report:
-            report_path = report_generator.save_report(path, args.report)
-        else:
-            report_path = report_generator.save_report(path)
+        if not paths:
+            logger.info("[#error_log] ❌ 未提供任何路径")
+            return False
             
-        if report_path:
-            logger.info("[#process] 📝 报告已保存到: %s", report_path)
-        else:
-            logger.info("[#error_log] ❌ 保存报告失败")
+        # 处理和验证所有路径
+        valid_paths = process_paths(paths)
+        
+        if not valid_paths:
+            logger.info("[#error_log] ❌ 没有有效的路径可处理")
+            return False
+            
+        # 创建报告生成器
+        report_generator = ReportGenerator()
+        
+        # 处理每个路径
+        for path in valid_paths:
+            logger.info("[#process] 🚀 开始处理目录: %s", path)
+            process_directory(path, report_generator, args.dry_run, args.create_shortcuts, args.only_group, args.keep_multi_main)
+            logger.info("[#process] ✨ 目录处理完成: %s", path)
+            
+            # 生成并保存报告
+            if args.report:
+                report_path = report_generator.save_report(path, args.report)
+            else:
+                report_path = report_generator.save_report(path)
+                
+            if report_path:
+                logger.info("[#process] 📝 报告已保存到: %s", report_path)
+            else:
+                logger.info("[#error_log] ❌ 保存报告失败")
+                
+        return True
+
+    except Exception as e:
+        logger.error("[#error_log] ❌ 处理过程中出错: %s", str(e))
+        return False
+
+def main():
+    """主函数"""
+    # 创建模式管理器
+    mode_manager = create_mode_manager(
+        config_path=os.path.join(os.path.dirname(__file__), 'find_config.json'),
+        cli_parser_setup=create_cli_parser,
+        application_runner=run_application
+    )
+    
+    # 根据命令行参数选择运行模式
+    if len(sys.argv) > 1:
+        mode_manager.run_cli(sys.argv[1:])
+    else:
+        # 默认使用TUI模式
+        mode_manager.run_tui()
 
 if __name__ == "__main__":
     main() 

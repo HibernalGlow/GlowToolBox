@@ -1,0 +1,55 @@
+{
+  "tui_config": {
+    "title": "图片哈希预热工具",
+    "checkbox_options": [
+      ["强制更新", "force", "-f"],
+      ["预演模式", "dry_run", "-d"],
+      ["使用分组", "use_groups", "--use-groups"]
+    ],
+    "input_options": [
+      ["目录路径", "paths", "--paths"],
+      ["线程数", "workers", "-w"],
+      ["哈希大小", "hash_size", "--hash-size"],
+      ["输出路径", "output", "--output"],
+      ["缓存路径", "cache", "--cache"]
+    ],
+    "preset_configs": {
+      "仅预览": {
+        "description": "预览模式,不实际修改文件",
+        "extra_args": ["-d"]
+      },
+      "强制更新": {
+        "description": "强制更新所有哈希值",
+        "extra_args": ["-f"]
+      },
+      "使用分组": {
+        "description": "使用分组信息过滤文件",
+        "extra_args": ["--use-groups"]
+      }
+    }
+  },
+  "debug_config": {
+    "base_modes": {
+      "1": {
+        "name": "预览模式",
+        "base_args": ["-d"],
+        "default_params": {}
+      },
+      "2": {
+        "name": "强制更新",
+        "base_args": ["-f"],
+        "default_params": {}
+      },
+      "3": {
+        "name": "使用分组",
+        "base_args": ["--use-groups"],
+        "default_params": {}
+      },
+      "4": {
+        "name": "正常模式",
+        "base_args": [],
+        "default_params": {}
+      }
+    }
+  }
+} 
