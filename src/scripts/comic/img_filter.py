@@ -2,6 +2,7 @@ from nodes.config.import_bundles import *
 
 # 导入日志配置
 from nodes.record.logger_config import setup_logger
+from nodes.hash.hash_accelerator import HashAccelerator
 
 import mmap  # 添加在文件顶部
 
@@ -1907,28 +1908,25 @@ class HashFileHandler:
             # 记录比较过程
             logger.debug(f"[#hash_calc]开始查找相似哈希值: {target_hash_str}" + (f" (来自: {target_url})" if target_url else ""))
             
-            compared_count = 0
-            max_diff = 2 ** hamming_distance_threshold  # 最大可能的差异值
+            # 使用加速器查找相似哈希
+            similar_hashes = HashAccelerator.find_similar_hashes(
+                target_hash_str,
+                [get_hash_str(h) for h in ref_hashes],
+                hash_to_uri,
+                hamming_distance_threshold
+            )
             
-            # 遍历所有哈希值进行比较
-            for current_hash in ref_hashes:
-                # 提取当前哈希值
-                current_hash_str = get_hash_str(current_hash)
-                current_url = current_hash.get('url', '') if isinstance(current_hash, dict) else ''
+            # 如果找到相似哈希
+            if similar_hashes:
+                # 取第一个相似哈希（最小汉明距离）
+                similar_hash, uri, distance = similar_hashes[0]
                 
-                # 计算汉明距离
-                hamming_distance = ImageHashCalculator.calculate_hamming_distance(target_hash_str, current_hash_str)
+                # 记录日志
+                result_msg = f"[#hash_calc]找到相似哈希值: {similar_hash}"
+                result_msg += f", 汉明距离: {distance}, URI: {uri}"
+                logger.info(result_msg)
                 
-                compared_count += 1
-                
-                if hamming_distance <= hamming_distance_threshold:
-                    # 找到相似的哈希值
-                    result_msg = f"[#hash_calc]找到相似哈希值: {current_hash_str}"
-                    if current_url:
-                        result_msg += f" (来自: {current_url})"
-                    result_msg += f", 汉明距离: {hamming_distance}, URI: {hash_to_uri[current_hash_str]}"
-                    logger.info(result_msg)
-                    return True, current_hash_str, hash_to_uri[current_hash_str]
+                return True, similar_hash, uri
             
             return False, None, None
             
