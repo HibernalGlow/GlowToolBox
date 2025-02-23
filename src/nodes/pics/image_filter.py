@@ -489,6 +489,10 @@ class ImageFilter:
         """获取图片哈希值，优先从缓存读取"""
         try:
             # 增加路径有效性检查
+            if not image_path:
+                logger.error("图片路径为空")
+                return None
+                
             if not os.path.exists(image_path):
                 logger.error(f"图片路径不存在: {image_path}")
                 return None
@@ -499,22 +503,32 @@ class ImageFilter:
                 return None
 
             # 增加缓存键存在性检查
-            if image_uri in self.hash_cache:
-                hash_data = self.hash_cache[image_uri]
-                # 处理不同的缓存数据结构
-                if isinstance(hash_data, dict):
-                    return hash_data.get('hash')
-                return str(hash_data)  # 兼容旧版本字符串格式
+            if self.hash_cache:
+                if image_uri in self.hash_cache:
+                    hash_data = self.hash_cache[image_uri]
+                    # 处理不同的缓存数据结构
+                    if isinstance(hash_data, dict):
+                        hash_value = hash_data.get('hash')
+                        if hash_value:
+                            return hash_value
+                    elif hash_data:  # 兼容旧版本字符串格式
+                        return str(hash_data)
 
             # 使用优化的文件读取
             img_data = self._read_file_optimized(image_path)
-            if img_data is None:
+            if not img_data:
+                logger.error(f"读取图片文件失败: {image_path}")
                 return None
 
             # 计算新哈希
-            hash_value = ImageHashCalculator.calculate_phash(BytesIO(img_data))
-            if not hash_value:
+            hash_result = ImageHashCalculator.calculate_phash(BytesIO(img_data))
+            if not hash_result:
                 logger.error(f"计算图片哈希失败: {image_path}")
+                return None
+                
+            hash_value = hash_result.get('hash') if isinstance(hash_result, dict) else hash_result
+            if not hash_value:
+                logger.error(f"获取哈希值失败: {image_path}")
                 return None
 
             # 更新缓存
