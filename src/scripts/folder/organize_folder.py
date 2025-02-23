@@ -10,6 +10,7 @@ import threading
 from enum import Enum
 from nodes.tui.textual_preset import create_config_app
 import msvcrt  # 用于Windows系统检查文件锁定状态
+from nodes.file_cleaner.backup_cleaner import BackupCleaner
 
 try:
     import keyboard
@@ -27,7 +28,7 @@ ARCHIVE_FORMATS = {'.zip', '.rar', '.7z', '.cbz', '.cbr'}
 DELETE_KEYWORDS = [
     ('*.bak', 'file'),     # 仅匹配文件
     ('temp_*', 'dir'),     # 仅匹配文件夹
-    # ('*.trash', 'both')    # 同时匹配文件和文件夹
+    ('*.trash', 'both')    # 同时匹配文件和文件夹
 ]
 
 # 添加无限模式枚举类
@@ -391,68 +392,26 @@ def is_file_in_use(file_path):
 def remove_backup_and_temp(path, exclude_keywords=[]):
     """
     删除指定路径下的备份文件(.bak)和临时文件夹(temp_开头)
-    修改为根据DELETE_KEYWORDS配置进行删除，跳过正在使用的文件
+    使用多线程加速扫描和处理
     """
     path = Path(path)
-    removed_count = 0
-    skipped_count = 0
-    
     print(f"\n开始清理配置规则文件: {path}")
     
     try:
-        for item in path.rglob("*"):
-            # 检查路径是否包含排除关键词
-            if any(keyword in str(item) for keyword in exclude_keywords):
-                continue
-            
-            try:
-                # 检查文件或其父目录是否正在使用
-                if item.is_file():
-                    if is_file_in_use(str(item)):
-                        print(f"跳过正在使用的文件: {item}")
-                        skipped_count += 1
-                        continue
-                    # 检查父目录中是否有文件正在使用
-                    parent_has_locked_file = False
-                    for sibling in item.parent.glob("*"):
-                        if sibling.is_file() and is_file_in_use(str(sibling)):
-                            parent_has_locked_file = True
-                            break
-                    if parent_has_locked_file:
-                        print(f"跳过文件(父目录有文件在使用): {item}")
-                        skipped_count += 1
-                        continue
-                
-                # 使用配置的关键词进行匹配
-                for pattern, target_type in DELETE_KEYWORDS:
-                    if target_type in ['file', 'both'] and item.is_file() and fnmatch.fnmatch(item.name, pattern):
-                        print(f"删除匹配 {pattern} 的文件: {item}")
-                        item.unlink()
-                        removed_count += 1
-                        break
-                    if target_type in ['dir', 'both'] and item.is_dir() and fnmatch.fnmatch(item.name, pattern):
-                        # 检查文件夹内是否有文件正在使用
-                        has_locked_file = False
-                        for child in item.rglob("*"):
-                            if child.is_file() and is_file_in_use(str(child)):
-                                has_locked_file = True
-                                break
-                        if has_locked_file:
-                            print(f"跳过文件夹(内有文件在使用): {item}")
-                            skipped_count += 1
-                            continue
-                        print(f"删除匹配 {pattern} 的文件夹: {item}")
-                        shutil.rmtree(item)
-                        removed_count += 1
-                        break
-            except Exception as e:
-                print(f"删除失败 {item}: {e}")
-                skipped_count += 1
-                
+        # 创建清理器实例
+        cleaner = BackupCleaner()
+        
+        # 执行清理
+        removed_count, skipped_count = cleaner.clean(
+            path=path,
+            patterns=DELETE_KEYWORDS,
+            exclude_keywords=exclude_keywords
+        )
+        
+        print(f"清理完成，共删除 {removed_count} 个项目，跳过 {skipped_count} 个项目")
+        
     except Exception as e:
         print(f"清理过程出错: {e}")
-    
-    print(f"清理完成，共删除 {removed_count} 个项目，跳过 {skipped_count} 个项目")
 
 def run_operations(paths, args, exclude_keywords):
     """执行所有操作的函数"""
