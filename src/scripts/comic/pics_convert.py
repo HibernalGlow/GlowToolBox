@@ -680,6 +680,17 @@ class ArchiveHandler:
     """处理压缩包的类"""
     def __init__(self):
         self.path_handler = PathHandler()
+        self.rename_log_file = "rename_log.txt"  # 添加日志文件路径
+
+    def _log_rename(self, original_path, new_path):
+        """记录重命名操作"""
+        try:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(self.rename_log_file, "a", encoding="utf-8") as f:
+                f.write(f"{timestamp} | 原始路径: {original_path} | 新路径: {new_path}\n")
+            logger.info(f"[#file]已记录重命名操作到日志文件")
+        except Exception as e:
+            logger.info(f"[#file]记录重命名操作失败: {e}")
 
     def _validate_archive(self, file_path: Path, params: dict) -> tuple[bool, int]:
         """验证压缩包是否需要处理"""
@@ -1080,6 +1091,8 @@ class ArchiveHandler:
                     # 只有在启用了rename_cbr选项时才重命名为CBR
                     if hasattr(self, 'rename_cbr') and self.rename_cbr:
                         new_name = safe_file.with_suffix('.cbr')
+                        # 记录重命名操作
+                        self._log_rename(str(safe_file), str(new_name))
                         fs.move(str(safe_file), str(new_name))
                         logger.info(f"[#file]已将文件改为CBR: {new_name}")
                 return (False, 0)
