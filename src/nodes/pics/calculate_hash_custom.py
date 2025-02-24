@@ -243,13 +243,13 @@ class ImageHashCalculator:
         """
         try:
             if not url:
-                logging.error("URL为空")
+                logging.warning("URL为空")
                 return None
 
             # 标准化URL格式
             normalized_url = PathURIGenerator.generate(url) if '://' not in url else url
             if not normalized_url:
-                logging.error(f"URL标准化失败: {url}")
+                logging.warning(f"URL标准化失败: {url}")
                 return None
             
             # 检查内存缓存
