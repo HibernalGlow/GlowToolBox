@@ -26,6 +26,7 @@ import argparse
 import json
 import sys
 from nodes.tui.mode_manager import create_mode_manager
+import pyperclip
 
 # 抑制所有警告
 warnings.filterwarnings('ignore')
@@ -420,21 +421,21 @@ class MultiAnalyzer:
                     
                     # 添加宽度（如果不是统一值且是最优值则添加表情）
                     if analysis['width'] > 0:
-                        width_str = f"{analysis['width']}@WD"
+                        width_str = f"{shorten_number_cn(analysis['width'], use_w=True)}@WD"
                         if not metrics_same['width'] and analysis['width'] == best_metrics['width']:
                             width_str = f"📏{width_str}"
                         parts.append(width_str)
                     
                     # 添加页数（如果不是统一值且是最优值则添加表情）
                     if analysis['page_count'] > 0:
-                        page_str = f"{analysis['page_count']}@PX"
+                        page_str = f"{shorten_number_cn(analysis['page_count'], use_w=True)}@PX"
                         if not metrics_same['page_count'] and analysis['page_count'] == best_metrics['page_count']:
                             page_str = f"📄{page_str}"
                         parts.append(page_str)
                     
                     # 添加清晰度（如果不是统一值且是最优值则添加表情）
                     if analysis['clarity_score'] > 0:
-                        clarity_str = f"{int(analysis['clarity_score'])}@DE"
+                        clarity_str = f"{shorten_number_cn(int(analysis['clarity_score']), use_w=True)}@DE"
                         if not metrics_same['clarity_score'] and analysis['clarity_score'] == best_metrics['clarity_score']:
                             clarity_str = f"🔍{clarity_str}"
                         parts.append(clarity_str)
@@ -485,12 +486,92 @@ class MultiAnalyzer:
 def setup_cli_parser():
     """设置命令行参数解析器"""
     parser = argparse.ArgumentParser(description='Multi文件分析器')
-    parser.add_argument('input_path', nargs='?', help='输入文件或目录路径')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('-c', '--clipboard', action='store_true', help='从剪贴板读取路径')
+    group.add_argument('input_path', nargs='?', help='输入文件或目录路径')
     parser.add_argument('-s', '--sample-count', type=int, default=3, help='每个压缩包抽取的图片样本数量（默认3）')
     parser.add_argument('-r', '--rename', action='store_true', help='执行重命名操作')
     parser.add_argument('--no-skip-special', action='store_true', help='不跳过trash和multi目录')
     parser.add_argument('-o', '--output', help='保存结果的文件路径')
     return parser
+
+def get_paths_from_clipboard():
+    """从剪贴板读取多行路径"""
+    try:
+        clipboard_content = pyperclip.paste()
+        if not clipboard_content:
+            return []
+            
+        # 分割多行内容并清理
+        paths = [
+            path.strip().strip('"').strip("'")
+            for path in clipboard_content.splitlines() 
+            if path.strip()
+        ]
+        
+        # 验证路径是否存在
+        valid_paths = [
+            path for path in paths 
+            if os.path.exists(path)
+        ]
+        
+        if valid_paths:
+            logger.info("[#file_ops] 📋 从剪贴板读取到 %d 个有效路径", len(valid_paths))
+        else:
+            logger.info("[#error_log] ⚠️ 剪贴板中没有有效路径")
+            
+        return valid_paths
+        
+    except Exception as e:
+        logger.info("[#error_log] ❌ 读取剪贴板时出错: %s", e)
+        return []
+
+def run_application(args):
+    """运行应用程序"""
+    input_paths = []
+    
+    # 从剪贴板读取
+    if args.clipboard:
+        input_paths.extend(get_paths_from_clipboard())
+    # 从命令行参数读取
+    elif args.input_path:
+        input_paths.append(args.input_path)
+    
+    if not input_paths:
+        print("错误：未提供输入路径")
+        return False
+
+    # 执行分析
+    print("\n开始分析...")
+    analyzer = MultiAnalyzer(sample_count=args.sample_count)
+    
+    all_results = []
+    for path in input_paths:
+        results = analyzer.process_directory_with_rename(
+            path,
+            do_rename=args.rename,
+            skip_special_dirs=not args.no_skip_special
+        )
+        all_results.extend(results)
+
+    # 保存结果
+    if args.output:
+        with open(args.output, 'w', encoding='utf-8') as f:
+            json.dump(all_results, f, ensure_ascii=False, indent=2)
+        print(f"\n结果已保存到: {args.output}")
+
+    # 显示结果
+    print("\n分析结果:")
+    for result in all_results:
+        print(f"原文件: {result['file']}")
+        if args.rename:
+            status = "成功" if result.get('renamed', False) else "失败"
+            print(f"新文件: {result['new_name']} (重命名{status})")
+        print(f"分析结果: {result['formatted']}")
+        print("-" * 50)
+
+    print("\n分析完成！")
+    return True
 
 def main():
     """主函数，用于命令行运行"""
@@ -503,12 +584,13 @@ def main():
             'title': 'Multi文件分析器配置',
             'checkbox_options': [
                 ('执行重命名操作', 'rename', '--rename', False),
-                ('不跳过trash和multi目录', 'skip_special', '--no-skip-special', False)
+                ('不跳过trash和multi目录', 'skip_special', '--no-skip-special', False),
+                ('从剪贴板读取路径', 'clipboard', '--clipboard', False)
             ],
             'input_options': [
                 ('采样数量', 'sample_count', '--sample-count', '3', '每个压缩包抽取的图片样本数量'),
                 ('结果保存路径', 'output', '--output', 'analysis_result.json', '分析结果保存的JSON文件路径'),
-                ('输入路径', 'input_path', 'input_path', '', '要分析的文件或目录路径')
+                ('输入路径', 'input_path', 'input_path', '', '要分析的文件或目录路径（不使用剪贴板时需要）')
             ],
             'preset_configs': {
                 '标准分析': {
@@ -547,40 +629,6 @@ def main():
         }
     }
 
-    def run_application(args):
-        """运行应用程序"""
-        if not args.input_path and not hasattr(args, 'clipboard'):
-            print("错误：未提供输入路径")
-            return False
-
-        # 执行分析
-        print("\n开始分析...")
-        analyzer = MultiAnalyzer(sample_count=args.sample_count)
-        results = analyzer.process_directory_with_rename(
-            args.input_path,
-            do_rename=args.rename,
-            skip_special_dirs=not args.no_skip_special
-        )
-
-        # 保存结果
-        if args.output:
-            with open(args.output, 'w', encoding='utf-8') as f:
-                json.dump(results, f, ensure_ascii=False, indent=2)
-            print(f"\n结果已保存到: {args.output}")
-
-        # 显示结果
-        print("\n分析结果:")
-        for result in results:
-            print(f"原文件: {result['file']}")
-            if args.rename:
-                status = "成功" if result.get('renamed', False) else "失败"
-                print(f"新文件: {result['new_name']} (重命名{status})")
-            print(f"分析结果: {result['formatted']}")
-            print("-" * 50)
-
-        print("\n分析完成！")
-        return True
-
     # 创建模式管理器
     mode_manager = create_mode_manager(
         config=config,
@@ -600,7 +648,9 @@ def main():
         print("3. 命令行模式")
         
         try:
-            choice = input("\n请选择运行模式 (1-3): ").strip()
+            # choice = input("\n请选择运行模式 (1-3): ").strip()
+            choice = "1"
+
             if choice == "1":
                 mode_manager.run_tui()
             elif choice == "2":
