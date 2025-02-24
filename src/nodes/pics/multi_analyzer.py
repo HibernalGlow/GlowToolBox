@@ -1,6 +1,7 @@
 """
 Multi文件分析器模块
 提供对压缩包文件的宽度、页数和清晰度分析功能
+支持命令行单独运行
 """
 
 import os
@@ -8,14 +9,23 @@ import logging
 from typing import List, Dict, Tuple, Union, Optional
 from pathlib import Path
 import zipfile
-from PIL import Image
+from PIL import Image, ImageFile
+import pillow_avif
+import pillow_jxl
+import warnings
 import cv2
 import numpy as np
 from io import BytesIO
 import random
 from concurrent.futures import ThreadPoolExecutor
-from .calculate_hash_custom import ImageClarityEvaluator
+from nodes.pics.calculate_hash_custom import ImageClarityEvaluator
 from nodes.utils.number_shortener import shorten_number_cn
+import re
+
+# 抑制PIL的警告
+warnings.filterwarnings('ignore', category=UserWarning)
+# 允许截断的图像文件
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +64,32 @@ class MultiAnalyzer:
         """计算压缩包中的图片总数"""
         image_files = self.get_archive_info(archive_path)
         return len(image_files)
+
+    def _safe_open_image(self, img_data: bytes) -> Optional[Image.Image]:
+        """安全地打开图片，处理可能的解码错误
+        
+        Args:
+            img_data: 图片二进制数据
+            
+        Returns:
+            Optional[Image.Image]: 成功则返回PIL图像对象，失败则返回None
+        """
+        try:
+            # 尝试用PIL打开
+            return Image.open(BytesIO(img_data))
+        except Exception as e:
+            try:
+                # 如果PIL失败，尝试用OpenCV打开
+                nparr = np.frombuffer(img_data, np.uint8)
+                img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                if img is None:
+                    raise ValueError("OpenCV无法解码图像")
+                # 转换为RGB
+                img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                return Image.fromarray(img_rgb)
+            except Exception as e2:
+                logger.error(f"图像解码失败: {str(e2)}")
+                return None
 
     def calculate_representative_width(self, archive_path: str) -> int:
         """计算压缩包中图片的代表宽度（使用抽样和中位数）"""
@@ -99,10 +135,10 @@ class MultiAnalyzer:
                 with zipfile.ZipFile(archive_path, 'r') as zf:
                     for sample in samples:
                         try:
-                            # 直接从zip读取到内存
                             with zf.open(sample) as file:
                                 img_data = file.read()
-                                with Image.open(BytesIO(img_data)) as img:
+                                img = self._safe_open_image(img_data)
+                                if img is not None:
                                     widths.append(img.width)
                         except Exception as e:
                             logger.error(f"读取图片宽度失败 {sample}: {str(e)}")
@@ -151,8 +187,11 @@ class MultiAnalyzer:
                     try:
                         with zf.open(sample) as f:
                             img_data = f.read()
-                            score = ImageClarityEvaluator.calculate_definition(img_data)
-                            scores.append(score)
+                            img = self._safe_open_image(img_data)
+                            if img is not None:
+                                score = ImageClarityEvaluator.calculate_definition(img_data)
+                                if score > 0:
+                                    scores.append(score)
                     except Exception as e:
                         logger.error(f"计算清晰度失败 {sample}: {str(e)}")
                         continue
@@ -209,4 +248,177 @@ class MultiAnalyzer:
             clarity_str = shorten_number_cn(clarity_int, use_w=True)
             parts.append(f"{clarity_str}@DE")
             
-        return "{" + ",".join(parts) + "}" if parts else "" 
+        return "{" + ",".join(parts) + "}" if parts else ""
+
+    def process_file_with_count(self, file_path: str, base_dir: str = "") -> Tuple[str, str, Dict[str, Union[int, float]]]:
+        """处理单个文件，返回原始路径、新路径和分析结果
+        
+        Args:
+            file_path: 文件路径
+            base_dir: 基础目录（可选）
+            
+        Returns:
+            Tuple[str, str, Dict]: 原始路径、新路径和分析结果的元组
+        """
+        # 获取完整路径
+        full_path = os.path.join(base_dir, file_path) if base_dir else file_path
+        dir_name = os.path.dirname(full_path)
+        file_name = os.path.basename(full_path)
+        name, ext = os.path.splitext(file_name)
+        
+        # 移除已有的标记
+        name = re.sub(r'\{[^}]*@(?:PX|WD|DE)[^}]*\}', '', name)
+        
+        # 分析文件
+        result = self.analyze_archive(full_path)
+        
+        # 构建新文件名
+        formatted = self.format_analysis_result(result)
+        if formatted:
+            name = f"{name}{formatted}"
+            
+        # 构建新的完整路径
+        new_name = f"{name}{ext}"
+        new_path = os.path.join(dir_name, new_name) if dir_name else new_name
+        
+        return full_path, new_path, result
+
+    def process_directory_with_rename(self, input_path: str, do_rename: bool = False) -> List[Dict[str, Union[str, Dict[str, Union[int, float]]]]]:
+        """处理目录下的所有文件，可选择是否重命名
+        
+        Args:
+            input_path: 输入路径
+            do_rename: 是否执行重命名操作
+            
+        Returns:
+            List[Dict]: 处理结果列表
+        """
+        results = []
+        
+        if os.path.isfile(input_path):
+            if input_path.lower().endswith(('.zip', '.cbz')):
+                orig_path, new_path, analysis = self.process_file_with_count(input_path)
+                result = {
+                    'file': os.path.basename(input_path),
+                    'new_name': os.path.basename(new_path),
+                    'analysis': analysis,
+                    'formatted': self.format_analysis_result(analysis)
+                }
+                if do_rename and orig_path != new_path:
+                    try:
+                        os.rename(orig_path, new_path)
+                        result['renamed'] = True
+                    except Exception as e:
+                        logger.error(f"重命名失败 {orig_path}: {str(e)}")
+                        result['renamed'] = False
+                results.append(result)
+        elif os.path.isdir(input_path):
+            for root, _, files in os.walk(input_path):
+                for file in files:
+                    if file.lower().endswith(('.zip', '.cbz')):
+                        file_path = os.path.join(root, file)
+                        try:
+                            orig_path, new_path, analysis = self.process_file_with_count(
+                                file_path, 
+                                base_dir=""  # 使用相对路径
+                            )
+                            result = {
+                                'file': os.path.relpath(file_path, input_path),
+                                'new_name': os.path.basename(new_path),
+                                'analysis': analysis,
+                                'formatted': self.format_analysis_result(analysis)
+                            }
+                            if do_rename and orig_path != new_path:
+                                try:
+                                    os.rename(orig_path, new_path)
+                                    result['renamed'] = True
+                                except Exception as e:
+                                    logger.error(f"重命名失败 {orig_path}: {str(e)}")
+                                    result['renamed'] = False
+                            results.append(result)
+                        except Exception as e:
+                            logger.error(f"处理文件失败 {file_path}: {str(e)}")
+                            
+        return results
+
+def main():
+    """主函数，用于命令行运行"""
+    import json
+    
+    # 配置日志
+    logging.basicConfig(level=logging.INFO,
+                       format='%(asctime)s - %(levelname)s - %(message)s')
+    
+    print("=== Multi文件分析器 ===")
+    print("请输入要分析的文件或目录路径（输入q退出）：")
+    
+    while True:
+        try:
+            input_path = input("路径> ").strip()
+            
+            if input_path.lower() in ('q', 'quit', 'exit'):
+                print("程序已退出")
+                break
+                
+            if not input_path:
+                print("请输入有效路径")
+                continue
+                
+            if not os.path.exists(input_path):
+                print(f"错误：路径 '{input_path}' 不存在")
+                continue
+            
+            # 获取样本数量
+            sample_count = 3  # 默认值
+            try:
+                count_input = input("请输入采样数量（直接回车使用默认值3）> ").strip()
+                if count_input:
+                    sample_count = int(count_input)
+                    if sample_count < 1:
+                        print("采样数量必须大于0，使用默认值3")
+                        sample_count = 3
+            except ValueError:
+                print("无效的采样数量，使用默认值3")
+            
+            # 是否执行重命名
+            do_rename = input("是否重命名文件？(y/N) ").strip().lower() == 'y'
+            
+            # 是否保存到文件
+            save_to_file = input("是否保存结果到文件？(y/N) ").strip().lower() == 'y'
+            output_file = None
+            if save_to_file:
+                output_file = input("请输入保存路径（直接回车使用默认路径 analysis_result.json）> ").strip()
+                if not output_file:
+                    output_file = "analysis_result.json"
+            
+            # 执行分析
+            print("\n开始分析...")
+            analyzer = MultiAnalyzer(sample_count=sample_count)
+            results = analyzer.process_directory_with_rename(input_path, do_rename)
+            
+            # 输出结果
+            if output_file:
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    json.dump(results, f, ensure_ascii=False, indent=2)
+                print(f"\n结果已保存到: {output_file}")
+            
+            # 总是在控制台显示结果
+            print("\n分析结果:")
+            for result in results:
+                print(f"原文件: {result['file']}")
+                if do_rename:
+                    status = "成功" if result.get('renamed', False) else "失败"
+                    print(f"新文件: {result['new_name']} (重命名{status})")
+                print(f"分析结果: {result['formatted']}")
+                print("-" * 50)
+            
+            print("\n分析完成！")
+            print("\n请输入新的路径进行分析（输入q退出）：")
+            
+        except Exception as e:
+            logger.error(f"处理过程中出错: {str(e)}")
+            print(f"错误: {str(e)}")
+            print("\n请输入新的路径进行分析（输入q退出）：")
+
+if __name__ == '__main__':
+    main() 
