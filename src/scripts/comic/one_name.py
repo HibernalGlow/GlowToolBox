@@ -221,7 +221,8 @@ def get_unique_filename(directory, filename, artist_name, is_excluded=False):
         (r'\{\d+%?@DE\}', r''),            # 匹配如 {85%@DE}
         (r'\[multi\]', r''),
         (r'\[trash\]', r''),
-
+        # 清理samename标记，以便重新添加
+        (r'\[samename_\d+\]', r''),
     ]
     
     advanced_patterns = [
@@ -290,7 +291,14 @@ def get_unique_filename(directory, filename, artist_name, is_excluded=False):
     # 如果是排除的文件夹，应用基本替换规则后再次应用pangu格式化
     if is_excluded:
         base = pangu.spacing_text(base)
-        return f"{base}{ext}"
+        filename = f"{base}{ext}"
+        # 检查文件是否存在，如果存在则添加[samename_n]后缀
+        counter = 1
+        original_filename = filename
+        while os.path.exists(os.path.join(directory, filename)):
+            filename = f"{base}[samename_{counter}]{ext}"
+            counter += 1
+        return filename
 
     # 对非排除文件夹应用高级替换规则
     for pattern, replacement in advanced_patterns:
@@ -396,7 +404,13 @@ def get_unique_filename(directory, filename, artist_name, is_excluded=False):
     new_base = re.sub(r'\s{2,}', ' ', new_base)  # 清理多余空格
     new_base = new_base.strip()
     
+    # 检查文件是否存在，如果存在则添加[samename_n]后缀
     filename = f"{new_base}{ext}"
+    counter = 1
+    original_filename = filename
+    while os.path.exists(os.path.join(directory, filename)):
+        filename = f"{new_base}[samename_{counter}]{ext}"
+        counter += 1
     
     return filename
 
