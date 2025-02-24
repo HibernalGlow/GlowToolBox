@@ -616,14 +616,30 @@ def main():
         'debug_config': {
             'base_modes': {
                 '1': {
-                    'name': '标准分析模式',
-                    'base_args': ['--sample-count', '3'],
+                    'name': '标准分析模式（从剪贴板读取）',
+                    'base_args': ['--sample-count', '3', '--clipboard'],
                     'default_params': {}
                 },
                 '2': {
-                    'name': '完整分析模式',
+                    'name': '标准分析模式（手动输入路径）',
+                    'base_args': ['--sample-count', '3'],
+                    'default_params': {}
+                },
+                '3': {
+                    'name': '完整分析模式（从剪贴板读取）',
+                    'base_args': ['--sample-count', '3', '--no-skip-special', '--clipboard'],
+                    'default_params': {}
+                },
+                '4': {
+                    'name': '完整分析模式（手动输入路径）',
                     'base_args': ['--sample-count', '3', '--no-skip-special'],
                     'default_params': {}
+                }
+            },
+            'param_options': {
+                'input_path': {
+                    'prompt': '请输入要处理的路径: ',
+                    'required': True
                 }
             }
         }
@@ -648,9 +664,7 @@ def main():
         print("3. 命令行模式")
         
         try:
-            # choice = input("\n请选择运行模式 (1-3): ").strip()
-            choice = "1"
-
+            choice = input("\n请选择运行模式 (1-3): ").strip()
             if choice == "1":
                 mode_manager.run_tui()
             elif choice == "2":
