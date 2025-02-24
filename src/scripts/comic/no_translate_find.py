@@ -31,6 +31,8 @@ from nodes.record.logger_config import setup_logger
 from nodes.pics.calculate_hash_custom import ImageClarityEvaluator
 from nodes.tui.textual_logger import TextualLoggerManager
 from nodes.utils.number_shortener import shorten_number_cn
+from nodes.tui.mode_manager import create_mode_manager
+import json
 
 config = {
     'script_name': 'no_translate_find',
@@ -980,7 +982,8 @@ def handle_multi_main_file(file_path: str, base_dir: str) -> Optional[str]:
         logger.error("[#error_log] ❌ 创建multi-main副本失败 %s: %s", file_path, str(e))
         return None
 
-def main():
+def setup_cli_parser():
+    """设置命令行参数解析器"""
     parser = argparse.ArgumentParser(description='处理重复压缩包文件')
     group = parser.add_mutually_exclusive_group()
     group.add_argument('-c', '--clipboard', action='store_true', help='从剪贴板读取路径')
@@ -989,17 +992,24 @@ def main():
     parser.add_argument('--create-shortcuts', action='store_true', help='创建快捷方式而不是移动文件')
     parser.add_argument('--enable-multi-main', action='store_true', help='为每个multi组创建主文件副本')
     parser.add_argument('--report', type=str, help='指定报告文件名（默认为"处理报告_时间戳.md"）')
-    args = parser.parse_args()
-    
+    return parser
+
+def run_application(args):
+    """运行应用程序的主函数"""
     # 获取要处理的路径
     paths = []
     
     # 从剪贴板读取
-    if args.clipboard:
+    if hasattr(args, 'clipboard') and args.clipboard:
         paths.extend(get_paths_from_clipboard())
     # 从命令行参数读取
-    elif args.paths:
-        paths.extend(args.paths)
+    elif hasattr(args, 'paths') and args.paths:
+        if isinstance(args.paths, str):
+            # 如果是TUI模式传入的字符串，按逗号分割
+            paths.extend([p.strip() for p in args.paths.split(',') if p.strip()])
+        else:
+            # 命令行模式传入的列表
+            paths.extend(args.paths)
     # 默认从终端输入
     else:
         print("请输入要处理的路径（每行一个，输入空行结束）：")
@@ -1013,18 +1023,18 @@ def main():
                 break
             except KeyboardInterrupt:
                 print("用户取消输入")
-                return
+                return False
         
     if not paths:
         logger.info("[#error_log] ❌ 未提供任何路径")
-        return
+        return False
         
     # 处理和验证所有路径
     valid_paths = process_paths(paths)
     
     if not valid_paths:
         logger.info("[#error_log] ❌ 没有有效的路径可处理")
-        return
+        return False
     
     # 创建报告生成器
     report_generator = ReportGenerator()
@@ -1035,13 +1045,13 @@ def main():
         process_directory(
             path,
             report_generator,
-            create_shortcuts=args.create_shortcuts,
-            enable_multi_main=args.enable_multi_main
+            create_shortcuts=args.create_shortcuts if hasattr(args, 'create_shortcuts') else False,
+            enable_multi_main=args.enable_multi_main if hasattr(args, 'enable_multi_main') else False
         )
         logger.info("[#process] ✨ 目录处理完成: %s", path)
         
         # 生成并保存报告
-        if args.report:
+        if hasattr(args, 'report') and args.report:
             report_path = report_generator.save_report(path, args.report)
         else:
             report_path = report_generator.save_report(path)
@@ -1050,6 +1060,45 @@ def main():
             logger.info("[#process] 📝 报告已保存到: %s", report_path)
         else:
             logger.info("[#error_log] ❌ 保存报告失败")
+    
+    return True
+
+def main():
+    # 获取配置文件路径
+    config_path = os.path.join(os.path.dirname(__file__), 'no_translate_find_config.json')
+    
+    # 创建模式管理器
+    mode_manager = create_mode_manager(
+        config_path=config_path,
+        cli_parser_setup=setup_cli_parser,
+        application_runner=run_application
+    )
+    
+    # 根据命令行参数选择运行模式
+    if len(sys.argv) > 1:
+        # 如果有命令行参数，直接运行CLI模式
+        mode_manager.run_cli(sys.argv[1:])
+    else:
+        # 否则显示模式选择菜单
+        print("\n=== 运行模式选择 ===")
+        print("1. TUI界面模式")
+        print("2. 调试模式")
+        print("3. 命令行模式")
+        
+        try:
+            choice = input("\n请选择运行模式 (1-3): ").strip()
+            if choice == "1":
+                mode_manager.run_tui()
+            elif choice == "2":
+                mode_manager.run_debug()
+            elif choice == "3":
+                mode_manager.run_cli()
+            else:
+                print("无效的选择，退出程序")
+        except KeyboardInterrupt:
+            print("\n用户取消操作")
+        except Exception as e:
+            print(f"运行出错: {e}")
 
 if __name__ == "__main__":
     main() 
