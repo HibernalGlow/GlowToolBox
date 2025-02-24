@@ -32,7 +32,7 @@ config = {
     'script_name': 'recruit_cover_filter',
     'console_enabled': False,
     'backup': {
-        'enabled': True,  # 是否启用备份功能
+        'enabled': False,  # 是否启用备份功能
     }
 }
 logger, config_info = setup_logger(config)
