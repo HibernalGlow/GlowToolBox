@@ -808,40 +808,24 @@ def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, re
             if not dry_run:
                 os.makedirs(multi_dir, exist_ok=True)
             
-            # 找出最大的文件并保留在原位置（如果启用了keep_multi_main）
+            # 找出最大的文件作为主文件
             main_file = max(chinese_versions, key=lambda x: os.path.getsize(os.path.join(base_dir, x)))
             if keep_multi_main and not dry_run:
-                # 为主文件添加[multi-main]标记
+                # 先复制一份主文件副本
                 main_file_path = os.path.join(base_dir, main_file)
                 name, ext = os.path.splitext(main_file)
                 new_main_name = f"{name}[multi-main]{ext}"
                 new_main_path = os.path.join(base_dir, new_main_name)
                 try:
-                    os.rename(main_file_path, new_main_path)
-                    logger.info("[#file_ops] ✅ 已标记主文件: %s -> %s", main_file, new_main_name)
-                    group_details['actions'].append(f"标记主文件: {main_file} -> {new_main_name}")
-                    main_file = new_main_name
-                    
-                    # 复制原始文件（不带标记）到multi目录
-                    src_path = os.path.join(base_dir, new_main_path)
-                    rel_path = os.path.relpath(main_file_path, base_dir)  # 使用原始文件名
-                    dst_path = os.path.join(multi_dir, rel_path)
-                    if not dry_run:
-                        logger.info("[#file_ops] 🔄 正在复制主文件到multi: %s", main_file)
-                        if safe_copy_file(src_path, dst_path):
-                            logger.info("[#file_ops] ✅ 已复制主文件到multi: %s", main_file)
-                            group_details['actions'].append(f"复制主文件到multi: {main_file}")
-                    else:
-                        logger.info("[#file_ops] 🔄 [DRY RUN] 将复制主文件到multi: %s", main_file)
-                        group_details['actions'].append(f"[DRY RUN] 将复制主文件到multi: {main_file}")
+                    # 复制主文件并重命名为带[multi-main]标记的版本
+                    if safe_copy_file(main_file_path, new_main_path):
+                        logger.info("[#file_ops] ✅ 已创建主文件副本并标记: %s -> %s", main_file, new_main_name)
+                        group_details['actions'].append(f"创建主文件副本并标记: {main_file} -> {new_main_name}")
                 except Exception as e:
-                    logger.error("[#error_log] ❌ 标记主文件失败: %s", str(e))
+                    logger.error("[#error_log] ❌ 创建主文件副本失败: %s", str(e))
 
             for file in chinese_versions:
-                if keep_multi_main and file == main_file:
-                    continue  # 主文件已经在前面处理过了
-
-                # 移动其他文件到multi
+                # 移动所有文件到multi（包括主文件）
                 src_path = os.path.join(base_dir, file)
                 rel_path = os.path.relpath(src_path, base_dir)
                 dst_path = os.path.join(multi_dir, rel_path)
@@ -873,40 +857,24 @@ def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, re
             if not dry_run:
                 os.makedirs(multi_dir, exist_ok=True)
                 
-            # 找出最大的文件并保留在原位置（如果启用了keep_multi_main）
+            # 找出最大的文件作为主文件
             main_file = max(other_versions, key=lambda x: os.path.getsize(os.path.join(base_dir, x)))
             if keep_multi_main and not dry_run:
-                # 为主文件添加[multi-main]标记
+                # 先复制一份主文件副本
                 main_file_path = os.path.join(base_dir, main_file)
                 name, ext = os.path.splitext(main_file)
                 new_main_name = f"{name}[multi-main]{ext}"
                 new_main_path = os.path.join(base_dir, new_main_name)
                 try:
-                    os.rename(main_file_path, new_main_path)
-                    logger.info("[#file_ops] ✅ 已标记主文件: %s -> %s", main_file, new_main_name)
-                    group_details['actions'].append(f"标记主文件: {main_file} -> {new_main_name}")
-                    main_file = new_main_name
-                    
-                    # 复制原始文件（不带标记）到multi目录
-                    src_path = os.path.join(base_dir, new_main_path)
-                    rel_path = os.path.relpath(main_file_path, base_dir)  # 使用原始文件名
-                    dst_path = os.path.join(multi_dir, rel_path)
-                    if not dry_run:
-                        logger.info("[#file_ops] 🔄 正在复制主文件到multi: %s", main_file)
-                        if safe_copy_file(src_path, dst_path):
-                            logger.info("[#file_ops] ✅ 已复制主文件到multi: %s", main_file)
-                            group_details['actions'].append(f"复制主文件到multi: {main_file}")
-                    else:
-                        logger.info("[#file_ops] 🔄 [DRY RUN] 将复制主文件到multi: %s", main_file)
-                        group_details['actions'].append(f"[DRY RUN] 将复制主文件到multi: {main_file}")
+                    # 复制主文件并重命名为带[multi-main]标记的版本
+                    if safe_copy_file(main_file_path, new_main_path):
+                        logger.info("[#file_ops] ✅ 已创建主文件副本并标记: %s -> %s", main_file, new_main_name)
+                        group_details['actions'].append(f"创建主文件副本并标记: {main_file} -> {new_main_name}")
                 except Exception as e:
-                    logger.error("[#error_log] ❌ 标记主文件失败: %s", str(e))
+                    logger.error("[#error_log] ❌ 创建主文件副本失败: %s", str(e))
 
             for file in other_versions:
-                if keep_multi_main and file == main_file:
-                    continue  # 主文件已经在前面处理过了
-
-                # 移动其他文件到multi
+                # 移动所有文件到multi（包括主文件）
                 src_path = os.path.join(base_dir, file)
                 rel_path = os.path.relpath(src_path, base_dir)
                 dst_path = os.path.join(multi_dir, rel_path)
@@ -1025,40 +993,24 @@ def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, re
             if not dry_run:
                 os.makedirs(multi_dir, exist_ok=True)
             
-            # 找出最大的文件并保留在原位置（如果启用了keep_multi_main）
+            # 找出最大的文件作为主文件
             main_file = max(chinese_versions, key=lambda x: os.path.getsize(os.path.join(base_dir, x)))
             if keep_multi_main and not dry_run:
-                # 为主文件添加[multi-main]标记
+                # 先复制一份主文件副本
                 main_file_path = os.path.join(base_dir, main_file)
                 name, ext = os.path.splitext(main_file)
                 new_main_name = f"{name}[multi-main]{ext}"
                 new_main_path = os.path.join(base_dir, new_main_name)
                 try:
-                    os.rename(main_file_path, new_main_path)
-                    logger.info("[#file_ops] ✅ 已标记主文件: %s -> %s", main_file, new_main_name)
-                    group_details['actions'].append(f"标记主文件: {main_file} -> {new_main_name}")
-                    main_file = new_main_name
-                    
-                    # 复制原始文件（不带标记）到multi目录
-                    src_path = os.path.join(base_dir, new_main_path)
-                    rel_path = os.path.relpath(main_file_path, base_dir)  # 使用原始文件名
-                    dst_path = os.path.join(multi_dir, rel_path)
-                    if not dry_run:
-                        logger.info("[#file_ops] 🔄 正在复制主文件到multi: %s", main_file)
-                        if safe_copy_file(src_path, dst_path):
-                            logger.info("[#file_ops] ✅ 已复制主文件到multi: %s", main_file)
-                            group_details['actions'].append(f"复制主文件到multi: {main_file}")
-                    else:
-                        logger.info("[#file_ops] 🔄 [DRY RUN] 将复制主文件到multi: %s", main_file)
-                        group_details['actions'].append(f"[DRY RUN] 将复制主文件到multi: {main_file}")
+                    # 复制主文件并重命名为带[multi-main]标记的版本
+                    if safe_copy_file(main_file_path, new_main_path):
+                        logger.info("[#file_ops] ✅ 已创建主文件副本并标记: %s -> %s", main_file, new_main_name)
+                        group_details['actions'].append(f"创建主文件副本并标记: {main_file} -> {new_main_name}")
                 except Exception as e:
-                    logger.error("[#error_log] ❌ 标记主文件失败: %s", str(e))
+                    logger.error("[#error_log] ❌ 创建主文件副本失败: %s", str(e))
 
             for file in chinese_versions:
-                if keep_multi_main and file == main_file:
-                    continue  # 主文件已经在前面处理过了
-
-                # 移动其他文件到multi
+                # 移动所有文件到multi（包括主文件）
                 src_path = os.path.join(base_dir, file)
                 rel_path = os.path.relpath(src_path, base_dir)
                 dst_path = os.path.join(multi_dir, rel_path)
@@ -1108,40 +1060,24 @@ def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, re
             if not dry_run:
                 os.makedirs(multi_dir, exist_ok=True)
                 
-            # 找出最大的文件并保留在原位置（如果启用了keep_multi_main）
+            # 找出最大的文件作为主文件
             main_file = max(other_versions, key=lambda x: os.path.getsize(os.path.join(base_dir, x)))
             if keep_multi_main and not dry_run:
-                # 为主文件添加[multi-main]标记
+                # 先复制一份主文件副本
                 main_file_path = os.path.join(base_dir, main_file)
                 name, ext = os.path.splitext(main_file)
                 new_main_name = f"{name}[multi-main]{ext}"
                 new_main_path = os.path.join(base_dir, new_main_name)
                 try:
-                    os.rename(main_file_path, new_main_path)
-                    logger.info("[#file_ops] ✅ 已标记主文件: %s -> %s", main_file, new_main_name)
-                    group_details['actions'].append(f"标记主文件: {main_file} -> {new_main_name}")
-                    main_file = new_main_name
-                    
-                    # 复制原始文件（不带标记）到multi目录
-                    src_path = os.path.join(base_dir, new_main_path)
-                    rel_path = os.path.relpath(main_file_path, base_dir)  # 使用原始文件名
-                    dst_path = os.path.join(multi_dir, rel_path)
-                    if not dry_run:
-                        logger.info("[#file_ops] 🔄 正在复制主文件到multi: %s", main_file)
-                        if safe_copy_file(src_path, dst_path):
-                            logger.info("[#file_ops] ✅ 已复制主文件到multi: %s", main_file)
-                            group_details['actions'].append(f"复制主文件到multi: {main_file}")
-                    else:
-                        logger.info("[#file_ops] 🔄 [DRY RUN] 将复制主文件到multi: %s", main_file)
-                        group_details['actions'].append(f"[DRY RUN] 将复制主文件到multi: {main_file}")
+                    # 复制主文件并重命名为带[multi-main]标记的版本
+                    if safe_copy_file(main_file_path, new_main_path):
+                        logger.info("[#file_ops] ✅ 已创建主文件副本并标记: %s -> %s", main_file, new_main_name)
+                        group_details['actions'].append(f"创建主文件副本并标记: {main_file} -> {new_main_name}")
                 except Exception as e:
-                    logger.error("[#error_log] ❌ 标记主文件失败: %s", str(e))
+                    logger.error("[#error_log] ❌ 创建主文件副本失败: %s", str(e))
 
             for file in other_versions:
-                if keep_multi_main and file == main_file:
-                    continue  # 主文件已经在前面处理过了
-
-                # 移动其他文件到multi
+                # 移动所有文件到multi（包括主文件）
                 src_path = os.path.join(base_dir, file)
                 rel_path = os.path.relpath(src_path, base_dir)
                 dst_path = os.path.join(multi_dir, rel_path)
