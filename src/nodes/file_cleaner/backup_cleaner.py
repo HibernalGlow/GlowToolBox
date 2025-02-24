@@ -102,13 +102,47 @@ class BackupCleaner:
         self._removed_count = 0
         self._skipped_count = 0
         
-        # 收集所有项目
-        items = []
-        for item in path.rglob("*"):
-            items.append(item)
+        # 检查路径是否存在
+        if not path.exists():
+            print(f"警告：路径不存在 - {path}")
+            return self._removed_count, self._skipped_count
             
-            # 当收集到一定数量时进行批处理
-            if len(items) >= batch_size:
+        try:
+            # 收集所有项目
+            items = []
+            try:
+                for item in path.rglob("*"):
+                    try:
+                        items.append(item)
+                        
+                        # 当收集到一定数量时进行批处理
+                        if len(items) >= batch_size:
+                            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                                futures = []
+                                for i in range(0, len(items), batch_size):
+                                    batch = items[i:i + batch_size]
+                                    future = executor.submit(self._process_batch, batch, patterns, exclude_keywords)
+                                    futures.append(future)
+                                    
+                                # 收集结果
+                                for future in as_completed(futures):
+                                    try:
+                                        removed, skipped = future.result()
+                                        self._update_counts(removed, skipped)
+                                    except Exception as e:
+                                        print(f"警告：处理批次时出错 - {e}")
+                                        continue
+                                    
+                            items = []
+                    except Exception as e:
+                        print(f"警告：处理项目时出错 - {e}")
+                        continue
+                        
+            except Exception as e:
+                print(f"警告：遍历目录时出错 - {e}")
+            
+            # 处理剩余项目
+            if items:
                 with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                     futures = []
                     for i in range(0, len(items), batch_size):
@@ -118,23 +152,14 @@ class BackupCleaner:
                         
                     # 收集结果
                     for future in as_completed(futures):
-                        removed, skipped = future.result()
-                        self._update_counts(removed, skipped)
-                        
-                items = []
-                
-        # 处理剩余项目
-        if items:
-            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                futures = []
-                for i in range(0, len(items), batch_size):
-                    batch = items[i:i + batch_size]
-                    future = executor.submit(self._process_batch, batch, patterns, exclude_keywords)
-                    futures.append(future)
-                    
-                # 收集结果
-                for future in as_completed(futures):
-                    removed, skipped = future.result()
-                    self._update_counts(removed, skipped)
-                    
+                        try:
+                            removed, skipped = future.result()
+                            self._update_counts(removed, skipped)
+                        except Exception as e:
+                            print(f"警告：处理批次时出错 - {e}")
+                            continue
+                            
+        except Exception as e:
+            print(f"警告：清理过程中出错 - {e}")
+            
         return self._removed_count, self._skipped_count 

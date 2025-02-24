@@ -27,7 +27,7 @@ ARCHIVE_FORMATS = {'.zip', '.rar', '.7z', '.cbz', '.cbr'}
 # 在文件顶部添加删除规则配置（建议放在VIDEO_FORMATS和ARCHIVE_FORMATS附近）
 DELETE_KEYWORDS = [
     ('*.bak', 'file'),     # 仅匹配文件
-    # ('temp_*', 'dir'),     # 仅匹配文件夹
+    ('temp_*', 'dir'),     # 仅匹配文件夹
     # ('*.trash', 'both')    # 同时匹配文件和文件夹
 ]
 
