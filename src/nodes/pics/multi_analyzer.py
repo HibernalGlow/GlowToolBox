@@ -22,6 +22,10 @@ from nodes.pics.calculate_hash_custom import ImageClarityEvaluator
 from nodes.utils.number_shortener import shorten_number_cn
 import re
 from nodes.pics.group_analyzer import GroupAnalyzer
+import argparse
+import json
+import sys
+from nodes.tui.mode_manager import create_mode_manager
 
 # 抑制所有警告
 warnings.filterwarnings('ignore')
@@ -478,87 +482,137 @@ class MultiAnalyzer:
                     
         return results
 
+def setup_cli_parser():
+    """设置命令行参数解析器"""
+    parser = argparse.ArgumentParser(description='Multi文件分析器')
+    parser.add_argument('input_path', nargs='?', help='输入文件或目录路径')
+    parser.add_argument('-s', '--sample-count', type=int, default=3, help='每个压缩包抽取的图片样本数量（默认3）')
+    parser.add_argument('-r', '--rename', action='store_true', help='执行重命名操作')
+    parser.add_argument('--no-skip-special', action='store_true', help='不跳过trash和multi目录')
+    parser.add_argument('-o', '--output', help='保存结果的文件路径')
+    return parser
+
 def main():
     """主函数，用于命令行运行"""
-    import json
+    # 获取配置文件路径
+    config_path = os.path.join(os.path.dirname(__file__), 'multi_analyzer_config.json')
     
-    # 配置日志
-    logging.basicConfig(level=logging.INFO,
-                       format='%(asctime)s - %(levelname)s - %(message)s')
-    
-    print("=== Multi文件分析器 ===")
-    print("请输入要分析的文件或目录路径（输入q退出）：")
-    
-    while True:
+    # 创建配置
+    config = {
+        'tui_config': {
+            'title': 'Multi文件分析器配置',
+            'checkbox_options': [
+                ('执行重命名操作', 'rename', '--rename', False),
+                ('不跳过trash和multi目录', 'skip_special', '--no-skip-special', False)
+            ],
+            'input_options': [
+                ('采样数量', 'sample_count', '--sample-count', '3', '每个压缩包抽取的图片样本数量'),
+                ('结果保存路径', 'output', '--output', 'analysis_result.json', '分析结果保存的JSON文件路径'),
+                ('输入路径', 'input_path', 'input_path', '', '要分析的文件或目录路径')
+            ],
+            'preset_configs': {
+                '标准分析': {
+                    'description': '标准分析配置',
+                    'checkbox_options': ['rename'],
+                    'input_values': {
+                        'sample_count': '3',
+                        'output': 'analysis_result.json',
+                        'input_path': ''
+                    }
+                },
+                '完整分析': {
+                    'description': '分析所有目录（包括trash和multi）',
+                    'checkbox_options': ['rename', 'skip_special'],
+                    'input_values': {
+                        'sample_count': '3',
+                        'output': 'analysis_result.json',
+                        'input_path': ''
+                    }
+                }
+            }
+        },
+        'debug_config': {
+            'base_modes': {
+                '1': {
+                    'name': '标准分析模式',
+                    'base_args': ['--sample-count', '3'],
+                    'default_params': {}
+                },
+                '2': {
+                    'name': '完整分析模式',
+                    'base_args': ['--sample-count', '3', '--no-skip-special'],
+                    'default_params': {}
+                }
+            }
+        }
+    }
+
+    def run_application(args):
+        """运行应用程序"""
+        if not args.input_path and not hasattr(args, 'clipboard'):
+            print("错误：未提供输入路径")
+            return False
+
+        # 执行分析
+        print("\n开始分析...")
+        analyzer = MultiAnalyzer(sample_count=args.sample_count)
+        results = analyzer.process_directory_with_rename(
+            args.input_path,
+            do_rename=args.rename,
+            skip_special_dirs=not args.no_skip_special
+        )
+
+        # 保存结果
+        if args.output:
+            with open(args.output, 'w', encoding='utf-8') as f:
+                json.dump(results, f, ensure_ascii=False, indent=2)
+            print(f"\n结果已保存到: {args.output}")
+
+        # 显示结果
+        print("\n分析结果:")
+        for result in results:
+            print(f"原文件: {result['file']}")
+            if args.rename:
+                status = "成功" if result.get('renamed', False) else "失败"
+                print(f"新文件: {result['new_name']} (重命名{status})")
+            print(f"分析结果: {result['formatted']}")
+            print("-" * 50)
+
+        print("\n分析完成！")
+        return True
+
+    # 创建模式管理器
+    mode_manager = create_mode_manager(
+        config=config,
+        cli_parser_setup=setup_cli_parser,
+        application_runner=run_application
+    )
+
+    # 根据命令行参数选择运行模式
+    if len(sys.argv) > 1:
+        # 如果有命令行参数，直接运行CLI模式
+        mode_manager.run_cli(sys.argv[1:])
+    else:
+        # 否则显示模式选择菜单
+        print("\n=== 运行模式选择 ===")
+        print("1. TUI界面模式")
+        print("2. 调试模式")
+        print("3. 命令行模式")
+        
         try:
-            input_path = input("路径> ").strip()
-            
-            if input_path.lower() in ('q', 'quit', 'exit'):
-                print("程序已退出")
-                break
-                
-            if not input_path:
-                print("请输入有效路径")
-                continue
-                
-            if not os.path.exists(input_path):
-                print(f"错误：路径 '{input_path}' 不存在")
-                continue
-            
-            # 获取样本数量
-            sample_count = 3  # 默认值
-            try:
-                count_input = input("请输入采样数量（直接回车使用默认值3）> ").strip()
-                if count_input:
-                    sample_count = int(count_input)
-                    if sample_count < 1:
-                        print("采样数量必须大于0，使用默认值3")
-                        sample_count = 3
-            except ValueError:
-                print("无效的采样数量，使用默认值3")
-            
-            # 是否执行重命名
-            do_rename = input("是否重命名文件？(y/N) ").strip().lower() == 'y'
-            
-            # 是否跳过特殊目录
-            skip_special = input("是否跳过trash和multi目录？(Y/n) ").strip().lower() != 'n'
-            
-            # 是否保存到文件
-            save_to_file = input("是否保存结果到文件？(y/N) ").strip().lower() == 'y'
-            output_file = None
-            if save_to_file:
-                output_file = input("请输入保存路径（直接回车使用默认路径 analysis_result.json）> ").strip()
-                if not output_file:
-                    output_file = "analysis_result.json"
-            
-            # 执行分析
-            print("\n开始分析...")
-            analyzer = MultiAnalyzer(sample_count=sample_count)
-            results = analyzer.process_directory_with_rename(input_path, do_rename, skip_special_dirs=skip_special)
-            
-            # 输出结果
-            if output_file:
-                with open(output_file, 'w', encoding='utf-8') as f:
-                    json.dump(results, f, ensure_ascii=False, indent=2)
-                print(f"\n结果已保存到: {output_file}")
-            
-            # 总是在控制台显示结果
-            print("\n分析结果:")
-            for result in results:
-                print(f"原文件: {result['file']}")
-                if do_rename:
-                    status = "成功" if result.get('renamed', False) else "失败"
-                    print(f"新文件: {result['new_name']} (重命名{status})")
-                print(f"分析结果: {result['formatted']}")
-                print("-" * 50)
-            
-            print("\n分析完成！")
-            print("\n请输入新的路径进行分析（输入q退出）：")
-            
+            choice = input("\n请选择运行模式 (1-3): ").strip()
+            if choice == "1":
+                mode_manager.run_tui()
+            elif choice == "2":
+                mode_manager.run_debug()
+            elif choice == "3":
+                mode_manager.run_cli()
+            else:
+                print("无效的选择，退出程序")
+        except KeyboardInterrupt:
+            print("\n用户取消操作")
         except Exception as e:
-            logger.error(f"处理过程中出错: {str(e)}")
-            print(f"错误: {str(e)}")
-            print("\n请输入新的路径进行分析（输入q退出）：")
+            print(f"运行出错: {e}")
 
 if __name__ == '__main__':
     main() 
