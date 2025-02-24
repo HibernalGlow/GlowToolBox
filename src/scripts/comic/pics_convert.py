@@ -680,17 +680,51 @@ class ArchiveHandler:
     """处理压缩包的类"""
     def __init__(self):
         self.path_handler = PathHandler()
-        self.rename_log_file = "rename_log.txt"  # 添加日志文件路径
+        self.rename_log_file = "cbr_candidates.txt"  # 改为记录CBR候选文件
+        self.low_compression_count = 0  # 添加连续低压缩率计数器
+        self.COMPRESSION_THRESHOLD = 0.2  # 压缩率阈值 (20%)
+        self.MAX_LOW_COMPRESSION = 3  # 最大允许连续低压缩次数
 
-    def _log_rename(self, original_path, new_path):
-        """记录重命名操作"""
+    def _check_compression_rate(self, original_size, new_size) -> bool:
+        """检查压缩率，返回是否为低压缩率"""
+        if new_size >= original_size:  # 负压缩率
+            self.low_compression_count += 1
+            return True
+            
+        compression_rate = (original_size - new_size) / original_size
+        if compression_rate < self.COMPRESSION_THRESHOLD:  # 低于阈值
+            self.low_compression_count += 1
+            return True
+        else:
+            self.low_compression_count = 0  # 重置计数器
+            return False
+
+    def _should_stop_processing(self) -> bool:
+        """判断是否应该停止处理"""
+        return self.low_compression_count >= self.MAX_LOW_COMPRESSION
+
+    def _log_cbr_candidate(self, file_path, reason):
+        """记录需要重命名为CBR的文件"""
         try:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             with open(self.rename_log_file, "a", encoding="utf-8") as f:
-                f.write(f"{timestamp} | 原始路径: {original_path} | 新路径: {new_path}\n")
-            logger.info(f"[#file]已记录重命名操作到日志文件")
+                f.write(f"{timestamp} | 文件路径: {file_path} | 原因: {reason}\n")
+            logger.info(f"[#file]已记录CBR候选文件: {file_path}")
         except Exception as e:
-            logger.info(f"[#file]记录重命名操作失败: {e}")
+            logger.info(f"[#file]记录CBR候选文件失败: {e}")
+
+    def _rename_to_cbr(self, file_path):
+        """执行重命名为CBR的操作"""
+        if hasattr(self, 'rename_cbr') and self.rename_cbr:
+            try:
+                new_name = Path(file_path).with_suffix('.cbr')
+                os.rename(str(file_path), str(new_name))
+                logger.info(f"[#file]已将文件改为CBR: {new_name}")
+                return True
+            except Exception as e:
+                logger.info(f"[#file]重命名为CBR失败: {e}")
+                return False
+        return False
 
     def _validate_archive(self, file_path: Path, params: dict) -> tuple[bool, int]:
         """验证压缩包是否需要处理"""
@@ -789,6 +823,9 @@ class ArchiveHandler:
             file_path = Path(file_path)
             logger.info(f"[#file]开始处理文件: {file_path}")
             
+            # 重置低压缩率计数器
+            self.low_compression_count = 0
+            
             # 验证压缩包
             is_valid, image_count = self._validate_archive(file_path, params)
             if not is_valid:
@@ -808,6 +845,14 @@ class ArchiveHandler:
                 processed_files, skipped_files = self._process_archive_contents(
                     file_path, temp_dir, params, image_count
                 )
+                
+                # 如果连续低压缩率达到阈值，记录并可能重命名为CBR
+                if self._should_stop_processing():
+                    reason = f"连续{self.MAX_LOW_COMPRESSION}张图片压缩率过低"
+                    self._log_cbr_candidate(str(file_path), reason)
+                    logger.info(f"[#file]{reason}")
+                    self._rename_to_cbr(file_path)
+                    return []
                 
                 # 完成处理
                 return self._finalize_archive(
@@ -1081,21 +1126,23 @@ class ArchiveHandler:
                 return (False, 0)
             original_size = fs.info(str(safe_file))['size']
             new_size = fs.info(str(safe_new))['size']
+            
+            # 检查压缩率
+            is_low_compression = self._check_compression_rate(original_size, new_size)
+            if is_low_compression:
+                logger.info(f"[#file]检测到低压缩率，当前连续次数: {self.low_compression_count}")
+            
             # 如果新文件大小超过原文件的80%，认为压缩效果不理想
             SIZE_THRESHOLD_RATIO = 0.8  # 80%
             if new_size >= original_size * SIZE_THRESHOLD_RATIO:
-                logger.info(f"[#file]新压缩包 ({new_size / 1024 / 1024:.2f}MB) 大小超过原始文件 ({original_size / 1024 / 1024:.2f}MB) 的{SIZE_THRESHOLD_RATIO*100}%，压缩效果不理想")
+                reason = f"压缩包大小比例超过{SIZE_THRESHOLD_RATIO*100}% ({new_size/1024/1024:.2f}MB -> {original_size/1024/1024:.2f}MB)"
+                logger.info(f"[#file]{reason}")
                 fs.delete(str(safe_new))
                 if fs.exists(str(safe_backup)):
                     fs.move(str(safe_backup), str(safe_file))
-                    # 只有在启用了rename_cbr选项时才重命名为CBR
-                    new_name = safe_file.with_suffix('.cbr')
-                    # 记录重命名操作
-                    self._log_rename(str(safe_file), str(new_name))
-
-                    if hasattr(self, 'rename_cbr') and self.rename_cbr:
-                        fs.move(str(safe_file), str(new_name))
-                        logger.info(f"[#file]已将文件改为CBR: {new_name}")
+                    # 记录CBR候选并可能重命名
+                    self._log_cbr_candidate(str(safe_file), reason)
+                    self._rename_to_cbr(safe_file)
                 return (False, 0)
             try:
                 with fs.open(str(safe_file), 'rb') as f:
