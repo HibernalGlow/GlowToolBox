@@ -39,12 +39,12 @@ HASH_PARAMS = {
     'hash_version': 1  # 哈希版本号，用于后续兼容性处理
 }
 
-# 添加新的缓存类
 class HashCache:
     """哈希值缓存管理类（单例模式）"""
     _instance = None
     _cache = {}
     _initialized = False
+    _last_refresh = 0
 
     def __new__(cls):
         if not cls._instance:
@@ -54,47 +54,79 @@ class HashCache:
     @classmethod
     def get_cache(cls):
         """获取内存中的缓存数据"""
-        if not cls._initialized:
+        current_time = time.time()
+        
+        # 如果未初始化或者距离上次刷新超过超时时间，则刷新缓存
+        if not cls._initialized or (current_time - cls._last_refresh > CACHE_TIMEOUT):
             cls.refresh_cache()
+            
         return cls._cache
     
     @classmethod
     def refresh_cache(cls):
         """刷新缓存并保持内存驻留"""
-        new_cache = {}
-        for hash_file in GLOBAL_HASH_FILES:
-            try:
-                if os.path.exists(hash_file):
+        try:
+            new_cache = {}
+            loaded_files = []
+            
+            for hash_file in GLOBAL_HASH_FILES:
+                try:
+                    if not os.path.exists(hash_file):
+                        logging.debug(f"哈希文件不存在: {hash_file}")
+                        continue
+                        
                     with open(hash_file, 'rb') as f:
                         data = orjson.loads(f.read())
-                        
+                        if not data:
+                            logging.debug(f"哈希文件为空: {hash_file}")
+                            continue
+                            
                         # 处理新格式 (image_hashes_collection.json)
                         if "hashes" in data:
                             hashes = data["hashes"]
+                            if not hashes:
+                                logging.debug(f"哈希数据为空: {hash_file}")
+                                continue
+                                
                             for uri, hash_data in hashes.items():
                                 if isinstance(hash_data, dict):
-                                    new_cache[uri] = hash_data.get('hash', '')
+                                    if hash_str := hash_data.get('hash'):
+                                        new_cache[uri] = hash_str
                                 else:
-                                    new_cache[uri] = hash_data
+                                    new_cache[uri] = str(hash_data)
                                     
                         # 处理旧格式 (image_hashes_global.json)
                         else:
                             # 排除特殊键
                             special_keys = {'_hash_params', 'dry_run', 'input_paths'}
-                            hashes = {
-                                k: v['hash'] if isinstance(v, dict) else v
-                                for k, v in data.items()
-                                if k not in special_keys
-                            }
-                            new_cache.update(hashes)
-                            
-                    logging.debug(f"从 {hash_file} 加载了 {len(hashes)} 个哈希值")
-            except Exception as e:
-                logging.error(f"加载哈希文件失败 {hash_file}: {e}")
+                            for k, v in data.items():
+                                if k not in special_keys:
+                                    if isinstance(v, dict):
+                                        if hash_str := v.get('hash'):
+                                            new_cache[k] = hash_str
+                                    else:
+                                        new_cache[k] = str(v)
+                                        
+                        loaded_files.append(hash_file)
+                        logging.debug(f"从 {hash_file} 加载了 {len(new_cache) - len(cls._cache)} 个新哈希值")
+                        
+                except Exception as e:
+                    logging.error(f"加载哈希文件失败 {hash_file}: {e}")
+                    continue
+                    
+            if loaded_files:
+                cls._cache = new_cache  # 直接替换引用保证原子性
+                cls._initialized = True
+                cls._last_refresh = time.time()
+                logging.info(f"哈希缓存已更新，共 {len(cls._cache)} 个条目")
+            else:
+                logging.warning("没有成功加载任何哈希文件")
                 
-        cls._cache = new_cache  # 直接替换引用保证原子性
-        cls._initialized = True
-        logging.info(f"哈希缓存已更新，共 {len(cls._cache)} 个条目")
+        except Exception as e:
+            logging.error(f"刷新哈希缓存失败: {e}")
+            if not cls._initialized:
+                cls._cache = {}  # 如果是首次初始化失败，确保有一个空缓存
+            # 保持现有缓存不变
 
 class ImgUtils:
     
@@ -210,11 +242,22 @@ class ImageHashCalculator:
             str: 哈希值字符串，未找到返回None
         """
         try:
+            if not url:
+                logging.error("URL为空")
+                return None
+
             # 标准化URL格式
             normalized_url = PathURIGenerator.generate(url) if '://' not in url else url
+            if not normalized_url:
+                logging.error(f"URL标准化失败: {url}")
+                return None
             
             # 检查内存缓存
             cached_hashes = HashCache.get_cache()
+            if not cached_hashes:
+                logging.debug("哈希缓存为空")
+                return None
+                
             if hash_value := cached_hashes.get(normalized_url):
                 logging.debug(f"从缓存找到哈希值: {normalized_url}")
                 return hash_value
@@ -222,22 +265,40 @@ class ImageHashCalculator:
             # 未命中缓存时主动扫描全局文件
             for hash_file in GLOBAL_HASH_FILES:
                 if not os.path.exists(hash_file):
+                    logging.debug(f"哈希文件不存在: {hash_file}")
                     continue
                     
-                with open(hash_file, 'rb') as f:
-                    data = orjson.loads(f.read())
-                    # 处理新旧格式
-                    hashes = data.get('hashes', data) if 'hashes' in data else data
-                    if hash_value := hashes.get(normalized_url):
-                        if isinstance(hash_value, dict):
-                            return hash_value.get('hash')
-                        logging.debug(f"从全局文件找到哈希值: {normalized_url}")
-                        return hash_value
-                        
+                try:
+                    with open(hash_file, 'rb') as f:
+                        data = orjson.loads(f.read())
+                        if not data:
+                            logging.debug(f"哈希文件为空: {hash_file}")
+                            continue
+                            
+                        # 处理新旧格式
+                        hashes = data.get('hashes', data) if 'hashes' in data else data
+                        if not hashes:
+                            logging.debug(f"哈希数据为空: {hash_file}")
+                            continue
+                            
+                        if hash_value := hashes.get(normalized_url):
+                            if isinstance(hash_value, dict):
+                                hash_str = hash_value.get('hash')
+                                if hash_str:
+                                    logging.debug(f"从全局文件找到哈希值: {normalized_url}")
+                                    return hash_str
+                            else:
+                                logging.debug(f"从全局文件找到哈希值: {normalized_url}")
+                                return str(hash_value)
+                except Exception as e:
+                    logging.warning(f"读取哈希文件失败 {hash_file}: {e}")
+                    continue
+            
+            logging.debug(f"未找到哈希值: {normalized_url}")
             return None
             
         except Exception as e:
-            logging.error(f"查询哈希失败 {url}: {e}")
+            logging.warning(f"查询哈希失败 {url}: {e}")
             return None
 
     @staticmethod
@@ -314,7 +375,7 @@ class ImageHashCalculator:
             }
             
         except Exception as e:
-            logging.error(f"计算失败: {e}")
+            logging.warning(f"计算失败: {e}")
             return None
 
 
@@ -456,7 +517,7 @@ class ImageHashCalculator:
                     'similar': is_similar
                 })
             except Exception as e:
-                logging.error(f"对比 {img1} 和 {img2} 失败: {e}")
+                logging.warning(f"对比 {img1} 和 {img2} 失败: {e}")
         
         # 生成HTML报告
         html_content = [
@@ -529,7 +590,7 @@ class ImageHashCalculator:
                     orjson.OPT_APPEND_NEWLINE))
             logging.debug(f"已保存哈希缓存到: {GLOBAL_HASH_FILES[-1]}")  # 改为debug级别减少日志量
         except Exception as e:
-            logging.error(f"保存全局哈希缓存失败: {e}", exc_info=True)
+            logging.warning(f"保存全局哈希缓存失败: {e}", exc_info=True)
 
     @staticmethod
     def load_global_hashes() -> Dict[str, str]:
@@ -544,7 +605,7 @@ class ImageHashCalculator:
                     }
             return {}
         except Exception as e:
-            logging.error(f"加载全局哈希缓存失败: {e}", exc_info=True)
+            logging.warning(f"加载全局哈希缓存失败: {e}", exc_info=True)
             return {}
 
     @staticmethod
