@@ -21,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from nodes.pics.calculate_hash_custom import ImageClarityEvaluator
 from nodes.utils.number_shortener import shorten_number_cn
 import re
+from nodes.pics.group_analyzer import GroupAnalyzer
 
 # 抑制所有警告
 warnings.filterwarnings('ignore')
@@ -299,61 +300,175 @@ class MultiAnalyzer:
         return full_path, new_path, result
 
     def process_directory_with_rename(self, input_path: str, do_rename: bool = False) -> List[Dict[str, Union[str, Dict[str, Union[int, float]]]]]:
-        """处理目录下的所有文件，可选择是否重命名
-        
-        Args:
-            input_path: 输入路径
-            do_rename: 是否执行重命名操作
-            
-        Returns:
-            List[Dict]: 处理结果列表
-        """
+        """处理目录下的所有文件，可选择是否重命名"""
         results = []
+        pending_renames = []  # 存储待重命名的文件信息
+        group_analyzer = GroupAnalyzer()  # 创建组分析器实例
         
+        # 用于存储文件组
+        file_groups = {}
+        
+        # 第一步：收集所有文件并进行初始分析
         if os.path.isfile(input_path):
             if input_path.lower().endswith(('.zip', '.cbz')):
                 orig_path, new_path, analysis = self.process_file_with_count(input_path)
                 result = {
                     'file': os.path.basename(input_path),
-                    'new_name': os.path.basename(new_path),
+                    'orig_path': orig_path,
                     'analysis': analysis,
                     'formatted': self.format_analysis_result(analysis)
                 }
-                if do_rename and orig_path != new_path:
-                    try:
-                        os.rename(orig_path, new_path)
-                        result['renamed'] = True
-                    except Exception as e:
-                        logger.error(f"重命名失败 {orig_path}: {str(e)}")
-                        result['renamed'] = False
                 results.append(result)
+                
         elif os.path.isdir(input_path):
             for root, _, files in os.walk(input_path):
+                if 'trash' in root or 'multi' in root:
+                    continue
                 for file in files:
                     if file.lower().endswith(('.zip', '.cbz')):
                         file_path = os.path.join(root, file)
                         try:
-                            orig_path, new_path, analysis = self.process_file_with_count(
-                                file_path, 
-                                base_dir=""  # 使用相对路径
-                            )
+                            orig_path, new_path, analysis = self.process_file_with_count(file_path)
                             result = {
                                 'file': os.path.relpath(file_path, input_path),
-                                'new_name': os.path.basename(new_path),
+                                'orig_path': orig_path,
                                 'analysis': analysis,
                                 'formatted': self.format_analysis_result(analysis)
                             }
-                            if do_rename and orig_path != new_path:
-                                try:
-                                    os.rename(orig_path, new_path)
-                                    result['renamed'] = True
-                                except Exception as e:
-                                    logger.error(f"重命名失败 {orig_path}: {str(e)}")
-                                    result['renamed'] = False
                             results.append(result)
+                            
+                            # 将文件添加到对应的组
+                            clean_name = group_analyzer.clean_filename(file)
+                            if clean_name not in file_groups:
+                                file_groups[clean_name] = []
+                            file_groups[clean_name].append(result)
+                            
                         except Exception as e:
                             logger.error(f"处理文件失败 {file_path}: {str(e)}")
-                            
+        
+        # 第二步：处理每个文件组，找出最优指标
+        for group_name, group_results in file_groups.items():
+            if len(group_results) > 1:  # 只处理有多个文件的组
+                logger.info(f"📦 处理文件组: {group_name}")
+                
+                # 找出最优指标
+                best_metrics = {
+                    'width': 0,  # 最大宽度
+                    'page_count': float('inf'),  # 最小页数
+                    'clarity_score': 0.0  # 最高清晰度
+                }
+                
+                # 检查是否所有指标都相同
+                metrics_same = {
+                    'width': True,
+                    'page_count': True,
+                    'clarity_score': True
+                }
+                
+                # 收集所有指标值
+                all_metrics = {
+                    'width': set(),
+                    'page_count': set(),
+                    'clarity_score': set()
+                }
+                
+                # 第一轮：收集所有值并找出最优值
+                for result in group_results:
+                    analysis = result['analysis']
+                    # 收集所有值
+                    if analysis['width'] > 0:
+                        all_metrics['width'].add(analysis['width'])
+                    if analysis['page_count'] > 0:
+                        all_metrics['page_count'].add(analysis['page_count'])
+                    if analysis['clarity_score'] > 0:
+                        all_metrics['clarity_score'].add(analysis['clarity_score'])
+                    
+                    # 更新最优值
+                    best_metrics['width'] = max(best_metrics['width'], analysis['width'])
+                    best_metrics['page_count'] = min(best_metrics['page_count'], analysis['page_count'])
+                    best_metrics['clarity_score'] = max(best_metrics['clarity_score'], analysis['clarity_score'])
+                
+                # 检查每个指标是否都相同
+                metrics_same['width'] = len(all_metrics['width']) <= 1
+                metrics_same['page_count'] = len(all_metrics['page_count']) <= 1
+                metrics_same['clarity_score'] = len(all_metrics['clarity_score']) <= 1
+                
+                # 记录最优指标
+                best_metrics_info = {
+                    'width': best_metrics['width'],
+                    'page_count': best_metrics['page_count'] if best_metrics['page_count'] != float('inf') else 0,
+                    'clarity_score': best_metrics['clarity_score']
+                }
+                
+                logger.info(f"🏆 组最优指标: 宽度={best_metrics_info['width']}, 页数={best_metrics_info['page_count']}, 清晰度={best_metrics_info['clarity_score']}")
+                
+                # 为每个文件更新格式化指标
+                for result in group_results:
+                    analysis = result['analysis']
+                    parts = []
+                    
+                    # 添加宽度（如果不是统一值且是最优值则添加表情）
+                    if analysis['width'] > 0:
+                        width_str = f"{analysis['width']}@WD"
+                        if not metrics_same['width'] and analysis['width'] == best_metrics['width']:
+                            width_str = f"📏{width_str}"
+                        parts.append(width_str)
+                    
+                    # 添加页数（如果不是统一值且是最优值则添加表情）
+                    if analysis['page_count'] > 0:
+                        page_str = f"{analysis['page_count']}@PX"
+                        if not metrics_same['page_count'] and analysis['page_count'] == best_metrics['page_count']:
+                            page_str = f"📄{page_str}"
+                        parts.append(page_str)
+                    
+                    # 添加清晰度（如果不是统一值且是最优值则添加表情）
+                    if analysis['clarity_score'] > 0:
+                        clarity_str = f"{int(analysis['clarity_score'])}@DE"
+                        if not metrics_same['clarity_score'] and analysis['clarity_score'] == best_metrics['clarity_score']:
+                            clarity_str = f"🔍{clarity_str}"
+                        parts.append(clarity_str)
+                    
+                    result['formatted'] = "{" + ",".join(parts) + "}" if parts else ""
+        
+        # 第三步：准备重命名操作
+        for result in results:
+            orig_path = result['orig_path']
+            dir_name = os.path.dirname(orig_path)
+            file_name = os.path.basename(orig_path)
+            name, ext = os.path.splitext(file_name)
+            
+            # 移除已有的标记
+            name = re.sub(r'\{[^}]*@(?:PX|WD|DE)[^}]*\}', '', name)
+            
+            # 添加新的格式化指标
+            if result['formatted']:
+                name = f"{name}{result['formatted']}"
+            
+            # 构建新的完整路径
+            new_name = f"{name}{ext}"
+            new_path = os.path.join(dir_name, new_name) if dir_name else new_name
+            result['new_name'] = os.path.basename(new_path)
+            
+            if do_rename and orig_path != new_path:
+                pending_renames.append((orig_path, new_path, result))
+        
+        # 第四步：执行重命名操作
+        if do_rename and pending_renames:
+            print("\n开始重命名文件...")
+            for orig_path, new_path, result in pending_renames:
+                try:
+                    if os.path.exists(orig_path):
+                        os.rename(orig_path, new_path)
+                        result['renamed'] = True
+                        print(f"重命名成功: {os.path.basename(orig_path)} -> {os.path.basename(new_path)}")
+                    else:
+                        logger.error(f"文件不存在: {orig_path}")
+                        result['renamed'] = False
+                except Exception as e:
+                    logger.error(f"重命名失败 {orig_path}: {str(e)}")
+                    result['renamed'] = False
+                    print(f"重命名失败: {os.path.basename(orig_path)} ({str(e)})")
+                    
         return results
 
 def main():
