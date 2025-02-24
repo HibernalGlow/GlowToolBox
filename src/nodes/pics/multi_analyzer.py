@@ -617,22 +617,22 @@ def main():
             'base_modes': {
                 '1': {
                     'name': '标准分析模式（从剪贴板读取）',
-                    'base_args': ['--sample-count', '3', '--clipboard'],
+                    'base_args': ['--sample-count', '3', '--clipboard', '--rename'],
                     'default_params': {}
                 },
                 '2': {
                     'name': '标准分析模式（手动输入路径）',
-                    'base_args': ['--sample-count', '3'],
+                    'base_args': ['--sample-count', '3', '--rename'],
                     'default_params': {}
                 },
                 '3': {
                     'name': '完整分析模式（从剪贴板读取）',
-                    'base_args': ['--sample-count', '3', '--no-skip-special', '--clipboard'],
+                    'base_args': ['--sample-count', '3', '--no-skip-special', '--clipboard', '--rename'],
                     'default_params': {}
                 },
                 '4': {
                     'name': '完整分析模式（手动输入路径）',
-                    'base_args': ['--sample-count', '3', '--no-skip-special'],
+                    'base_args': ['--sample-count', '3', '--no-skip-special', '--rename'],
                     'default_params': {}
                 }
             },
@@ -665,6 +665,7 @@ def main():
         
         try:
             choice = input("\n请选择运行模式 (1-3): ").strip()
+            choice = "2"
             if choice == "1":
                 mode_manager.run_tui()
             elif choice == "2":
