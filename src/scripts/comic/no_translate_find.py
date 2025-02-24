@@ -32,6 +32,7 @@ from nodes.pics.calculate_hash_custom import ImageClarityEvaluator
 from nodes.tui.textual_logger import TextualLoggerManager
 from nodes.utils.number_shortener import shorten_number_cn
 from nodes.tui.mode_manager import create_mode_manager
+from nodes.pics.multi_analyzer import MultiAnalyzer  # 新增导入
 import json
 
 config = {
@@ -617,43 +618,18 @@ def process_file_with_count(file_path: str) -> Tuple[str, str, int, float]:
     name = re.sub(r'\{\d+w\}', '', name)
     name = re.sub(r'\{\d+de\}', '', name)
     
-    # 计算元数据
-    image_count = get_image_count(full_path)
-    width = calculate_representative_width(full_path)
+    # 使用MultiAnalyzer进行分析
+    analyzer = MultiAnalyzer()
+    analysis_result = analyzer.analyze_archive(full_path)
     
-    # 计算清晰度评分（新增）
-    clarity_score = 0.0
-    try:
-        with zipfile.ZipFile(full_path, 'r') as zf:
-            image_files = [f for f in zf.namelist() if os.path.splitext(f.lower())[1] in IMAGE_EXTENSIONS]
-            if image_files:
-                sample_files = random.sample(image_files, min(5, len(image_files)))
-                scores = []
-                for sample in sample_files:
-                    with zf.open(sample) as f:
-                        img_data = f.read()
-                        scores.append(ImageClarityEvaluator.calculate_definition(img_data))
-                clarity_score = sum(scores) / len(scores) if scores else 0.0
-                
-    except Exception as e:
-        logger.error("[#error_log] 清晰度计算失败 %s: %s", file_path, str(e))
-    
-    # 修改后的标记生成部分
-    if image_count > 0:
-        count_str = shorten_number_cn(image_count, use_w=True)  # 使用k单位
-        name = f"{name}{{{count_str}@PX}}"
-    if width > 0:
-        width_str = shorten_number_cn(width, use_w=True)  # 使用k单位
-        name = f"{name}{{{width_str}@WD}}"
-    if clarity_score > 0:
-        # 清晰度使用整数百分比格式
-        clarity_score=int(clarity_score)
-        clarity_score = shorten_number_cn(clarity_score, use_w=True)
-        name = f"{name}{{{clarity_score}@DE}}"
+    # 生成新的文件名
+    formatted_result = analyzer.format_analysis_result(analysis_result)
+    if formatted_result:
+        name = f"{name}{formatted_result}"
     
     new_name = f"{name}{ext}"
     new_path = os.path.join(dir_name, new_name) if dir_name else new_name
-    return file_path, new_path, width, clarity_score
+    return file_path, new_path, analysis_result['width'], analysis_result['clarity_score']
 
 def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, report_generator: ReportGenerator, create_shortcuts: bool = False, enable_multi_main: bool = False) -> None:
     """处理一组相似文件"""
