@@ -299,8 +299,14 @@ class MultiAnalyzer:
         
         return full_path, new_path, result
 
-    def process_directory_with_rename(self, input_path: str, do_rename: bool = False) -> List[Dict[str, Union[str, Dict[str, Union[int, float]]]]]:
-        """处理目录下的所有文件，可选择是否重命名"""
+    def process_directory_with_rename(self, input_path: str, do_rename: bool = False, skip_special_dirs: bool = True) -> List[Dict[str, Union[str, Dict[str, Union[int, float]]]]]:
+        """处理目录下的所有文件，可选择是否重命名
+        
+        Args:
+            input_path: 输入路径
+            do_rename: 是否执行重命名操作
+            skip_special_dirs: 是否跳过trash和multi目录
+        """
         results = []
         pending_renames = []  # 存储待重命名的文件信息
         group_analyzer = GroupAnalyzer()  # 创建组分析器实例
@@ -322,7 +328,8 @@ class MultiAnalyzer:
                 
         elif os.path.isdir(input_path):
             for root, _, files in os.walk(input_path):
-                if 'trash' in root or 'multi' in root:
+                if skip_special_dirs and ('trash' in root or 'multi' in root):
+                    logger.info(f"⏭️ 跳过目录: {root}")
                     continue
                 for file in files:
                     if file.lower().endswith(('.zip', '.cbz')):
@@ -513,6 +520,9 @@ def main():
             # 是否执行重命名
             do_rename = input("是否重命名文件？(y/N) ").strip().lower() == 'y'
             
+            # 是否跳过特殊目录
+            skip_special = input("是否跳过trash和multi目录？(Y/n) ").strip().lower() != 'n'
+            
             # 是否保存到文件
             save_to_file = input("是否保存结果到文件？(y/N) ").strip().lower() == 'y'
             output_file = None
@@ -524,7 +534,7 @@ def main():
             # 执行分析
             print("\n开始分析...")
             analyzer = MultiAnalyzer(sample_count=sample_count)
-            results = analyzer.process_directory_with_rename(input_path, do_rename)
+            results = analyzer.process_directory_with_rename(input_path, do_rename, skip_special_dirs=skip_special)
             
             # 输出结果
             if output_file:
