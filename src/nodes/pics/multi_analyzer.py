@@ -15,6 +15,7 @@ from io import BytesIO
 import random
 from concurrent.futures import ThreadPoolExecutor
 from .calculate_hash_custom import ImageClarityEvaluator
+from nodes.utils.number_shortener import shorten_number_cn
 
 logger = logging.getLogger(__name__)
 
@@ -198,10 +199,14 @@ class MultiAnalyzer:
         
         parts = []
         if width > 0:
-            parts.append(f"{width}@WD")
+            width_str = shorten_number_cn(width, use_w=True)
+            parts.append(f"{width_str}@WD")
         if count > 0:
-            parts.append(f"{count}@PX")
+            count_str = shorten_number_cn(count, use_w=True)
+            parts.append(f"{count_str}@PX")
         if clarity > 0:
-            parts.append(f"{int(clarity)}@DE")
+            clarity_int = int(clarity)
+            clarity_str = shorten_number_cn(clarity_int, use_w=True)
+            parts.append(f"{clarity_str}@DE")
             
         return "{" + ",".join(parts) + "}" if parts else "" 
