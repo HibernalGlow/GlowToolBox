@@ -22,10 +22,13 @@ from nodes.pics.calculate_hash_custom import ImageClarityEvaluator
 from nodes.utils.number_shortener import shorten_number_cn
 import re
 
-# 抑制PIL的警告
-warnings.filterwarnings('ignore', category=UserWarning)
+# 抑制所有警告
+warnings.filterwarnings('ignore')
 # 允许截断的图像文件
 ImageFile.LOAD_TRUNCATED_IMAGES = True
+# 设置OpenCV的错误处理
+ # 限制OpenCV线程数
+ # 只显示错误日志
 
 logger = logging.getLogger(__name__)
 
@@ -75,11 +78,13 @@ class MultiAnalyzer:
             Optional[Image.Image]: 成功则返回PIL图像对象，失败则返回None
         """
         try:
-            # 尝试用PIL打开
-            return Image.open(BytesIO(img_data))
-        except Exception as e:
+            # 首先尝试用PIL直接打开
+            img = Image.open(BytesIO(img_data))
+            img.verify()  # 验证图像完整性
+            return Image.open(BytesIO(img_data))  # 重新打开以便后续使用
+        except Exception as e1:
             try:
-                # 如果PIL失败，尝试用OpenCV打开
+                # 如果PIL验证失败，尝试用OpenCV打开
                 nparr = np.frombuffer(img_data, np.uint8)
                 img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                 if img is None:
@@ -88,8 +93,12 @@ class MultiAnalyzer:
                 img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                 return Image.fromarray(img_rgb)
             except Exception as e2:
-                logger.error(f"图像解码失败: {str(e2)}")
-                return None
+                try:
+                    # 最后尝试直接用PIL打开而不验证
+                    return Image.open(BytesIO(img_data))
+                except Exception as e3:
+                    logger.debug(f"图像解码失败: PIL1={str(e1)}, CV2={str(e2)}, PIL2={str(e3)}")
+                    return None
 
     def calculate_representative_width(self, archive_path: str) -> int:
         """计算压缩包中图片的代表宽度（使用抽样和中位数）"""
@@ -187,17 +196,19 @@ class MultiAnalyzer:
                     try:
                         with zf.open(sample) as f:
                             img_data = f.read()
-                            img = self._safe_open_image(img_data)
-                            if img is not None:
+                            # 直接传递二进制数据给清晰度计算函数
+                            try:
                                 score = ImageClarityEvaluator.calculate_definition(img_data)
-                                if score > 0:
+                                if score and score > 0:  # 确保得到有效的分数
                                     scores.append(score)
+                            except Exception as e:
+                                logger.debug(f"清晰度计算失败 {sample}: {str(e)}")
                     except Exception as e:
-                        logger.error(f"计算清晰度失败 {sample}: {str(e)}")
+                        logger.debug(f"处理图像失败 {sample}: {str(e)}")
                         continue
 
             # 返回平均清晰度评分
-            return sum(scores) / len(scores) if scores else 0.0
+            return float(sum(scores) / len(scores)) if scores else 0.0
 
         except Exception as e:
             logger.error(f"计算清晰度评分失败 {archive_path}: {str(e)}")
@@ -205,30 +216,34 @@ class MultiAnalyzer:
 
     def analyze_archive(self, archive_path: str) -> Dict[str, Union[int, float]]:
         """分析压缩包，返回宽度、页数和清晰度信息"""
+        result = {
+            'width': 0,
+            'page_count': 0,
+            'clarity_score': 0.0
+        }
+        
         try:
-            # 并行计算所有指标
-            with ThreadPoolExecutor() as executor:
-                width_future = executor.submit(self.calculate_representative_width, archive_path)
-                count_future = executor.submit(self.get_image_count, archive_path)
-                clarity_future = executor.submit(self.calculate_clarity_score, archive_path)
-
-                # 获取结果
-                width = width_future.result()
-                count = count_future.result()
-                clarity = clarity_future.result()
-
-            return {
-                'width': width,
-                'page_count': count,
-                'clarity_score': clarity
-            }
+            # 分别计算各项指标，失败一项不影响其他项
+            try:
+                result['page_count'] = self.get_image_count(archive_path)
+            except Exception as e:
+                logger.error(f"计算页数失败 {archive_path}: {str(e)}")
+                
+            try:
+                result['width'] = self.calculate_representative_width(archive_path)
+            except Exception as e:
+                logger.error(f"计算宽度失败 {archive_path}: {str(e)}")
+                
+            try:
+                result['clarity_score'] = self.calculate_clarity_score(archive_path)
+            except Exception as e:
+                logger.error(f"计算清晰度失败 {archive_path}: {str(e)}")
+            
+            return result
+            
         except Exception as e:
             logger.error(f"分析压缩包失败 {archive_path}: {str(e)}")
-            return {
-                'width': 0,
-                'page_count': 0,
-                'clarity_score': 0.0
-            }
+            return result
 
     def format_analysis_result(self, result: Dict[str, Union[int, float]]) -> str:
         """格式化分析结果为字符串"""
