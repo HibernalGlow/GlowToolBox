@@ -1089,10 +1089,11 @@ class ArchiveHandler:
                 if fs.exists(str(safe_backup)):
                     fs.move(str(safe_backup), str(safe_file))
                     # 只有在启用了rename_cbr选项时才重命名为CBR
+                    new_name = safe_file.with_suffix('.cbr')
+                    # 记录重命名操作
+                    self._log_rename(str(safe_file), str(new_name))
+
                     if hasattr(self, 'rename_cbr') and self.rename_cbr:
-                        new_name = safe_file.with_suffix('.cbr')
-                        # 记录重命名操作
-                        self._log_rename(str(safe_file), str(new_name))
                         fs.move(str(safe_file), str(new_name))
                         logger.info(f"[#file]已将文件改为CBR: {new_name}")
                 return (False, 0)
