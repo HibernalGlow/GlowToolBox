@@ -37,7 +37,8 @@
       "--sample-count",
       "3",
       "--no-skip-special",
-      "--clipboard"
+      "--clipboard",
+      "--rename"
     ]
   }
 }

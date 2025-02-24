@@ -532,13 +532,16 @@ def run_application(args):
     
     # 从剪贴板读取
     if args.clipboard:
-        input_paths.extend(get_paths_from_clipboard())
+        clipboard_paths = get_paths_from_clipboard()
+        if not clipboard_paths:
+            print("错误：剪贴板中没有有效路径")
+            return False
+        input_paths.extend(clipboard_paths)
     # 从命令行参数读取
     elif args.input_path:
         input_paths.append(args.input_path)
-    
-    if not input_paths:
-        print("错误：未提供输入路径")
+    else:
+        print("错误：未提供输入路径，且未启用剪贴板读取")
         return False
 
     # 执行分析
@@ -664,7 +667,7 @@ def main():
         print("3. 命令行模式")
         
         try:
-            choice = input("\n请选择运行模式 (1-3): ").strip()
+            # choice = input("\n请选择运行模式 (1-3): ").strip()
             choice = "2"
             if choice == "1":
                 mode_manager.run_tui()
