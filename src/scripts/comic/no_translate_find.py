@@ -614,9 +614,7 @@ def process_file_with_count(file_path: str) -> Tuple[str, str, int, float]:
     name, ext = os.path.splitext(file_name)
     
     # 移除已有的标记
-    name = re.sub(r'\{\d+p\}', '', name)
-    name = re.sub(r'\{\d+w\}', '', name)
-    name = re.sub(r'\{\d+de\}', '', name)
+    name = re.sub(r'\{[^}]*@(?:PX|WD|DE)[^}]*\}', '', name)
     
     # 使用MultiAnalyzer进行分析
     analyzer = MultiAnalyzer()
