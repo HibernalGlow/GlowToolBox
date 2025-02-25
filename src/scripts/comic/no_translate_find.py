@@ -24,7 +24,7 @@ import pillow_avif
 import pillow_jxl
 from pathlib import Path
 from colorama import init, Fore, Style
-from typing import List, Dict, Set, Tuple, Optional
+from typing import List, Dict, Set, Tuple, Optional, Union
 from opencc import OpenCC  # 用于繁简转换
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from nodes.record.logger_config import setup_logger
@@ -33,6 +33,7 @@ from nodes.tui.textual_logger import TextualLoggerManager
 from nodes.utils.number_shortener import shorten_number_cn
 from nodes.tui.mode_manager import create_mode_manager
 import json
+from nodes.pics.group_analyzer import GroupAnalyzer
 
 config = {
     'script_name': 'no_translate_find',
@@ -341,7 +342,7 @@ def get_7zip_path() -> str:
     
     for path in possible_paths:
         if os.path.exists(path):
-            return path
+            return f'"{path}"'  # 用引号包裹路径
             
     # 如果找不到7zip，尝试使用命令行的7z
     try:
@@ -605,25 +606,30 @@ def safe_move_file(src_path: str, dst_path: str, max_retries: int = 3, delay: fl
                 
     return False
 
-def process_file_with_count(file_path: str) -> Tuple[str, str, int, float]:
-    """处理单个文件，返回原始路径、新路径、宽度和清晰度"""
+def process_file_with_count(file_path: str) -> Tuple[str, str, Dict[str, Union[int, float]]]:
+    """处理单个文件，返回原始路径、新路径和所有指标"""
     full_path = file_path
     dir_name = os.path.dirname(file_path)
     file_name = os.path.basename(file_path)
     name, ext = os.path.splitext(file_name)
     
     # 移除已有的标记
-    name = re.sub(r'\{\d+p\}', '', name)
-    name = re.sub(r'\{\d+w\}', '', name)
-    name = re.sub(r'\{\d+de\}', '', name)
     name = re.sub(r'\{[^}]*\}', '', name)  # 移除所有花括号内容
     
-    # 计算元数据
-    image_count = get_image_count(full_path)
-    width = calculate_representative_width(full_path)
+    # 计算所有指标
+    metrics = {
+        'width': 0,
+        'page_count': 0,
+        'clarity_score': 0.0
+    }
+    
+    # 计算页数
+    metrics['page_count'] = get_image_count(full_path)
+    
+    # 计算宽度
+    metrics['width'] = calculate_representative_width(full_path)
     
     # 计算清晰度评分
-    clarity_score = 0.0
     try:
         with zipfile.ZipFile(full_path, 'r') as zf:
             image_files = [f for f in zf.namelist() if os.path.splitext(f.lower())[1] in IMAGE_EXTENSIONS]
@@ -634,81 +640,132 @@ def process_file_with_count(file_path: str) -> Tuple[str, str, int, float]:
                     with zf.open(sample) as f:
                         img_data = f.read()
                         scores.append(ImageClarityEvaluator.calculate_definition(img_data))
-                clarity_score = sum(scores) / len(scores) if scores else 0.0
+                metrics['clarity_score'] = sum(scores) / len(scores) if scores else 0.0
                 
     except Exception as e:
         logger.error("[#error_log] 清晰度计算失败 %s: %s", file_path, str(e))
     
     # 生成属性字符串，所有属性放在一个大括号内
-    metrics = []
-    if image_count > 0:
-        metrics.append(f"{shorten_number_cn(image_count, use_w=True)}@PX")
-    if width > 0:
-        metrics.append(f"{shorten_number_cn(width, use_w=True)}@WD")
-    if clarity_score > 0:
-        metrics.append(f"{int(clarity_score)}@DE")
+    parts = []
+    if metrics['width'] > 0:
+        parts.append(f"{shorten_number_cn(metrics['width'], use_w=True)}@WD")
+    if metrics['page_count'] > 0:
+        parts.append(f"{shorten_number_cn(metrics['page_count'], use_w=True)}@PX")
+    if metrics['clarity_score'] > 0:
+        parts.append(f"{shorten_number_cn(int(metrics['clarity_score']), use_w=True)}@DE")
     
-    metrics_str = "{" + ",".join(metrics) + "}" if metrics else ""
+    metrics_str = "{" + ",".join(parts) + "}" if parts else ""
     new_name = f"{name}{metrics_str}{ext}"
     new_path = os.path.join(dir_name, new_name) if dir_name else new_name
     
-    return file_path, new_path, width, clarity_score
+    return file_path, new_path, metrics
 
 def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, report_generator: ReportGenerator, create_shortcuts: bool = False, enable_multi_main: bool = False) -> None:
     """处理一组相似文件"""
     # 获取组的基础名称
     group_base_name, _ = clean_filename(group_files[0])
-    logger.info("[#group_info] 🔍 开始处理组: %s", group_base_name)
     
-    # 过滤黑名单文件
-    filtered_files = []
-    for file in group_files:
-        if is_in_blacklist(file):
-            logger.info("[#file_ops] ⏭️ 跳过黑名单文件: %s", file)
-            report_generator.update_stats('skipped_files')
-            continue
-        filtered_files.append(file)
-    
+    # 过滤掉黑名单文件
+    filtered_files = [f for f in group_files if not is_in_blacklist(f)]
     if not filtered_files:
-        logger.info("[#file_ops] 🚫 所有文件都在黑名单中，跳过处理")
+        logger.info("[#group_info] ⏭️ 组[%s]跳过: 所有文件都在黑名单中", group_base_name)
         return
         
-    # 分类文件
-    chinese_versions = [f for f in filtered_files if is_chinese_version(f)]
-    other_versions = [f for f in filtered_files if not is_chinese_version(f)]
+    # 分离汉化版本和其他版本，并使用完整路径
+    chinese_versions = []
+    other_versions = []
+    for f in filtered_files:
+        full_path = os.path.join(base_dir, f)
+        if is_chinese_version(f):
+            chinese_versions.append(full_path)
+        else:
+            other_versions.append(full_path)
     
     # 检查汉化版本中是否有包含原版关键词的
     chinese_has_original = any(has_original_keywords(f) for f in chinese_versions)
     
     # 如果汉化版本中没有原版关键词，则将其他版本中包含原版关键词的也归为需要保留的版本
-    original_keyword_versions = []
     if not chinese_has_original:
-        original_keyword_versions = [f for f in other_versions if has_original_keywords(f)]
+        original_keyword_versions = [f for f in other_versions if has_original_keywords(os.path.basename(f))]
         if original_keyword_versions:
             chinese_versions.extend(original_keyword_versions)
-            other_versions = [f for f in other_versions if not has_original_keywords(f)]
+            other_versions = [f for f in other_versions if not has_original_keywords(os.path.basename(f))]
             logger.info("[#file_ops] 📝 将%d个包含原版关键词的文件归入保留列表", len(original_keyword_versions))
     
     # 为每个文件添加图片数量标记和计算宽度
     processed_files = []
+    file_metrics = {}  # 存储每个文件的指标
+    
+    # 第一轮：计算所有文件的指标，直接使用完整路径
     for file in chinese_versions + other_versions:
-        old_path, new_path, width, clarity = process_file_with_count(file)
-        if old_path != new_path:
-            old_full_path = os.path.join(base_dir, old_path)
-            new_full_path = os.path.join(base_dir, new_path)
-            try:
-                os.rename(old_full_path, new_full_path)
-                processed_files.append((old_path, new_path))
-                logger.info("[#file_ops] ✅ 已重命名: %s -> %s", old_path, new_path)
-            except Exception as e:
-                logger.error("[#error_log] ❌ 重命名失败 %s: %s", old_path, str(e))
-                processed_files.append((old_path, old_path))
-        else:
-            processed_files.append((old_path, old_path))
+        old_path, new_path, metrics = process_file_with_count(file)  # 现在传入的是完整路径
+        processed_files.append((old_path, new_path))
+        file_metrics[old_path] = metrics
+    
+    # 找出最优指标
+    best_metrics = {
+        'width': max((m['width'] for m in file_metrics.values()), default=0),
+        'page_count': min((m['page_count'] for m in file_metrics.values() if m['page_count'] > 0), default=0),
+        'clarity_score': max((m['clarity_score'] for m in file_metrics.values()), default=0)
+    }
+    
+    # 检查指标是否统一
+    metrics_same = {
+        'width': len(set(m['width'] for m in file_metrics.values() if m['width'] > 0)) <= 1,
+        'page_count': len(set(m['page_count'] for m in file_metrics.values() if m['page_count'] > 0)) <= 1,
+        'clarity_score': len(set(m['clarity_score'] for m in file_metrics.values() if m['clarity_score'] > 0)) <= 1
+    }
+    
+    # 第二轮：重命名文件，添加带emoji的指标
+    updated_files = []
+    for old_path, _ in processed_files:
+        metrics = file_metrics[old_path]
+        parts = []
+        
+        # 添加宽度（如果不是统一值且是最优值则添加表情）
+        if metrics['width'] > 0:
+            width_str = f"{shorten_number_cn(metrics['width'], use_w=True)}@WD"
+            if not metrics_same['width'] and metrics['width'] == best_metrics['width']:
+                width_str = f"📏{width_str}"
+            parts.append(width_str)
+        
+        # 添加页数（如果不是统一值且是最优值则添加表情）
+        if metrics['page_count'] > 0:
+            page_str = f"{shorten_number_cn(metrics['page_count'], use_w=True)}@PX"
+            if not metrics_same['page_count'] and metrics['page_count'] == best_metrics['page_count']:
+                page_str = f"📄{page_str}"
+            parts.append(page_str)
+        
+        # 添加清晰度（如果不是统一值且是最优值则添加表情）
+        if metrics['clarity_score'] > 0:
+            clarity_str = f"{shorten_number_cn(int(metrics['clarity_score']), use_w=True)}@DE"
+            if not metrics_same['clarity_score'] and metrics['clarity_score'] == best_metrics['clarity_score']:
+                clarity_str = f"🔍{clarity_str}"
+            parts.append(clarity_str)
+        
+        # 构建新文件名
+        dir_name = os.path.dirname(old_path)
+        file_name = os.path.basename(old_path)
+        name, ext = os.path.splitext(file_name)
+        name = re.sub(r'\{[^}]*\}', '', name)  # 移除已有的指标
+        metrics_str = "{" + ",".join(parts) + "}" if parts else ""
+        new_name = f"{name}{metrics_str}{ext}"
+        new_path = os.path.join(dir_name, new_name)
+        
+        # 重命名文件
+        old_full_path = os.path.join(base_dir, old_path)
+        new_full_path = os.path.join(base_dir, new_path)
+        try:
+            os.rename(old_full_path, new_full_path)
+            updated_files.append((old_path, new_path))
+            logger.info("[#file_ops] ✅ 已重命名: %s -> %s", old_path, new_path)
+        except Exception as e:
+            logger.error("[#error_log] ❌ 重命名失败 %s: %s", old_path, str(e))
+            updated_files.append((old_path, old_path))
     
     # 更新文件路径
-    chinese_versions = [new_path for old_path, new_path in processed_files if old_path in chinese_versions]
-    other_versions = [new_path for old_path, new_path in processed_files if old_path in other_versions]
+    chinese_versions = [new_path for old_path, new_path in updated_files if old_path in chinese_versions]
+    other_versions = [new_path for old_path, new_path in updated_files if old_path in other_versions]
     
     # 处理文件移动逻辑
     if chinese_versions:
@@ -1083,7 +1140,7 @@ def main():
         print("3. 命令行模式")
         
         try:
-            choice = input("\n请选择运行模式 (1-3): ").strip()
+            choice = "2"
             if choice == "1":
                 mode_manager.run_tui()
             elif choice == "2":

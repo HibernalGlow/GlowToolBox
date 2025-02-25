@@ -109,6 +109,14 @@ class MultiAnalyzer:
     def calculate_representative_width(self, archive_path: str) -> int:
         """计算压缩包中图片的代表宽度（使用抽样和中位数）"""
         try:
+            # 确保使用绝对路径
+            archive_path = os.path.abspath(archive_path)
+            
+            # 检查文件是否存在
+            if not os.path.exists(archive_path):
+                logger.error(f"文件不存在: {archive_path}")
+                return 0
+                
             # 检查文件扩展名
             ext = os.path.splitext(archive_path)[1].lower()
             if ext not in {'.zip', '.cbz'}:  # 只处理zip格式
@@ -175,6 +183,14 @@ class MultiAnalyzer:
     def calculate_clarity_score(self, archive_path: str) -> float:
         """计算压缩包中图片的清晰度评分"""
         try:
+            # 确保使用绝对路径
+            archive_path = os.path.abspath(archive_path)
+            
+            # 检查文件是否存在
+            if not os.path.exists(archive_path):
+                logger.error(f"文件不存在: {archive_path}")
+                return 0.0
+
             # 获取压缩包中的文件信息
             image_files = self.get_archive_info(archive_path)
             if not image_files:
@@ -328,13 +344,17 @@ class MultiAnalyzer:
         pending_renames = []  # 存储待重命名的文件信息
         group_analyzer = GroupAnalyzer()  # 创建组分析器实例
         
+        # 确保使用绝对路径
+        input_path = os.path.abspath(input_path)
+        
         # 用于存储文件组
         file_groups = {}
         
         # 第一步：收集所有文件并进行初始分析
         if os.path.isfile(input_path):
             if input_path.lower().endswith(('.zip', '.cbz')):
-                orig_path, new_path, analysis = self.process_file_with_count(input_path)
+                orig_path = input_path  # 使用绝对路径
+                new_path, analysis = self.process_file_with_count(orig_path)
                 result = {
                     'file': os.path.basename(input_path),
                     'orig_path': orig_path,
