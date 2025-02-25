@@ -218,10 +218,12 @@ def get_unique_filename(directory, filename, artist_name, is_excluded=False):
         (r'\{\d+de\}', r''),
         (r'\{\d+\.?\d*[kKwW]?@PX\}', r''),  # 匹配如 {1.8k@PX}、{215@PX}
         (r'\{\d+\.?\d*[kKwW]?@WD\}', r''),  # 匹配如 {1800w@WD}、{1.8k@WD}
-        (r'\{\d+%?@DE\}', r''),            # 匹配如 {85%@DE}
+        (r'\{\d+%?@DE\}', r''),  
+        # 匹配如 {85%@DE}
         (r'\[multi\]', r''),
         (r'\[trash\]', r''),
         # 清理samename标记，以便重新添加
+        (r'\[multi\-main\]', r''),
         (r'\[samename_\d+\]', r''),
     ]
     
