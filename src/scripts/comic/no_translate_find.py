@@ -351,82 +351,61 @@ def get_7zip_path() -> str:
     except:
         return None
 
-def get_archive_info(archive_path: str) -> List[Tuple[str, int]]:
-    """使用7zip获取压缩包中的文件信息"""
-    try:
-        seven_zip = get_7zip_path()
-        if not seven_zip:
-            logger.info("[#error_log] ❌ 未找到7-Zip")
-            return []
-            
-        # 列出压缩包内容
-        cmd = [seven_zip, 'l', archive_path]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        
-        if result.returncode != 0:
-            logger.info("[#error_log] ❌ 7-Zip命令执行失败: %s", result.stderr)
-            return []
-            
-        # 收集所有图片文件信息
-        image_files = []
-        for line in result.stdout.splitlines():
-            for ext in IMAGE_EXTENSIONS:
-                if line.lower().endswith(ext):
-                    # 解析文件大小（根据7z输出格式调整）
-                    parts = line.split()
-                    if len(parts) >= 4:
-                        try:
-                            size = int(parts[3])
-                            name = parts[-1]
-                            image_files.append((name, size))
-                        except:
-                            continue
-                    break
-        return image_files
-        
-    except Exception as e:
-        logger.info("[#error_log] ❌ 获取压缩包信息失败 %s: %s", archive_path, str(e))
-        return []
-
 def get_image_count(archive_path: str) -> int:
     """计算压缩包中的图片总数"""
-    image_files = get_archive_info(archive_path)
-    return len(image_files)
+    try:
+        with zipfile.ZipFile(archive_path, 'r') as zf:
+            # 统计支持的图片格式文件数量
+            count = sum(1 for f in zf.namelist() 
+                       if os.path.splitext(f.lower())[1] in IMAGE_EXTENSIONS)
+            return count
+    except Exception as e:
+        logger.error("[#error_log] ❌ 统计图片数量失败 %s: %s", archive_path, str(e))
+        return 0
 
 def get_sample_images(archive_path: str, temp_dir: str, sample_count: int = 3) -> List[str]:
     """从压缩包中提取样本图片到临时目录"""
-    image_files = get_archive_info(archive_path)
-    if not image_files:
-        return []
-        
-    # 按文件大小排序
-    image_files.sort(key=lambda x: x[1], reverse=True)
-    
-    # 选择样本
-    samples = []
-    if image_files:
-        samples.append(image_files[0][0])  # 最大的文件
-        if len(image_files) > 2:
-            samples.append(image_files[len(image_files)//2][0])  # 中间的文件
-        
-        # 从前30%选择剩余样本
-        top_30_percent = image_files[:max(3, len(image_files) // 3)]
-        while len(samples) < sample_count and top_30_percent:
-            sample = random.choice(top_30_percent)[0]
-            if sample not in samples:
-                samples.append(sample)
-    
-    # 提取选中的样本到临时目录
-    seven_zip = get_7zip_path()
-    extracted_files = []
-    for sample in samples:
-        temp_file = os.path.join(temp_dir, os.path.basename(sample))
-        cmd = [seven_zip, 'e', archive_path, sample, f'-o{temp_dir}', '-y']
-        result = subprocess.run(cmd, capture_output=True)
-        if result.returncode == 0 and os.path.exists(temp_file):
-            extracted_files.append(temp_file)
+    try:
+        with zipfile.ZipFile(archive_path, 'r') as zf:
+            # 获取所有图片文件
+            image_files = [(f, info.file_size) for f, info in 
+                         ((f, zf.getinfo(f)) for f in zf.namelist())
+                         if os.path.splitext(f.lower())[1] in IMAGE_EXTENSIONS]
             
-    return extracted_files
+            if not image_files:
+                return []
+            
+            # 按文件大小排序
+            image_files.sort(key=lambda x: x[1], reverse=True)
+            
+            # 选择样本
+            samples = []
+            if image_files:
+                samples.append(image_files[0][0])  # 最大的文件
+                if len(image_files) > 2:
+                    samples.append(image_files[len(image_files)//2][0])  # 中间的文件
+                
+                # 从前30%选择剩余样本
+                top_30_percent = image_files[:max(3, len(image_files) // 3)]
+                while len(samples) < sample_count and top_30_percent:
+                    sample = random.choice(top_30_percent)[0]
+                    if sample not in samples:
+                        samples.append(sample)
+            
+            # 提取选中的样本到临时目录
+            extracted_files = []
+            for sample in samples:
+                temp_file = os.path.join(temp_dir, os.path.basename(sample))
+                with zf.open(sample) as source, open(temp_file, 'wb') as target:
+                    shutil.copyfileobj(source, target)
+                if os.path.exists(temp_file):
+                    extracted_files.append(temp_file)
+                    
+            return extracted_files
+            
+    except Exception as e:
+        logger.error("[#error_log] ❌ 提取样本图片失败 %s: %s", archive_path, str(e))
+        return []
 
 def calculate_representative_width(archive_path: str, sample_count: int = 3) -> int:
     """计算压缩包中图片的代表宽度（使用抽样和中位数）"""
@@ -623,8 +602,13 @@ def process_file_with_count(file_path: str) -> Tuple[str, str, Dict[str, Union[i
         'clarity_score': 0.0
     }
     
-    # 计算页数
-    metrics['page_count'] = get_image_count(full_path)
+    # 首先尝试从原文件名提取页数信息
+    page_match = re.search(r'\{(\d+)@PX\}', file_name)
+    if page_match:
+        metrics['page_count'] = int(page_match.group(1))
+    else:
+        # 如果文件名中没有页数信息，才计算页数
+        metrics['page_count'] = get_image_count(full_path)
     
     # 计算宽度
     metrics['width'] = calculate_representative_width(full_path)
