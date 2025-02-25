@@ -649,6 +649,9 @@ def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, re
     # 获取组的基础名称
     group_base_name, _ = clean_filename(group_files[0])
     
+    # 生成组ID（使用组名的哈希值后4位作为组ID）
+    group_id = abs(hash(group_base_name)) % 10000
+    
     # 过滤掉黑名单文件
     filtered_files = [f for f in group_files if not is_in_blacklist(f)]
     if not filtered_files:
@@ -705,6 +708,9 @@ def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, re
     for old_path, _ in processed_files:
         metrics = file_metrics[old_path]
         parts = []
+        
+        # 添加组ID
+        parts.append(f"🪆G{group_id:04d}")
         
         # 添加宽度（如果不是统一值且是最优值则添加表情）
         if metrics['width'] > 0:

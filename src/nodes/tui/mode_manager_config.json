@@ -26,10 +26,8 @@
     ]
   },
   "d:\\1VSCODE\\GlowToolBox\\src\\scripts\\comic\\no_translate_find.py": {
-    "mode": "3",
-    "args": [
-      "--enable-multi-main"
-    ]
+    "mode": "1",
+    "args": []
   },
   "d:\\1VSCODE\\GlowToolBox\\src\\nodes\\pics\\multi_analyzer.py": {
     "mode": "3",
