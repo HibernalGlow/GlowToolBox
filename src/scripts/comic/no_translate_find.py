@@ -32,7 +32,6 @@ from nodes.pics.calculate_hash_custom import ImageClarityEvaluator
 from nodes.tui.textual_logger import TextualLoggerManager
 from nodes.utils.number_shortener import shorten_number_cn
 from nodes.tui.mode_manager import create_mode_manager
-from nodes.pics.multi_analyzer import MultiAnalyzer  # 新增导入
 import json
 
 config = {
@@ -614,31 +613,46 @@ def process_file_with_count(file_path: str) -> Tuple[str, str, int, float]:
     name, ext = os.path.splitext(file_name)
     
     # 移除已有的标记
-    # name = re.sub(r'\{[^}]*@(?:PX|WD|DE)[^}]*\}', '', name)
+    name = re.sub(r'\{\d+p\}', '', name)
+    name = re.sub(r'\{\d+w\}', '', name)
+    name = re.sub(r'\{\d+de\}', '', name)
+    name = re.sub(r'\{[^}]*\}', '', name)  # 移除所有花括号内容
     
-    # 使用MultiAnalyzer进行分析
-    analyzer = MultiAnalyzer()
-    analysis_result = analyzer.analyze_archive(full_path)
+    # 计算元数据
+    image_count = get_image_count(full_path)
+    width = calculate_representative_width(full_path)
     
-    # 如果文件名中已有标记，先提取出来
-    existing_marks = re.findall(r'\{[^}]*@(?:PX|WD|DE)[^}]*\}', name)
+    # 计算清晰度评分
+    clarity_score = 0.0
+    try:
+        with zipfile.ZipFile(full_path, 'r') as zf:
+            image_files = [f for f in zf.namelist() if os.path.splitext(f.lower())[1] in IMAGE_EXTENSIONS]
+            if image_files:
+                sample_files = random.sample(image_files, min(5, len(image_files)))
+                scores = []
+                for sample in sample_files:
+                    with zf.open(sample) as f:
+                        img_data = f.read()
+                        scores.append(ImageClarityEvaluator.calculate_definition(img_data))
+                clarity_score = sum(scores) / len(scores) if scores else 0.0
+                
+    except Exception as e:
+        logger.error("[#error_log] 清晰度计算失败 %s: %s", file_path, str(e))
     
-    # 移除已有的标记以准备添加新标记
-    name = re.sub(r'\{[^}]*@(?:PX|WD|DE)[^}]*\}', '', name)
+    # 生成属性字符串，所有属性放在一个大括号内
+    metrics = []
+    if image_count > 0:
+        metrics.append(f"{shorten_number_cn(image_count, use_w=True)}@PX")
+    if width > 0:
+        metrics.append(f"{shorten_number_cn(width, use_w=True)}@WD")
+    if clarity_score > 0:
+        metrics.append(f"{int(clarity_score)}@DE")
     
-    # 生成新的格式化结果
-    formatted_result = analyzer.format_analysis_result(analysis_result)
-    
-    # 如果有新的分析结果，添加到文件名中
-    if formatted_result:
-        name = f"{name}{formatted_result}"
-    # 如果没有新的分析结果但有原有标记，保留原有标记
-    elif existing_marks:
-        name = f"{name}{''.join(existing_marks)}"
-    
-    new_name = f"{name}{ext}"
+    metrics_str = "{" + ",".join(metrics) + "}" if metrics else ""
+    new_name = f"{name}{metrics_str}{ext}"
     new_path = os.path.join(dir_name, new_name) if dir_name else new_name
-    return file_path, new_path, analysis_result['width'], analysis_result['clarity_score']
+    
+    return file_path, new_path, width, clarity_score
 
 def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, report_generator: ReportGenerator, create_shortcuts: bool = False, enable_multi_main: bool = False) -> None:
     """处理一组相似文件"""
@@ -672,7 +686,6 @@ def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, re
         original_keyword_versions = [f for f in other_versions if has_original_keywords(f)]
         if original_keyword_versions:
             chinese_versions.extend(original_keyword_versions)
-            # 从other_versions中移除这些文件
             other_versions = [f for f in other_versions if not has_original_keywords(f)]
             logger.info("[#file_ops] 📝 将%d个包含原版关键词的文件归入保留列表", len(original_keyword_versions))
     
@@ -708,7 +721,6 @@ def process_file_group(group_files: List[str], base_dir: str, trash_dir: str, re
             # 如果启用了multi-main功能，找到最大的文件作为主文件
             if enable_multi_main:
                 main_file = max(chinese_versions, key=lambda x: os.path.getsize(os.path.join(base_dir, x)))
-                # 创建主文件的副本
                 if handle_multi_main_file(main_file, base_dir):
                     logger.info("[#file_ops] ✅ 已处理multi-main文件: %s", main_file)
             
