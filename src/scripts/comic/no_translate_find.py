@@ -614,16 +614,27 @@ def process_file_with_count(file_path: str) -> Tuple[str, str, int, float]:
     name, ext = os.path.splitext(file_name)
     
     # 移除已有的标记
-    name = re.sub(r'\{[^}]*@(?:PX|WD|DE)[^}]*\}', '', name)
+    # name = re.sub(r'\{[^}]*@(?:PX|WD|DE)[^}]*\}', '', name)
     
     # 使用MultiAnalyzer进行分析
     analyzer = MultiAnalyzer()
     analysis_result = analyzer.analyze_archive(full_path)
     
-    # 生成新的文件名
+    # 如果文件名中已有标记，先提取出来
+    existing_marks = re.findall(r'\{[^}]*@(?:PX|WD|DE)[^}]*\}', name)
+    
+    # 移除已有的标记以准备添加新标记
+    name = re.sub(r'\{[^}]*@(?:PX|WD|DE)[^}]*\}', '', name)
+    
+    # 生成新的格式化结果
     formatted_result = analyzer.format_analysis_result(analysis_result)
+    
+    # 如果有新的分析结果，添加到文件名中
     if formatted_result:
         name = f"{name}{formatted_result}"
+    # 如果没有新的分析结果但有原有标记，保留原有标记
+    elif existing_marks:
+        name = f"{name}{''.join(existing_marks)}"
     
     new_name = f"{name}{ext}"
     new_path = os.path.join(dir_name, new_name) if dir_name else new_name

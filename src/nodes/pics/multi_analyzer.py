@@ -232,18 +232,30 @@ class MultiAnalyzer:
             # 分别计算各项指标，失败一项不影响其他项
             try:
                 result['page_count'] = self.get_image_count(archive_path)
+                if result['page_count'] == 0:
+                    logger.debug(f"未找到图片: {archive_path}")
+                    return result
             except Exception as e:
                 logger.error(f"计算页数失败 {archive_path}: {str(e)}")
                 
             try:
                 result['width'] = self.calculate_representative_width(archive_path)
+                if result['width'] == 0:
+                    logger.debug(f"无法计算宽度: {archive_path}")
             except Exception as e:
                 logger.error(f"计算宽度失败 {archive_path}: {str(e)}")
                 
             try:
                 result['clarity_score'] = self.calculate_clarity_score(archive_path)
+                if result['clarity_score'] == 0:
+                    logger.debug(f"无法计算清晰度: {archive_path}")
             except Exception as e:
                 logger.error(f"计算清晰度失败 {archive_path}: {str(e)}")
+            
+            # 验证结果有效性
+            if result['width'] == 0 and result['page_count'] == 0 and result['clarity_score'] == 0:
+                logger.error(f"所有指标计算失败 {archive_path}")
+                return result
             
             return result
             
