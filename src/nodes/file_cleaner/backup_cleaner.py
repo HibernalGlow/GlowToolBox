@@ -7,6 +7,7 @@ from typing import List, Tuple, Set
 import threading
 from queue import Queue
 import time
+import stat
 
 class BackupCleaner:
     def __init__(self, max_workers: int = None):
@@ -20,23 +21,36 @@ class BackupCleaner:
         self._lock = threading.Lock()
         self._removed_count = 0
         self._skipped_count = 0
-        self._error_paths = set()  # 新增：记录出错的路径
+        self._error_paths = set()  # 记录出错的路径
         
-    def _is_file_in_use(self, file_path: str) -> bool:
-        """检查文件是否正在使用"""
+    def _force_delete(self, path: Path) -> bool:
+        """强制删除文件或文件夹，处理只读等特殊情况"""
         try:
-            # 创建一个临时文件名
-            temp_path = str(file_path) + ".tmp"
-            # 尝试重命名文件
-            os.rename(file_path, temp_path)
-            # 如果成功，改回原名
-            os.rename(temp_path, file_path)
-            return False
-        except (OSError, PermissionError):
+            if path.is_file():
+                # 修改文件权限
+                path.chmod(stat.S_IWRITE)
+                path.unlink()
+            else:
+                # 递归修改文件夹内所有文件的权限
+                for root, dirs, files in os.walk(str(path)):
+                    for dir in dirs:
+                        try:
+                            dir_path = Path(root) / dir
+                            dir_path.chmod(stat.S_IWRITE | stat.S_IEXEC)
+                        except:
+                            pass
+                    for file in files:
+                        try:
+                            file_path = Path(root) / file
+                            file_path.chmod(stat.S_IWRITE)
+                        except:
+                            pass
+                shutil.rmtree(path, ignore_errors=True)
             return True
-        except Exception:
+        except Exception as e:
+            print(f"强制删除失败 - {e}: {path}")
             return False
-            
+
     def _process_batch(self, items: List[Path], patterns: List[Tuple[str, str]], 
                       exclude_keywords: List[str]) -> Tuple[int, int]:
         """处理一批文件/文件夹"""
@@ -49,12 +63,6 @@ class BackupCleaner:
                 continue
                 
             try:
-                # 检查文件或文件夹是否正在使用
-                if item.is_file():
-                    if self._is_file_in_use(str(item)):
-                        skipped += 1
-                        continue
-                        
                 # 检查是否匹配删除模式
                 for pattern, target_type in patterns:
                     matched = False
@@ -66,16 +74,33 @@ class BackupCleaner:
                         
                     if matched:
                         try:
-                            if item.is_dir():
-                                shutil.rmtree(item)
+                            # 特殊处理 .trash 文件
+                            if item.name.endswith('.trash'):
+                                if self._force_delete(item):
+                                    removed += 1
+                                else:
+                                    skipped += 1
                             else:
-                                item.unlink()
-                            removed += 1
-                        except Exception:
+                                # 常规文件的删除尝试
+                                try:
+                                    if item.is_dir():
+                                        shutil.rmtree(item)
+                                    else:
+                                        item.unlink()
+                                    removed += 1
+                                except:
+                                    # 如果常规删除失败，尝试强制删除
+                                    if self._force_delete(item):
+                                        removed += 1
+                                    else:
+                                        skipped += 1
+                        except Exception as e:
+                            print(f"删除失败 - {e}: {item}")
                             skipped += 1
                         break
                         
-            except Exception:
+            except Exception as e:
+                print(f"处理失败 - {e}: {item}")
                 skipped += 1
                 
         return removed, skipped
