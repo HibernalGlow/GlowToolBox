@@ -640,7 +640,7 @@ def process_folders(base_path: str, exclude_keywords: List[str]) -> List[Path]:
             logger.info(f"[#process]📁 找到需要打包的文件夹: {result[0]}")
     
     if folders_to_process:
-        logger.info(f"[#cur_stats]📊 共找到 {len(folders_to_process)} 个文件夹需要打包")
+        # logger.info(f"[#cur_stats]📊 共找到 {len(folders_to_process)} 个文件夹需要打包")
         
         # 创建进度任务
         total_folders = len(folders_to_process)
