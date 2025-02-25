@@ -159,6 +159,27 @@ def has_forbidden_keyword(filename):
     """检查文件名是否包含禁止画师名的关键词"""
     return any(keyword in filename for keyword in forbidden_artist_keywords)
 
+def get_unique_filename_with_samename(directory: str, filename: str) -> str:
+    """
+    检查文件名是否存在，如果存在则添加[samename_n]后缀
+    Args:
+        directory: 文件所在目录
+        filename: 完整文件名（包含扩展名）
+    Returns:
+        str: 唯一的文件名
+    """
+    base, ext = os.path.splitext(filename)
+    # 对文件名进行pangu格式化
+    base = pangu.spacing_text(base)
+    new_filename = f"{base}{ext}"
+    
+    counter = 1
+    while os.path.exists(os.path.join(directory, new_filename)):
+        new_filename = f"{base}[samename_{counter}]{ext}"
+        counter += 1
+    
+    return new_filename
+
 def get_unique_filename(directory, filename, artist_name, is_excluded=False):
     """生成唯一文件名"""
     base, ext = os.path.splitext(filename)
@@ -172,6 +193,11 @@ def get_unique_filename(directory, filename, artist_name, is_excluded=False):
 
     # 使用 pangu 处理文字和数字之间的空格
     base = pangu.spacing_text(base)
+
+    # 如果是排除的文件夹，直接返回处理后的文件名
+    if is_excluded:
+        filename = f"{base}{ext}"
+        return get_unique_filename_with_samename(directory, filename)
 
     # 修改正则替换模式，更谨慎地处理日文字符
     basic_patterns = [
@@ -290,18 +316,6 @@ def get_unique_filename(directory, filename, artist_name, is_excluded=False):
     for pattern, replacement in basic_patterns:
         base = re.sub(pattern, replacement, base)
 
-    # 如果是排除的文件夹，应用基本替换规则后再次应用pangu格式化
-    if is_excluded:
-        base = pangu.spacing_text(base)
-        filename = f"{base}{ext}"
-        # 检查文件是否存在，如果存在则添加[samename_n]后缀
-        counter = 1
-        original_filename = filename
-        while os.path.exists(os.path.join(directory, filename)):
-            filename = f"{base}[samename_{counter}]{ext}"
-            counter += 1
-        return filename
-
     # 对非排除文件夹应用高级替换规则
     for pattern, replacement in advanced_patterns:
         base = re.sub(pattern, replacement, base)
@@ -408,13 +422,7 @@ def get_unique_filename(directory, filename, artist_name, is_excluded=False):
     
     # 检查文件是否存在，如果存在则添加[samename_n]后缀
     filename = f"{new_base}{ext}"
-    counter = 1
-    original_filename = filename
-    while os.path.exists(os.path.join(directory, filename)):
-        filename = f"{new_base}[samename_{counter}]{ext}"
-        counter += 1
-    
-    return filename
+    return get_unique_filename_with_samename(directory, filename)
 
 def has_artist_name(filename, artist_name):
     """检查文件名是否包含画师名"""
