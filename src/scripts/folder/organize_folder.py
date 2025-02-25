@@ -28,7 +28,7 @@ ARCHIVE_FORMATS = {'.zip', '.rar', '.7z', '.cbz', '.cbr'}
 DELETE_KEYWORDS = [
     ('*.bak', 'file'),     # 仅匹配文件
     ('temp_*', 'dir'),     # 仅匹配文件夹
-    # ('*.trash', 'both')    # 同时匹配文件和文件夹
+    ('*.trash', 'both')    # 同时匹配文件和文件夹
 ]
 
 # 添加无限模式枚举类

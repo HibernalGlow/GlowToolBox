@@ -20,6 +20,7 @@ class BackupCleaner:
         self._lock = threading.Lock()
         self._removed_count = 0
         self._skipped_count = 0
+        self._error_paths = set()  # 新增：记录出错的路径
         
     def _is_file_in_use(self, file_path: str) -> bool:
         """检查文件是否正在使用"""
@@ -85,6 +86,26 @@ class BackupCleaner:
             self._removed_count += removed
             self._skipped_count += skipped
             
+    def _safe_rglob(self, path: Path) -> List[Path]:
+        """安全地遍历目录，忽略访问错误"""
+        items = []
+        try:
+            for item in path.iterdir():
+                try:
+                    if item.is_dir():
+                        items.extend(self._safe_rglob(item))
+                    items.append(item)
+                except (PermissionError, OSError) as e:
+                    with self._lock:
+                        self._error_paths.add(str(item))
+                    print(f"警告：访问路径时出错 - {e}: {item}")
+                    continue
+        except (PermissionError, OSError) as e:
+            with self._lock:
+                self._error_paths.add(str(path))
+            print(f"警告：访问目录时出错 - {e}: {path}")
+        return items
+
     def clean(self, path: Path, patterns: List[Tuple[str, str]], 
              exclude_keywords: List[str], batch_size: int = 100) -> Tuple[int, int]:
         """
@@ -101,6 +122,7 @@ class BackupCleaner:
         """
         self._removed_count = 0
         self._skipped_count = 0
+        self._error_paths.clear()  # 清空错误路径记录
         
         # 检查路径是否存在
         if not path.exists():
@@ -108,58 +130,33 @@ class BackupCleaner:
             return self._removed_count, self._skipped_count
             
         try:
-            # 收集所有项目
-            items = []
-            try:
-                for item in path.rglob("*"):
-                    try:
-                        items.append(item)
-                        
-                        # 当收集到一定数量时进行批处理
-                        if len(items) >= batch_size:
-                            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                                futures = []
-                                for i in range(0, len(items), batch_size):
-                                    batch = items[i:i + batch_size]
-                                    future = executor.submit(self._process_batch, batch, patterns, exclude_keywords)
-                                    futures.append(future)
-                                    
-                                # 收集结果
-                                for future in as_completed(futures):
-                                    try:
-                                        removed, skipped = future.result()
-                                        self._update_counts(removed, skipped)
-                                    except Exception as e:
-                                        print(f"警告：处理批次时出错 - {e}")
-                                        continue
-                                    
-                            items = []
-                    except Exception as e:
-                        print(f"警告：处理项目时出错 - {e}")
-                        continue
-                        
-            except Exception as e:
-                print(f"警告：遍历目录时出错 - {e}")
+            # 使用安全的遍历方法收集所有项目
+            items = self._safe_rglob(path)
             
-            # 处理剩余项目
-            if items:
-                with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                    futures = []
-                    for i in range(0, len(items), batch_size):
-                        batch = items[i:i + batch_size]
-                        future = executor.submit(self._process_batch, batch, patterns, exclude_keywords)
-                        futures.append(future)
-                        
-                    # 收集结果
-                    for future in as_completed(futures):
-                        try:
-                            removed, skipped = future.result()
-                            self._update_counts(removed, skipped)
-                        except Exception as e:
-                            print(f"警告：处理批次时出错 - {e}")
-                            continue
+            # 按批次处理项目
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                futures = []
+                for i in range(0, len(items), batch_size):
+                    batch = items[i:i + batch_size]
+                    future = executor.submit(self._process_batch, batch, patterns, exclude_keywords)
+                    futures.append(future)
+                    
+                # 收集结果
+                for future in as_completed(futures):
+                    try:
+                        removed, skipped = future.result()
+                        self._update_counts(removed, skipped)
+                    except Exception as e:
+                        print(f"警告：处理批次时出错 - {e}")
+                        continue
                             
         except Exception as e:
             print(f"警告：清理过程中出错 - {e}")
+            
+        # 如果有错误路径，在最后统一报告
+        if self._error_paths:
+            print(f"\n遇到 {len(self._error_paths)} 个无法访问的路径:")
+            for error_path in sorted(self._error_paths):
+                print(f"- {error_path}")
             
         return self._removed_count, self._skipped_count 
