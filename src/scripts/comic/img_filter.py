@@ -12,8 +12,7 @@ config = {
 }
 logger, config_info = setup_logger(config)
 # 初始化 TextualLoggerManager
-HAS_TUI = True
-USE_DEBUGGER = False
+
 
 TEXTUAL_LAYOUT = {
     "cur_stats": {
@@ -42,7 +41,8 @@ TEXTUAL_LAYOUT = {
         "style": "lightwhite"
     }
 }
-
+HAS_TUI = True
+USE_DEBUGGER = False
 
 # 全局配置
 GLOBAL_HASH_CACHE = os.path.expanduser(r"E:\1EHV\image_hashes_global.json")

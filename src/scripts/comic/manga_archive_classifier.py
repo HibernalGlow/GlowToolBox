@@ -22,63 +22,47 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from nodes.tui.textual_preset import create_config_app
+from nodes.record.logger_config import setup_logger
+from nodes.tui.textual_logger import TextualLoggerManager
+import logging
 
 # 导入自定义工具
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from nodes.tui.rich_logger import RichProgressHandler
-# from utils.file_operation_monitor import init_file_monitor  # 使用全局文件监控
 
-# # 初始化文件监控器
-# monitor = init_file_monitor()
+# 定义日志布局配置
+TEXTUAL_LAYOUT = {
+    "current_stats": {
+        "ratio": 2,
+        "title": "📊 总体进度",
+        "style": "lightyellow"
+    },
+    "current_progress": {
+        "ratio": 2,
+        "title": "🔄 当前进度",
+        "style": "lightcyan"
+    },
+    "process": {
+        "ratio": 3,
+        "title": "📝 处理日志",
+        "style": "lightpink"
+    },
+    "update": {
+        "ratio": 2,
+        "title": "ℹ️ 更新日志",
+        "style": "lightblue"
+    }
+}
 
-# 初始化全局日志处理器
-global_handler = None
+# 初始化日志配置
+config = {
+    'script_name': 'comic_auto_uuid',
+    'console_enabled': False
+}
+logger, config_info = setup_logger(config)
 
-def get_handler():
-    """获取全局日志处理器，如果不存在则创建一个新的"""
-    global global_handler
-    if global_handler is None:
-        # 自定义布局配置
-        layout_config = {
-            "stats": {"size": 3, "title": "处理进度"},
-            "current_task": {"size": 2, "title": "当前任务"},
-            "archive_process": {"size": 3, "title": "压缩包处理"},
-            "folder_process": {"size": 3, "title": "文件夹处理"},
-            "series_extract": {"size": 4, "title": "系列提取"},  # 新增系列提取面板
-            "post_process": {"size": 3, "title": "后续处理"},
-            "update_log": {"size": 6, "title": "更新日志"}
-        }
-        
-        # 自定义样式配置
-        style_config = {
-            "border_style": "cyan",
-            "title_style": "yellow bold",
-            "padding": (0, 1),
-            # 为每个面板设置不同的颜色
-            "panel_styles": {
-                "stats": "green",
-                "current_task": "blue",
-                "archive_process": "magenta",
-                "folder_process": "cyan",
-                "series_extract": "yellow",  # 新增面板的颜色
-                "post_process": "yellow",
-                "update_log": "white"
-            }
-        }
-        
-        global_handler = RichProgressHandler(
-            layout_config=layout_config,
-            style_config=style_config
-        )
-        global_handler.__enter__()
-    return global_handler
-
-def close_handler():
-    """关闭全局日志处理器"""
-    global global_handler
-    if global_handler is not None:
-        global_handler.__exit__(None, None, None)
-        global_handler = None
+def init_TextualLogger():
+    """初始化TextualLogger"""
+    TextualLoggerManager.set_layout(TEXTUAL_LAYOUT, config_info['log_file'])
 
 # 初始化OpenCC转换器
 cc_t2s = OpenCC('t2s')  # 繁体转简体
@@ -215,7 +199,7 @@ def run_7z_command(command, archive_path, operation="", additional_args=None, ha
         raise TimeoutError(f"7z命令执行超时: {archive_path}")
     except Exception as e:
         if handler:
-            handler.update_panel("update_log", f"❌ 执行7z命令时出错 {archive_path}: {str(e)}")
+            logger.error(f"[#update] ❌ 执行7z命令时出错 {archive_path}: {str(e)}")
         return ""
 
 @timeout(60)
@@ -235,36 +219,31 @@ def is_archive_corrupted(archive_path):
 def count_images_in_archive(archive_path, handler=None):
     """使用7z的列表模式统计压缩包中的图片数量"""
     try:
-        if handler is None:
-            handler = get_handler()
-            
         # 首先检查压缩包是否损坏
         if is_archive_corrupted(archive_path):
-            handler.update_panel("update_log", f"⚠️ 压缩包已损坏，跳过处理: {archive_path}")
+            logger.warning(f"[#update] ⚠️ 压缩包已损坏，跳过处理: {archive_path}")
             return -1
             
         # 使用7z的列表命令，添加-slt参数来获取详细信息
-        output = run_7z_command('l', archive_path, additional_args=['-slt'], handler=handler)
+        output = run_7z_command('l', archive_path, additional_args=['-slt'])
         
         # 确保输出不为空
         if not output:
-            handler.update_panel("update_log", f"❌ 无法获取压缩包内容列表: {archive_path}")
+            logger.error(f"[#update] ❌ 无法获取压缩包内容列表: {archive_path}")
             return 0
             
         # 使用更高效的方式统计图片数量
         image_count = sum(1 for ext in IMAGE_EXTENSIONS if ext in output.lower())
         
         # 添加到更新日志
-        handler.update_panel("update_log", f"📦 压缩包 '{os.path.basename(archive_path)}' 中包含 {image_count} 张图片")
+        logger.info(f"[#update] 📦 压缩包 '{os.path.basename(archive_path)}' 中包含 {image_count} 张图片")
         
         return image_count
     except TimeoutError as e:
-        if handler:
-            handler.update_panel("update_log", f"❌ 处理压缩包超时 {archive_path}: {str(e)}")
+        logger.error(f"[#update] ❌ 处理压缩包超时 {archive_path}: {str(e)}")
         return -1
     except Exception as e:
-        if handler:
-            handler.update_panel("update_log", f"❌ 处理压缩包时出错 {archive_path}: {str(e)}")
+        logger.error(f"[#update] ❌ 处理压缩包时出错 {archive_path}: {str(e)}")
         return -1
 
 def is_archive(path):
@@ -358,9 +337,6 @@ CATEGORY_RULES = {
 
 def get_category(path, handler=None):
     """根据路径名判断类别，使用正则表达式进行匹配"""
-    if handler is None:
-        handler = get_handler()
-        
     filename = os.path.basename(path)
     
     # 首先检查是否为压缩包
@@ -377,11 +353,11 @@ def get_category(path, handler=None):
             return "4. 画集"
     
     # 统计压缩包中的图片数量
-    image_count = count_images_in_archive(path, handler)
+    image_count = count_images_in_archive(path)
     if image_count == -1:  # 表示压缩包损坏
         return "损坏"
         
-    handler.update_panel("update_log", f"压缩包 '{filename}' 中包含 {image_count} 张图片")
+    logger.info(f"[#update] 压缩包 '{filename}' 中包含 {image_count} 张图片")
     
     # 如果图片数量超过100且不是画集，检查其他分类规则
     if image_count >= 100:
@@ -437,21 +413,18 @@ def create_category_folders(base_path, handler=None):
         category_path = os.path.join(base_path, category)
         if not os.path.exists(category_path):
             os.makedirs(category_path)
-            if handler:
-                handler.update_panel("update_log", f"📁 创建分类文件夹: {category}")
+            logger.info(f"[#update] 📁 创建分类文件夹: {category}")
     
     # 创建损坏压缩包文件夹
     corrupted_path = os.path.join(base_path, "损坏压缩包")
     if not os.path.exists(corrupted_path):
         os.makedirs(corrupted_path)
-        if handler:
-            handler.update_panel("update_log", f"📁 创建损坏压缩包文件夹")
+        logger.info(f"[#update] 📁 创建损坏压缩包文件夹")
 
 def move_file_to_category(file_path, category, handler=None):
     """将文件移动到对应的分类文件夹"""
     if category == "未分类":
-        if handler:
-            handler.update_panel("update_log", f"文件 '{file_path}' 未能匹配任何分类规则，保持原位置")
+        logger.info(f"[#update] 文件 '{file_path}' 未能匹配任何分类规则，保持原位置")
         return
         
     target_dir = os.path.join(os.path.dirname(file_path), category)
@@ -459,11 +432,9 @@ def move_file_to_category(file_path, category, handler=None):
     
     if not os.path.exists(target_path):
         shutil.move(file_path, target_path)
-        if handler:
-            handler.update_panel("update_log", f"已移动到: {target_path}")
+        logger.info(f"[#update] 已移动到: {target_path}")
     else:
-        if handler:
-            handler.update_panel("update_log", f"目标路径已存在文件: {target_path}")
+        logger.info(f"[#update] 目标路径已存在文件: {target_path}")
 
 def move_corrupted_archive(file_path, base_path, handler=None):
     """移动损坏的压缩包到损坏压缩包文件夹，保持原有目录结构"""
@@ -490,24 +461,20 @@ def move_corrupted_archive(file_path, base_path, handler=None):
         
         # 移动文件
         shutil.move(file_path, target_path)
-        if handler:
-            handler.update_panel("update_log", f"📦 已移动损坏压缩包: {os.path.basename(file_path)} -> 损坏压缩包/{rel_path}")
+        logger.info(f"[#update] 📦 已移动损坏压缩包: {os.path.basename(file_path)} -> 损坏压缩包/{rel_path}")
             
     except Exception as e:
-        if handler:
-            handler.update_panel("update_log", f"❌ 移动损坏压缩包失败 {file_path}: {str(e)}")
+        logger.error(f"[#update] ❌ 移动损坏压缩包失败 {file_path}: {str(e)}")
 
 def process_single_file(abs_path, handler=None):
     """处理单个文件"""
     try:
         if not os.path.exists(abs_path):
-            if handler:
-                handler.update_panel("update_log", f"❌ 路径不存在: {abs_path}")
+            logger.error(f"[#update] ❌ 路径不存在: {abs_path}")
             return
             
-        if handler:
-            handler.update_panel("current_task", f"处理文件: {os.path.basename(abs_path)}")
-            handler.update_panel("archive_process", f"分析: {os.path.basename(abs_path)}")
+        logger.info(f"[#current_progress] 处理文件: {os.path.basename(abs_path)}")
+        logger.info(f"[#process] 分析: {os.path.basename(abs_path)}")
         
         # 确保分类文件夹存在
         create_category_folders(os.path.dirname(abs_path))
@@ -517,22 +484,19 @@ def process_single_file(abs_path, handler=None):
         
         # 如果是损坏的压缩包，移动到损坏压缩包文件夹
         if category == "损坏":
-            if handler:
-                handler.update_panel("update_log", f"⚠️ 压缩包已损坏: {os.path.basename(abs_path)}")
-                handler.update_panel("archive_process", f"❌ 损坏: {os.path.basename(abs_path)}")
-            move_corrupted_archive(abs_path, os.path.dirname(abs_path), handler)
+            logger.warning(f"[#update] ⚠️ 压缩包已损坏: {os.path.basename(abs_path)}")
+            logger.warning(f"[#process] ❌ 损坏: {os.path.basename(abs_path)}")
+            move_corrupted_archive(abs_path, os.path.dirname(abs_path))
             return
         
         # 移动文件到对应分类
-        move_file_to_category(abs_path, category, handler)
+        move_file_to_category(abs_path, category)
         
-        if handler:
-            handler.update_panel("archive_process", f"✅ 完成: {os.path.basename(abs_path)} -> {category}")
+        logger.info(f"[#process] ✅ 完成: {os.path.basename(abs_path)} -> {category}")
         
     except Exception as e:
-        if handler:
-            handler.update_panel("update_log", f"❌ 处理文件时出错 {abs_path}: {str(e)}")
-            handler.update_panel("archive_process", f"❌ 错误: {os.path.basename(abs_path)}")
+        logger.error(f"[#update] ❌ 处理文件时出错 {abs_path}: {str(e)}")
+        logger.error(f"[#process] ❌ 错误: {os.path.basename(abs_path)}")
 
 def normalize_filename(filename):
     """去除文件名中的圆括号、方括号及其内容，返回规范化的文件名"""
@@ -595,8 +559,8 @@ def calculate_similarity(str1, str2, handler=None):
     token = fuzz.token_sort_ratio(str1.lower(), str2.lower())
     
     max_similarity = max(ratio, partial, token)
-    if handler and max_similarity >= SIMILARITY_CONFIG['THRESHOLD']:
-        handler.update_panel("update_log", f"🔍 相似度: {max_similarity}%")
+    if max_similarity >= SIMILARITY_CONFIG['THRESHOLD']:
+        logger.info(f"[#update] 🔍 相似度: {max_similarity}%")
     return max_similarity
 
 def is_similar_to_existing_folder(dir_path, series_name, handler=None):
@@ -605,11 +569,10 @@ def is_similar_to_existing_folder(dir_path, series_name, handler=None):
         existing_folders = [d for d in os.listdir(dir_path) 
                           if os.path.isdir(os.path.join(dir_path, d))]
     except Exception as e:
-        if handler:
-            handler.update_panel("update_log", f"❌ 读取目录失败: {dir_path}")
+        logger.error(f"[#update] ❌ 读取目录失败: {dir_path}")
         return False
     
-    series_key = get_series_key(series_name, handler)
+    series_key = get_series_key(series_name)
     
     for folder in existing_folders:
         # 检查所有支持的系列前缀
@@ -648,25 +611,24 @@ def is_similar_to_existing_folder(dir_path, series_name, handler=None):
 
 def get_series_key(filename, handler=None):
     """获取用于系列比较的键值"""
-    if handler:
-        handler.update_panel("series_extract", f"处理文件: {filename}")
+    logger.info(f"[#process] 处理文件: {filename}")
     
     # 创建一个虚拟的对比组，包含当前文件和自身的副本
     # 这样可以利用 find_series_groups 的逻辑来提取系列名称
     test_group = [filename, filename]
-    series_groups = find_series_groups(test_group, handler)
+    series_groups = find_series_groups(test_group)
     
     # 如果能找到系列名称，使用它
     if series_groups:
         series_name = next(iter(series_groups.keys()))
-        if handler:
-            handler.update_panel("series_extract", f"找到系列名称: {series_name}")
+        logger.info(f"[#process] 找到系列名称: {series_name}")
         return series_name
     
     # 如果找不到系列名称，退回到基本的预处理
     name = preprocess_filename(filename)
     name = normalize_chinese(name)
     
+    logger.info(f"[#process] 使用预处理结果: {name}")
     if handler:
         handler.update_panel("series_extract", f"使用预处理结果: {name}")
     
@@ -725,17 +687,16 @@ def update_all_series_folders(directory_path, handler=None):
             for dir_name in dirs:
                 if dir_name.startswith('[#s]'):
                     full_path = os.path.join(root, dir_name)
-                    if update_series_folder_name(full_path, handler):
+                    if update_series_folder_name(full_path):
                         updated_count += 1
         
-        if handler and updated_count > 0:
-            handler.update_panel("update_log", f"✨ 更新了 {updated_count} 个系列文件夹名称")
+        if updated_count > 0:
+            logger.info(f"[#update] ✨ 更新了 {updated_count} 个系列文件夹名称")
             
         return updated_count
         
     except Exception as e:
-        if handler:
-            handler.update_panel("update_log", f"❌ 更新系列文件夹失败: {str(e)}")
+        logger.error(f"[#update] ❌ 更新系列文件夹失败: {str(e)}")
         return 0
 
 def preprocess_filenames(files, handler=None):
@@ -744,8 +705,7 @@ def preprocess_filenames(files, handler=None):
     for file_path in files:
         key = get_series_key(os.path.basename(file_path))
         file_keys[file_path] = key
-        if handler:
-            handler.update_panel("update_log", f"🔄 预处理: {os.path.basename(file_path)} -> {key}")
+        logger.info(f"[#update] 🔄 预处理: {os.path.basename(file_path)} -> {key}")
     return file_keys
 
 def get_base_filename(filename):
@@ -827,8 +787,7 @@ def find_similar_files(current_file, files, file_keys, processed_files, handler=
         )
         
         if is_similar:
-            if handler:
-                handler.update_panel("update_log", f"✨ 发现相似文件: {os.path.basename(other_file)} (相似度: {max(ratio, partial, token)}%)")
+            logger.info(f"[#update] ✨ 发现相似文件: {os.path.basename(other_file)} (相似度: {max(ratio, partial, token)}%)")
             similar_files.append(other_file)
             to_process.add(other_file)  # 添加到临时集合
             
@@ -903,10 +862,9 @@ def find_keyword_based_groups(remaining_files, file_keys, processed_files, handl
     for result in results:
         if result:
             series_name, group, current_to_process = result
-            if handler:
-                handler.update_panel("update_log", f"📚 发现系列: {series_name} ({len(group)}个文件)")
-                for file_path in group:
-                    handler.update_panel("update_log", f"  └─ {os.path.basename(file_path)}")
+            logger.info(f"[#update] 📚 发现系列: {series_name} ({len(group)}个文件)")
+            for file_path in group:
+                logger.info(f"[#update]   └─ {os.path.basename(file_path)}")
             keyword_groups[series_name] = group
             to_process.update(current_to_process)  # 更新总的处理集合
             to_process.add(group[0])
@@ -999,8 +957,7 @@ def find_series_groups(filenames, handler=None):
     matched_files = set()
     
     # 预处理阶段：检查已标记的系列
-    if handler:
-        handler.update_panel("series_extract", "🔍 预处理阶段：检查已标记的系列")
+    logger.info("[#process] 🔍 预处理阶段：检查已标记的系列")
     
     for file_path in list(remaining_files):
         if file_path in matched_files:
@@ -1018,13 +975,11 @@ def find_series_groups(filenames, handler=None):
                     series_groups[series_name].append(file_path)
                     matched_files.add(file_path)
                     remaining_files.remove(file_path)
-                    if handler:
-                        handler.update_panel("series_extract", f"✨ 预处理阶段：文件 '{os.path.basename(file_path)}' 已标记为系列 '{series_name}'")
+                    logger.info(f"[#process] ✨ 预处理阶段：文件 '{os.path.basename(file_path)}' 已标记为系列 '{series_name}'")
                 break
     
     # 第一阶段：风格匹配（关键词匹配）
-    if handler:
-        handler.update_panel("series_extract", "🔍 第一阶段：风格匹配（关键词匹配）")
+    logger.info("[#process] 🔍 第一阶段：风格匹配（关键词匹配）")
     
     while remaining_files:
         best_length = 0
@@ -1046,7 +1001,7 @@ def find_series_groups(filenames, handler=None):
                 # 检查基础名是否完全相同
                 base_name2 = get_base_filename(os.path.basename(file2))
                 if base_name1 == base_name2:
-                    handler.update_panel("series_extract", f"✨ 第一阶段：文件 '{os.path.basename(file1)}' 和 '{os.path.basename(file2)}' 基础名完全相同，跳过")
+                    logger.info(f"[#process] ✨ 第一阶段：文件 '{os.path.basename(file1)}' 和 '{os.path.basename(file2)}' 基础名完全相同，跳过")
                     continue  # 如果基础名完全相同,跳过这对文件
                     
                 keywords2 = simplified_keywords[file2]  # 使用简体版本比较
@@ -1082,10 +1037,11 @@ def find_series_groups(filenames, handler=None):
             remaining_files -= matched_files_this_round
             matched_files.update(matched_files_this_round)
             
-            if handler:
-                handler.update_panel("series_extract", f"✨ 第一阶段：通过关键词匹配找到系列 '{best_series_name}'")
+            logger.info(f"[#process] ✨ 第一阶段：通过关键词匹配找到系列 '{best_series_name}'")
+            for file_path in matched_files_this_round:
+                logger.info(f"[#process] ✨ 第一阶段：通过关键词匹配找到系列 '{best_series_name}'")
                 for file_path in matched_files_this_round:
-                    handler.update_panel("series_extract", f"  └─ 文件 '{os.path.basename(file_path)}' 匹配到系列（关键词：{' '.join(best_common)}）")
+                    logger.info(f"[#process] ✨ 第一阶段：通过关键词匹配找到系列 '{best_series_name}'")
         else:
             break  # 没有找到匹配，进入第二阶段
     
@@ -1252,17 +1208,12 @@ def create_series_folders(directory_path, archives, handler=None):
         if len(dir_archives) <= 1:
             continue
             
-        if handler:
-            # 更新处理状态
-            handler.process_log_lines.clear()
-            handler.process_log_lines.append(f"分析目录: {os.path.basename(dir_path)}")
-            handler.update_panel("update_log", f"找到 {len(dir_archives)} 个压缩包")
+        logger.info(f"[#update] 找到 {len(dir_archives)} 个压缩包")
         
-        series_groups = find_series_groups(dir_archives, handler)
+        series_groups = find_series_groups(dir_archives)
         
         if series_groups:
-            if handler:
-                handler.update_panel("update_log", f"📚 找到 {len(series_groups)} 个系列")
+            logger.info(f"[#update] 📚 找到 {len(series_groups)} 个系列")
             
             # 检查是否所有文件都会被移动到同一个系列
             total_files = len(dir_archives)
@@ -1270,8 +1221,7 @@ def create_series_folders(directory_path, archives, handler=None):
                 if series_name == "其他":
                     continue
                 if len(files) == total_files:
-                    if handler:
-                        handler.update_panel("update_log", f"⚠️ 所有文件都属于同一个系列，跳过创建子文件夹")
+                    logger.warning(f"[#update] ⚠️ 所有文件都属于同一个系列，跳过创建子文件夹")
                     return
             
             # 创建一个字典来记录每个系列的文件夹路径
@@ -1281,60 +1231,45 @@ def create_series_folders(directory_path, archives, handler=None):
             for series_name, files in series_groups.items():
                 # 跳过"其他"分类和只有一个文件的系列
                 if series_name == "其他" or len(files) <= 1:
-                    if handler:
-                        if series_name == "其他":
-                            handler.update_panel("update_log", f"⚠️ {len(files)} 个文件未能匹配到系列")
-                        else:
-                            handler.update_panel("update_log", f"⚠️ 系列 '{series_name}' 只有一个文件，跳过创建文件夹")
+                    if series_name == "其他":
+                        logger.warning(f"[#update] ⚠️ {len(files)} 个文件未能匹配到系列")
+                    else:
+                        logger.warning(f"[#update] ⚠️ 系列 '{series_name}' 只有一个文件，跳过创建文件夹")
                     continue
                 
                 # 添加系列标记（使用标准系列标记[#s]）
                 series_folder = os.path.join(dir_path, f'[#s]{series_name.strip()}')
                 if not os.path.exists(series_folder):
                     os.makedirs(series_folder)
-                    if handler:
-                        handler.update_panel("update_log", f"📁 创建系列文件夹: [#s]{series_name}")
+                    logger.info(f"[#update] 📁 创建系列文件夹: [#s]{series_name}")
                 series_folders[series_name] = series_folder
             
             # 然后移动每个系列的文件
             for series_name, folder_path in series_folders.items():
                 files = series_groups[series_name]
-                if handler:
-                    handler.update_panel("update_log", f"📦 开始移动系列 '{series_name}' 的文件...")
+                logger.info(f"[#update] 📦 开始移动系列 '{series_name}' 的文件...")
                 
                 for file_path in files:
-                    # 更新处理状态
-                    if handler:
-                        handler.process_log_lines.clear()
-                        handler.process_log_lines.append(f"移动: {os.path.basename(file_path)}")
-                    
                     target_path = os.path.join(folder_path, os.path.basename(file_path))
                     if not os.path.exists(target_path):
                         shutil.move(file_path, target_path)
-                        if handler:
-                            handler.update_panel("update_log", f"  └─ 移动: {os.path.basename(file_path)}")
+                        logger.info(f"[#update]   └─ 移动: {os.path.basename(file_path)}")
                     else:
-                        if handler:
-                            handler.update_panel("update_log", f"⚠️ 文件已存在于系列 '{series_name}': {os.path.basename(file_path)}")
+                        logger.warning(f"[#update] ⚠️ 文件已存在于系列 '{series_name}': {os.path.basename(file_path)}")
             
-            if handler:
-                handler.update_panel("current_task", "系列提取完成")
+            logger.info("[#current_progress] 系列提取完成")
         
-        if handler:
-            handler.update_panel("folder_process", f"✨ 目录处理完成: {dir_path}")
+        logger.info(f"[#process] ✨ 目录处理完成: {dir_path}")
 
-# 新增的辅助函数
 def validate_directory(directory_path, handler=None):
     """验证目录是否有效且不在黑名单中"""
     abs_dir_path = os.path.abspath(directory_path)
     if not os.path.isdir(abs_dir_path):
-        if handler:
-            handler.update_panel("update_log", f"❌ 不是有效的目录路径: {abs_dir_path}")
+        logger.error(f"[#update] ❌ 不是有效的目录路径: {abs_dir_path}")
         return None
     
     if is_path_blacklisted(abs_dir_path):
-        if handler:
-            handler.update_panel("update_log", f"⚠️ 目录在黑名单中，跳过处理: {abs_dir_path}")
+        logger.warning(f"[#update] ⚠️ 目录在黑名单中，跳过处理: {abs_dir_path}")
         return None
         
     return abs_dir_path
@@ -1354,30 +1289,26 @@ def collect_archives_for_category(directory_path, category_folders, handler=None
                 archives_to_check.append(entry.path)
     
     if archives_to_check:
-        if handler:
-            handler.update_panel("update_log", f"🔍 正在检查 {len(archives_to_check)} 个压缩包的完整性...")
+        logger.info(f"[#update] 🔍 正在检查 {len(archives_to_check)} 个压缩包的完整性...")
         
         # 使用线程池检查压缩包
         with ThreadPoolExecutor(max_workers=16) as executor:
             futures = {executor.submit(is_archive_corrupted, path): path for path in archives_to_check}
             for i, future in enumerate(futures, 1):
                 path = futures[future]
-                if handler:
-                    # 更新当前任务状态
-                    percentage = i / len(archives_to_check) * 100
-                    handler.update_panel("current_task", f"检测压缩包完整性... ({i}/{len(archives_to_check)}) {percentage:.1f}%")
+                # 更新当前任务状态
+                percentage = i / len(archives_to_check) * 100
+                logger.info(f"[#current_progress] 检测压缩包完整性... ({i}/{len(archives_to_check)}) {percentage:.1f}%")
                 try:
                     is_corrupted = future.result()
                     if not is_corrupted:
                         archives.append(path)
-                    elif handler:
-                        handler.update_panel("update_log", f"⚠️ 压缩包已损坏，跳过: {os.path.basename(path)}")
+                    else:
+                        logger.warning(f"[#update] ⚠️ 压缩包已损坏，跳过: {os.path.basename(path)}")
                 except TimeoutError:
-                    if handler:
-                        handler.update_panel("update_log", f"⚠️ 压缩包处理超时，跳过: {os.path.basename(path)}")
+                    logger.warning(f"[#update] ⚠️ 压缩包处理超时，跳过: {os.path.basename(path)}")
                 except Exception as e:
-                    if handler:
-                        handler.update_panel("update_log", f"❌ 检查压缩包时出错: {os.path.basename(path)}")
+                    logger.error(f"[#update] ❌ 检查压缩包时出错: {os.path.basename(path)}")
     
     return archives
 
@@ -1393,8 +1324,7 @@ def collect_archives_for_series(directory_path, category_folders, handler=None):
             continue
             
         if is_path_blacklisted(root):
-            if handler:
-                handler.update_panel("update_log", f"⚠️ 目录在黑名单中，跳过: {root}")
+            logger.warning(f"[#update] ⚠️ 目录在黑名单中，跳过: {root}")
             continue
             
         # 检查当前目录是否有系列标记或是损坏压缩包文件夹
@@ -1407,24 +1337,23 @@ def collect_archives_for_series(directory_path, category_folders, handler=None):
                 file_path = os.path.join(root, file)
                 # 检查文件名是否在系列提取黑名单中
                 if is_series_blacklisted(file):
-                    if handler:
-                        handler.update_panel("update_log", f"⚠️ 文件在系列提取黑名单中，跳过: {file}")
+                    logger.warning(f"[#update] ⚠️ 文件在系列提取黑名单中，跳过: {file}")
                     continue
                 if is_path_blacklisted(file):
-                    if handler:
-                        handler.update_panel("update_log", f"⚠️ 文件在黑名单中，跳过: {file}")
+                    logger.warning(f"[#update] ⚠️ 文件在黑名单中，跳过: {file}")
                     continue
                 archives_to_check.append(file_path)
     
     if archives_to_check:
-        if handler:
-            handler.update_panel("update_log", f"🔍 正在检查 {len(archives_to_check)} 个压缩包的完整性...")
+        logger.info(f"[#update] 🔍 正在检查 {len(archives_to_check)} 个压缩包的完整性...")
         
         # 使用线程池检查压缩包
         with ThreadPoolExecutor(max_workers=16) as executor:
             futures = {executor.submit(is_archive_corrupted, path): path for path in archives_to_check}
             for i, future in enumerate(futures, 1):
                 path = futures[future]
+                # 更新当前任务状态
+                percentage = i / len(archives_to_check) * 100
                 if handler:
                     # 更新当前任务状态
                     percentage = i / len(archives_to_check) * 100
@@ -1508,20 +1437,17 @@ def process_directory(directory_path, progress_task=None, enabled_features=None,
         if not abs_dir_path:
             return []
 
-        # 如果没有传入 handler，创建一个新的
-        handler_created = False
-        if handler is None:
-            handler = get_handler()
-            handler_created = True
+        # 初始化TextualLogger
+        init_TextualLogger()
 
         try:
             # 更新文件夹处理状态
-            handler.update_panel("folder_process", f"📂 开始处理目录: {abs_dir_path}")
+            logger.info(f"[#process] 📂 开始处理目录: {abs_dir_path}")
             
             # 更新旧的系列文件夹名称
             if 2 in enabled_features:
-                handler.update_panel("folder_process", "🔄 检查并更新旧的系列文件夹名称...")
-                update_all_series_folders(abs_dir_path, handler)
+                logger.info("[#process] 🔄 检查并更新旧的系列文件夹名称...")
+                update_all_series_folders(abs_dir_path)
             
             # 创建分类文件夹（功能1）
             if 1 in enabled_features:
@@ -1532,68 +1458,61 @@ def process_directory(directory_path, progress_task=None, enabled_features=None,
             
             # 功能2（系列提取）
             if 2 in enabled_features:
-                handler.update_panel("folder_process", "🔍 开始查找可提取系列的压缩包...")
-                archives = collect_archives_for_series(abs_dir_path, category_folders, handler)
+                logger.info("[#process] 🔍 开始查找可提取系列的压缩包...")
+                archives = collect_archives_for_series(abs_dir_path, category_folders)
                 if archives:
                     found_archives = True
                     total_archives = len(archives)
-                    handler.set_total(total_archives)
-                    handler.update_panel("update_log", f"✨ 在目录 '{abs_dir_path}' 及其子文件夹下找到 {total_archives} 个有效压缩包")
+                    logger.info(f"[#update] ✨ 在目录 '{abs_dir_path}' 及其子文件夹下找到 {total_archives} 个有效压缩包")
                     
                     # 直接处理所有压缩包
-                    create_series_folders(abs_dir_path, archives, handler)
+                    create_series_folders(abs_dir_path, archives)
                     
                     # 更新进度
-                    handler.update_panel("current_task", "系列提取完成")
+                    logger.info("[#current_progress] 系列提取完成")
                 else:
-                    handler.update_panel("folder_process", "没有找到可提取系列的压缩包")
+                    logger.info("[#process] 没有找到可提取系列的压缩包")
             
             # 功能1（分类）
             if 1 in enabled_features:
-                handler.update_panel("folder_process", "🔍 开始查找需要分类的压缩包...")
-                archives = collect_archives_for_category(abs_dir_path, category_folders, handler)
+                logger.info("[#process] 🔍 开始查找需要分类的压缩包...")
+                archives = collect_archives_for_category(abs_dir_path, category_folders)
                 if archives:
                     found_archives = True
                     total_archives = len(archives)
-                    handler.set_total(total_archives)
-                    handler.update_panel("update_log", f"✨ 在目录 '{abs_dir_path}' 下找到 {total_archives} 个有效压缩包")
+                    logger.info(f"[#update] ✨ 在目录 '{abs_dir_path}' 下找到 {total_archives} 个有效压缩包")
                     
                     # 构建进度条
                     for i, archive in enumerate(archives, 1):
                         percentage = i / total_archives * 100
-                        bar_width = 50
-                        completed_width = int(bar_width * percentage / 100)
-                        progress_bar = f"[{'=' * completed_width}{' ' * (bar_width - completed_width)}]"
-                        progress_text = f"正在分类压缩包... {progress_bar} {percentage:.1f}% ({i}/{total_archives})"
-                        handler.update_panel("current_task", progress_text)
+                        progress_text = f"正在分类压缩包... {percentage:.1f}% ({i}/{total_archives})"
+                        logger.info(f"[#current_progress] {progress_text}")
                         
                         # 更新处理状态
-                        handler.update_panel("archive_process", f"处理: {os.path.basename(archive)}")
-                        process_single_file(archive, handler)
+                        logger.info(f"[#process] 处理: {os.path.basename(archive)}")
+                        process_single_file(archive)
                 else:
-                    handler.update_panel("folder_process", "没有找到需要分类的压缩包")
+                    logger.info("[#process] 没有找到需要分类的压缩包")
             
             # 运行后续处理
             if 3 in enabled_features or 4 in enabled_features:
-                handler.update_panel("post_process", "🔧 开始运行后续处理...")
-                # run_post_processing(abs_dir_path, enabled_features, handler)
+                logger.info("[#post_process] 🔧 开始运行后续处理...")
+                run_post_processing(abs_dir_path, enabled_features)
             
             if not found_archives:
-                handler.update_panel("folder_process", f"在目录 '{abs_dir_path}' 下没有找到需要处理的压缩包")
+                logger.info(f"[#process] 在目录 '{abs_dir_path}' 下没有找到需要处理的压缩包")
             
-            handler.update_panel("folder_process", f"✨ 目录处理完成: {abs_dir_path}")
+            logger.info(f"[#process] ✨ 目录处理完成: {abs_dir_path}")
             
-        finally:
-            # 如果是我们创建的 handler，需要关闭它
-            if handler_created:
-                close_handler()
+        except Exception as e:
+            logger.error(f"[#update] ❌ 处理目录时出错 {directory_path}: {str(e)}")
+            logger.error(f"[#process] ❌ 处理出错: {os.path.basename(directory_path)}")
         
         return []
             
     except Exception as e:
-        if handler:
-            handler.update_panel("update_log", f"❌ 处理目录时出错 {directory_path}: {str(e)}")
-            handler.update_panel("folder_process", f"❌ 处理出错: {os.path.basename(directory_path)}")
+        logger.error(f"[#update] ❌ 处理目录时出错 {directory_path}: {str(e)}")
+        logger.error(f"[#process] ❌ 处理出错: {os.path.basename(directory_path)}")
         return []
 
 def process_paths(paths, enabled_features=None, similarity_config=None, wait_for_confirm=False):
@@ -1631,51 +1550,52 @@ def process_paths(paths, enabled_features=None, similarity_config=None, wait_for
             print(f"  - {path}")
         print()
     
-    # 只有在开始实际处理时才创建 handler
-    with get_handler() as handler:
-        for i, path in enumerate(valid_paths, 1):
-            try:
-                if wait_for_confirm:
-                    handler.update_panel("current_task", f"📍 处理第 {i}/{total_paths} 个路径: {path}")
-                else:
-                    handler.update_panel("current_task", f"处理: {os.path.basename(path)}")
+    # 初始化TextualLogger
+    init_TextualLogger()
+    
+    for i, path in enumerate(valid_paths, 1):
+        try:
+            if wait_for_confirm:
+                logger.info(f"[#current_progress] 📍 处理第 {i}/{total_paths} 个路径: {path}")
+            else:
+                logger.info(f"[#current_progress] 处理: {os.path.basename(path)}")
                     
-                if sys.platform == 'win32':
-                    if win32_path_exists(path):
-                        if os.path.isdir(path):
-                            process_directory(path, enabled_features=enabled_features, handler=handler)
-                        elif os.path.isfile(path) and is_archive(path):
-                            if 1 in enabled_features:
-                                if wait_for_confirm:
-                                    handler.update_panel("current_task", f"📦 处理单个文件: {path}")
-                                process_single_file(path, handler)
-                                if wait_for_confirm:
-                                    handler.update_panel("update_log", "✨ 文件处理完成")
-                else:
+            if sys.platform == 'win32':
+                if win32_path_exists(path):
                     if os.path.isdir(path):
-                        process_directory(path, enabled_features=enabled_features, handler=handler)
+                        process_directory(path, enabled_features=enabled_features)
                     elif os.path.isfile(path) and is_archive(path):
                         if 1 in enabled_features:
                             if wait_for_confirm:
-                                handler.update_panel("current_task", f"📦 处理单个文件: {path}")
-                            process_single_file(path, handler)
+                                logger.info(f"[#current_progress] 📦 处理单个文件: {path}")
+                            process_single_file(path)
                             if wait_for_confirm:
-                                handler.update_panel("update_log", "✨ 文件处理完成")
-                
-                if wait_for_confirm and i < total_paths:
-                    handler.update_panel("current_task", f"⏸️ 已处理完第 {i}/{total_paths} 个路径")
-                    input("按回车键继续处理下一个路径...")
+                                logger.info("[#update] ✨ 文件处理完成")
+            else:
+                if os.path.isdir(path):
+                    process_directory(path, enabled_features=enabled_features)
+                elif os.path.isfile(path) and is_archive(path):
+                    if 1 in enabled_features:
+                        if wait_for_confirm:
+                            logger.info(f"[#current_progress] 📦 处理单个文件: {path}")
+                        process_single_file(path)
+                        if wait_for_confirm:
+                            logger.info("[#update] ✨ 文件处理完成")
+            
+            if wait_for_confirm and i < total_paths:
+                logger.info(f"[#current_progress] ⏸️ 已处理完第 {i}/{total_paths} 个路径")
+                input("按回车键继续处理下一个路径...")
                     
-            except Exception as e:
-                handler.update_panel("update_log", f"❌ 处理路径时出错: {path}, 错误: {str(e)}")
-                if wait_for_confirm and i < total_paths:
-                    handler.update_panel("update_log", f"⚠️ 处理出错，是否继续？")
-                    input("按回车键继续处理下一个路径，按 Ctrl+C 终止程序...")
-        
-        if wait_for_confirm:
-            handler.update_panel("update_log", "✅ 所有路径处理完成！")
-        else:
-            handler.update_panel("update_log", f"✅ 批量处理完成！共处理 {total_paths} 个路径")
+        except Exception as e:
+            logger.error(f"[#update] ❌ 处理路径时出错: {path}, 错误: {str(e)}")
+            if wait_for_confirm and i < total_paths:
+                logger.warning("[#update] ⚠️ 处理出错，是否继续？")
+                input("按回车键继续处理下一个路径，按 Ctrl+C 终止程序...")
+    
+    if wait_for_confirm:
+        logger.info("[#update] ✅ 所有路径处理完成！")
+    else:
+        logger.info(f"[#update] ✅ 批量处理完成！共处理 {total_paths} 个路径")
 
 def process_args():
     """处理命令行参数"""
