@@ -1517,6 +1517,7 @@ def process_directory(directory_path, progress_task=None, enabled_features=None,
 
 def process_paths(paths, enabled_features=None, similarity_config=None, wait_for_confirm=False):
     """处理输入的路径列表"""
+    init_TextualLogger()
     if similarity_config:
         SIMILARITY_CONFIG.update(similarity_config)
         
