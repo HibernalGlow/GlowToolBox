@@ -2,7 +2,7 @@ import os
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Tuple
 import logging
 from dataclasses import dataclass
 from dateutil.parser import parse as date_parse
@@ -14,19 +14,20 @@ class FileInfo:
 
 class DateFormat:
     """日期格式预设"""
-    YEAR_MONTH_DAY = "%Y-%m-%d"  # 2024-02-27
-    YEAR_MONTH = "%Y-%m"         # 2024-02
-    YEAR = "%Y"                  # 2024
+    YEAR_MONTH_DAY = "%y/%m/%d"  # 24/02/28 -> 24/02/28/
+    YEAR_MONTH = "%y/%m"         # 24/02    -> 24/02/
+    YEAR = "%y"                  # 24       -> 24/
     
     @staticmethod
     def get_format_help():
         return """支持的日期格式：
-        - %Y-%m-%d : 年-月-日 (例如: 2024-02-27)
-        - %Y-%m    : 年-月   (例如: 2024-02)
-        - %Y       : 年      (例如: 2024)
+        - %y/%m/%d : 年/月/日 (例如: 24/02/28)
+        - %y/%m    : 年/月   (例如: 24/02)
+        - %y       : 年      (例如: 24)
         也可以自定义格式，例如：
-        - %Y/%m/%d : 使用斜杠分隔
-        - %Y_%m_%d : 使用下划线分隔
+        - %Y/%m/%d : 完整年份 (例如: 2024/02/28)
+        - %y_%m_%d : 使用下划线分隔
+        注意：使用斜杠(/)会自动创建多级目录
         """
 
 class DateGrouper:
@@ -36,20 +37,23 @@ class DateGrouper:
                  source_dir: str, 
                  target_dir: Optional[str] = None,
                  date_format: str = DateFormat.YEAR_MONTH_DAY,
-                 recursive: bool = True):
+                 recursive: bool = True,
+                 merge_levels: Optional[List[int]] = None):
         """
         初始化日期分组器
         
         Args:
             source_dir: 源文件目录
             target_dir: 目标目录（可选，如果不指定则在源目录下创建分组）
-            date_format: 日期格式（默认：年-月-日）
+            date_format: 日期格式（默认：年/月/日）
             recursive: 是否递归处理子目录
+            merge_levels: 需要合并的层级列表（从0开始，例如[1]表示合并月份层级）
         """
         self.source_dir = Path(source_dir)
         self.target_dir = Path(target_dir) if target_dir else self.source_dir
         self.date_format = date_format
         self.recursive = recursive
+        self.merge_levels = merge_levels or []
         self.logger = logging.getLogger(__name__)
         
     def _get_file_timestamp(self, file_path: Path) -> datetime:
@@ -67,19 +71,27 @@ class DateGrouper:
                 files.append(FileInfo(file_path, timestamp))
         return files
     
-    def _format_date(self, timestamp: datetime) -> str:
-        """格式化日期"""
+    def _format_date(self, timestamp: datetime) -> Tuple[str, List[str]]:
+        """格式化日期，返回完整路径和层级列表"""
         try:
-            return timestamp.strftime(self.date_format)
+            date_str = timestamp.strftime(self.date_format)
+            # 移除开头和结尾的斜杠，然后分割
+            levels = [x for x in date_str.strip('/').split('/') if x]
+            # 处理层级合并
+            if self.merge_levels:
+                for level in sorted(self.merge_levels, reverse=True):
+                    if level < len(levels):
+                        levels[level] = '*'
+            return '/'.join(levels), levels
         except ValueError as e:
             self.logger.error(f"日期格式错误: {str(e)}")
-            return timestamp.strftime(DateFormat.YEAR_MONTH_DAY)
+            return timestamp.strftime(DateFormat.YEAR_MONTH_DAY), []
     
     def _group_by_date(self, files: List[FileInfo]) -> Dict[str, List[FileInfo]]:
         """按日期对文件进行分组"""
         groups = {}
         for file in files:
-            date_str = self._format_date(file.timestamp)
+            date_str, _ = self._format_date(file.timestamp)
             if date_str not in groups:
                 groups[date_str] = []
             groups[date_str].append(file)
@@ -112,6 +124,8 @@ class DateGrouper:
         try:
             self.logger.info(f"开始整理文件夹: {self.source_dir}")
             self.logger.info(f"使用日期格式: {self.date_format}")
+            if self.merge_levels:
+                self.logger.info(f"合并层级: {self.merge_levels}")
             
             # 收集文件
             files = self._collect_files()
@@ -164,8 +178,11 @@ def main():
         target_dir = input("请输入目标文件夹路径（可选，直接回车则在源目录下分组）: ").strip()
         target_dir = target_dir if target_dir else None
         
-        date_format = input("请输入日期格式（直接回车使用默认格式 YYYY-MM-DD）: ").strip()
+        date_format = input("请输入日期格式（直接回车使用默认格式 YY/MM/DD）: ").strip()
         date_format = date_format if date_format else DateFormat.YEAR_MONTH_DAY
+        
+        merge_input = input("请输入要合并的层级（用逗号分隔，从0开始，例如1表示合并月份层级）: ").strip()
+        merge_levels = [int(x.strip()) for x in merge_input.split(',')] if merge_input else None
         
         recursive = input("是否处理子目录？(y/N): ").strip().lower() == 'y'
         
@@ -173,7 +190,8 @@ def main():
             source_dir=source_dir,
             target_dir=target_dir,
             date_format=date_format,
-            recursive=recursive
+            recursive=recursive,
+            merge_levels=merge_levels
         )
         grouper.organize()
         
