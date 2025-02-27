@@ -159,6 +159,17 @@ def has_forbidden_keyword(filename):
     """检查文件名是否包含禁止画师名的关键词"""
     return any(keyword in filename for keyword in forbidden_artist_keywords)
 
+def normalize_filename(filename):
+    """
+    标准化文件名以进行比较
+    1. 移除所有空格
+    2. 转换为小写
+    3. 保留数字和标点符号
+    """
+    # 移除所有空格并转换为小写
+    normalized = ''.join(filename.split()).lower()
+    return normalized
+
 def get_unique_filename_with_samename(directory: str, filename: str, original_path: str = None) -> str:
     """
     检查文件名是否存在，如果存在则添加[samename_n]后缀
@@ -176,6 +187,7 @@ def get_unique_filename_with_samename(directory: str, filename: str, original_pa
     
     # 获取目录下所有文件的列表（不包括自身）
     existing_files = []
+    existing_normalized = set()  # 用于存储标准化后的文件名
     for f in os.listdir(directory):
         f_path = os.path.join(directory, f)
         # 排除自身文件
@@ -183,12 +195,19 @@ def get_unique_filename_with_samename(directory: str, filename: str, original_pa
             continue
         if os.path.isfile(f_path):
             existing_files.append(f)
+            # 存储标准化后的文件名
+            f_base, f_ext = os.path.splitext(f)
+            normalized = normalize_filename(f_base)
+            existing_normalized.add(normalized)
 
     # 检查是否存在同名文件
     counter = 1
     current_filename = new_filename
-    while current_filename.lower() in [f.lower() for f in existing_files]:
-        current_filename = f"{base}[samename_{counter}]{ext}"
+    current_base, current_ext = os.path.splitext(current_filename)
+    
+    while normalize_filename(current_base) in existing_normalized:
+        current_base = f"{base}[samename_{counter}]"
+        current_filename = f"{current_base}{ext}"
         counter += 1
     
     return current_filename
