@@ -2,28 +2,54 @@ import os
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 import logging
 from dataclasses import dataclass
+from dateutil.parser import parse as date_parse
 
 @dataclass
 class FileInfo:
     path: Path
     timestamp: datetime
+
+class DateFormat:
+    """日期格式预设"""
+    YEAR_MONTH_DAY = "%Y-%m-%d"  # 2024-02-27
+    YEAR_MONTH = "%Y-%m"         # 2024-02
+    YEAR = "%Y"                  # 2024
     
+    @staticmethod
+    def get_format_help():
+        return """支持的日期格式：
+        - %Y-%m-%d : 年-月-日 (例如: 2024-02-27)
+        - %Y-%m    : 年-月   (例如: 2024-02)
+        - %Y       : 年      (例如: 2024)
+        也可以自定义格式，例如：
+        - %Y/%m/%d : 使用斜杠分隔
+        - %Y_%m_%d : 使用下划线分隔
+        """
+
 class DateGrouper:
     """文件日期分组器"""
     
-    def __init__(self, source_dir: str, target_dir: Optional[str] = None):
+    def __init__(self, 
+                 source_dir: str, 
+                 target_dir: Optional[str] = None,
+                 date_format: str = DateFormat.YEAR_MONTH_DAY,
+                 recursive: bool = True):
         """
         初始化日期分组器
         
         Args:
             source_dir: 源文件目录
             target_dir: 目标目录（可选，如果不指定则在源目录下创建分组）
+            date_format: 日期格式（默认：年-月-日）
+            recursive: 是否递归处理子目录
         """
         self.source_dir = Path(source_dir)
         self.target_dir = Path(target_dir) if target_dir else self.source_dir
+        self.date_format = date_format
+        self.recursive = recursive
         self.logger = logging.getLogger(__name__)
         
     def _get_file_timestamp(self, file_path: Path) -> datetime:
@@ -34,17 +60,26 @@ class DateGrouper:
     def _collect_files(self) -> List[FileInfo]:
         """收集所有文件信息"""
         files = []
-        for file_path in self.source_dir.rglob('*'):
+        glob_pattern = '**/*' if self.recursive else '*'
+        for file_path in self.source_dir.glob(glob_pattern):
             if file_path.is_file():
                 timestamp = self._get_file_timestamp(file_path)
                 files.append(FileInfo(file_path, timestamp))
         return files
     
+    def _format_date(self, timestamp: datetime) -> str:
+        """格式化日期"""
+        try:
+            return timestamp.strftime(self.date_format)
+        except ValueError as e:
+            self.logger.error(f"日期格式错误: {str(e)}")
+            return timestamp.strftime(DateFormat.YEAR_MONTH_DAY)
+    
     def _group_by_date(self, files: List[FileInfo]) -> Dict[str, List[FileInfo]]:
         """按日期对文件进行分组"""
         groups = {}
         for file in files:
-            date_str = file.timestamp.strftime('%Y-%m-%d')
+            date_str = self._format_date(file.timestamp)
             if date_str not in groups:
                 groups[date_str] = []
             groups[date_str].append(file)
@@ -58,27 +93,34 @@ class DateGrouper:
     
     def _move_files(self, groups: Dict[str, List[FileInfo]]) -> None:
         """移动文件到对应的日期文件夹"""
+        total_files = sum(len(files) for files in groups.values())
+        moved_files = 0
+        
         for date_str, files in groups.items():
             target_folder = self.target_dir / date_str
             for file_info in files:
                 target_path = target_folder / file_info.path.name
                 if not target_path.exists():
                     shutil.move(str(file_info.path), str(target_path))
-                    self.logger.info(f"Moved {file_info.path.name} to {date_str}/")
+                    moved_files += 1
+                    self.logger.info(f"已移动 [{moved_files}/{total_files}] {file_info.path.name} -> {date_str}/")
                 else:
-                    self.logger.warning(f"File {file_info.path.name} already exists in {date_str}/")
+                    self.logger.warning(f"文件已存在: {date_str}/{file_info.path.name}")
     
     def organize(self) -> None:
         """执行文件组织"""
         try:
-            self.logger.info(f"Starting to organize files in {self.source_dir}")
+            self.logger.info(f"开始整理文件夹: {self.source_dir}")
+            self.logger.info(f"使用日期格式: {self.date_format}")
             
             # 收集文件
             files = self._collect_files()
             if not files:
-                self.logger.warning("No files found to organize")
+                self.logger.warning("没有找到需要整理的文件")
                 return
                 
+            self.logger.info(f"找到 {len(files)} 个文件")
+            
             # 按日期分组
             groups = self._group_by_date(files)
             
@@ -88,10 +130,10 @@ class DateGrouper:
             # 移动文件
             self._move_files(groups)
             
-            self.logger.info("File organization completed successfully")
+            self.logger.info("文件整理完成")
             
         except Exception as e:
-            self.logger.error(f"Error organizing files: {str(e)}")
+            self.logger.error(f"整理过程出错: {str(e)}")
             raise
 
 def setup_logging():
@@ -101,25 +143,42 @@ def setup_logging():
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
 
+def print_date_format_help():
+    """打印日期格式帮助信息"""
+    print("\n" + DateFormat.get_format_help())
+
 def main():
     """主函数，用于直接运行模块"""
     setup_logging()
     logger = logging.getLogger(__name__)
     
     try:
-        source_dir = input("请输入要整理的源文件夹路径: ").strip()
-        target_dir = input("请输入目标文件夹路径（可选，直接回车则在源文件夹内分组）: ").strip()
+        print("\n=== 文件日期分组工具 ===")
+        print_date_format_help()
         
+        source_dir = input("\n请输入要整理的源文件夹路径: ").strip()
         if not source_dir:
             logger.error("源文件夹路径不能为空")
             return
             
+        target_dir = input("请输入目标文件夹路径（可选，直接回车则在源目录下分组）: ").strip()
         target_dir = target_dir if target_dir else None
-        grouper = DateGrouper(source_dir, target_dir)
+        
+        date_format = input("请输入日期格式（直接回车使用默认格式 YYYY-MM-DD）: ").strip()
+        date_format = date_format if date_format else DateFormat.YEAR_MONTH_DAY
+        
+        recursive = input("是否处理子目录？(y/N): ").strip().lower() == 'y'
+        
+        grouper = DateGrouper(
+            source_dir=source_dir,
+            target_dir=target_dir,
+            date_format=date_format,
+            recursive=recursive
+        )
         grouper.organize()
         
     except KeyboardInterrupt:
-        logger.info("操作已取消")
+        logger.info("\n操作已取消")
     except Exception as e:
         logger.error(f"发生错误: {str(e)}")
 
