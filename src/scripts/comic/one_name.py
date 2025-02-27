@@ -159,12 +159,13 @@ def has_forbidden_keyword(filename):
     """检查文件名是否包含禁止画师名的关键词"""
     return any(keyword in filename for keyword in forbidden_artist_keywords)
 
-def get_unique_filename_with_samename(directory: str, filename: str) -> str:
+def get_unique_filename_with_samename(directory: str, filename: str, original_path: str = None) -> str:
     """
     检查文件名是否存在，如果存在则添加[samename_n]后缀
     Args:
         directory: 文件所在目录
         filename: 完整文件名（包含扩展名）
+        original_path: 原始文件的完整路径，用于排除自身
     Returns:
         str: 唯一的文件名
     """
@@ -173,12 +174,24 @@ def get_unique_filename_with_samename(directory: str, filename: str) -> str:
     base = pangu.spacing_text(base)
     new_filename = f"{base}{ext}"
     
+    # 获取目录下所有文件的列表（不包括自身）
+    existing_files = []
+    for f in os.listdir(directory):
+        f_path = os.path.join(directory, f)
+        # 排除自身文件
+        if original_path and os.path.samefile(f_path, original_path):
+            continue
+        if os.path.isfile(f_path):
+            existing_files.append(f)
+
+    # 检查是否存在同名文件
     counter = 1
-    while os.path.exists(os.path.join(directory, new_filename)):
-        new_filename = f"{base}[samename_{counter}]{ext}"
+    current_filename = new_filename
+    while current_filename.lower() in [f.lower() for f in existing_files]:
+        current_filename = f"{base}[samename_{counter}]{ext}"
         counter += 1
     
-    return new_filename
+    return current_filename
 
 def get_unique_filename(directory, filename, artist_name, is_excluded=False):
     """生成唯一文件名"""
@@ -460,6 +473,9 @@ def process_files_in_directory(directory, artist_name):
         # 只有在非排除文件夹、启用了画师名添加、不包含禁止关键词时才添加画师名
         if not is_excluded and not has_forbidden_keyword and add_artist_name_enabled and artist_name not in exclude_keywords and not has_artist_name(new_filename, artist_name):
             new_filename = append_artist_name(new_filename, artist_name)
+            
+        # 确保文件名唯一（传入原始文件路径以排除自身）
+        new_filename = get_unique_filename_with_samename(directory, new_filename, original_file_path)
         
         if new_filename != filename:
             files_to_modify.append((filename, new_filename, original_file_path))

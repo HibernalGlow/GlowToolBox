@@ -6,7 +6,6 @@ import subprocess
 from pathlib import Path
 from nodes.record.logger_config import setup_logger
 from nodes.tui.textual_logger import TextualLoggerManager
-from scripts.comic.psd_convert import convert_psd_files
 
 # 配置日志面板布局
 TEXTUAL_LAYOUT = {
@@ -55,12 +54,11 @@ class SinglePacker:
     SUPPORTED_IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.webp', '.jxl', '.avif', '.gif')
     
     @staticmethod
-    def pack_directory(directory_path: str, convert_psd: bool = True):
+    def pack_directory(directory_path: str):
         """处理指定目录的单层打包
         
         Args:
             directory_path: 要处理的目录路径
-            convert_psd: 是否在打包前转换PSD文件，默认为True
         """
         init_TextualLogger()
         try:
@@ -72,12 +70,6 @@ class SinglePacker:
             if not os.path.isdir(directory_path):
                 logger.error(f"❌ 指定路径不是目录: {directory_path}")
                 return
-            
-            # 在打包前处理PSD文件
-            if convert_psd:
-                logger.info(f"[#process]🔄 开始处理PSD文件")
-                convert_psd_files(directory_path, use_recycle_bin=False)
-                logger.info(f"[#process]✅ PSD处理完成")
                 
             base_name = os.path.basename(directory_path)
             logger.info(f"[#process]🔄 开始处理目录: {directory_path}")
@@ -205,12 +197,6 @@ if "__main__" == __name__:
         help="要处理的目录路径，支持输入多个路径"
     )
     
-    parser.add_argument(
-        '--no-psd',
-        action='store_true',
-        help="不处理PSD文件（默认会处理）"
-    )
-    
     # 解析命令行参数
     args = parser.parse_args()
     
@@ -230,6 +216,12 @@ if "__main__" == __name__:
         parser.print_help()
         sys.exit(1)
     
+    # 提示用户先处理PSD文件
+    print("\n提示：如需处理PSD文件，请先使用以下命令：")
+    print("python -m scripts.comic.psd_convert", " ".join(f'"{d}"' for d in directories))
+    print("\n按回车键继续打包操作...")
+    input()
+    
     # 处理每个输入的目录
     for directory in directories:
-        SinglePacker.pack_directory(directory, convert_psd=not args.no_psd)
+        SinglePacker.pack_directory(directory)
