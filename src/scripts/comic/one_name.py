@@ -185,32 +185,19 @@ def get_unique_filename_with_samename(directory: str, filename: str, original_pa
     base = pangu.spacing_text(base)
     new_filename = f"{base}{ext}"
     
-    # 获取目录下所有文件的列表（不包括自身）
-    existing_files = []
-    existing_normalized = set()  # 用于存储标准化后的文件名
-    for f in os.listdir(directory):
-        f_path = os.path.join(directory, f)
-        # 排除自身文件
-        if original_path and os.path.samefile(f_path, original_path):
-            continue
-        if os.path.isfile(f_path):
-            existing_files.append(f)
-            # 存储标准化后的文件名
-            f_base, f_ext = os.path.splitext(f)
-            normalized = normalize_filename(f_base)
-            existing_normalized.add(normalized)
-
-    # 检查是否存在同名文件
+    # 如果文件不存在，或者是自身，直接返回
+    new_path = os.path.join(directory, new_filename)
+    if not os.path.exists(new_path) or (original_path and os.path.samefile(new_path, original_path)):
+        return new_filename
+        
+    # 如果存在同名文件，添加编号
     counter = 1
-    current_filename = new_filename
-    current_base, current_ext = os.path.splitext(current_filename)
-    
-    while normalize_filename(current_base) in existing_normalized:
-        current_base = f"{base}[samename_{counter}]"
-        current_filename = f"{current_base}{ext}"
+    while True:
+        current_filename = f"{base}[samename_{counter}]{ext}"
+        current_path = os.path.join(directory, current_filename)
+        if not os.path.exists(current_path):
+            return current_filename
         counter += 1
-    
-    return current_filename
 
 def get_unique_filename(directory, filename, artist_name, is_excluded=False):
     """生成唯一文件名"""
@@ -488,20 +475,14 @@ def process_files_in_directory(directory, artist_name):
         new_filename = filename
         
         # 对所有文件应用格式化，包括排除文件夹中的文件
-        # 注意：这里需要传入原始文件路径
-        new_filename = get_unique_filename(directory, new_filename, artist_name, is_excluded)
+        # new_filename = get_unique_filename(directory, new_filename, artist_name, is_excluded)
         
         # 只有在非排除文件夹、启用了画师名添加、不包含禁止关键词时才添加画师名
         if not is_excluded and not has_forbidden_keyword and add_artist_name_enabled and artist_name not in exclude_keywords and not has_artist_name(new_filename, artist_name):
             new_filename = append_artist_name(new_filename, artist_name)
         
-        # 确保文件名唯一（传入原始文件路径以排除自身）
-        # 注意：如果文件名没有改变，我们应该传入原始路径；如果改变了，应该传入None
-        if new_filename == filename:
-            final_filename = get_unique_filename_with_samename(directory, new_filename, original_file_path)
-        else:
-            # 如果文件名已经改变，说明这是一个新文件名，不需要排除自身
-            final_filename = get_unique_filename_with_samename(directory, new_filename, None)
+        # 确保文件名唯一（始终传入原始路径以排除自身）
+        final_filename = get_unique_filename_with_samename(directory, new_filename, original_file_path)
         
         if final_filename != filename:
             files_to_modify.append((filename, final_filename, original_file_path))
