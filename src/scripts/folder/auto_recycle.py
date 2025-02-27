@@ -62,17 +62,37 @@ class RecycleBinCleaner:
         main_container = ttk.Frame(self.root, padding=10)
         main_container.pack(fill=BOTH, expand=YES)
         
-        # 顶部状态区域
-        status_frame = ttk.Frame(main_container)
-        status_frame.pack(fill=X, pady=(0, 10))
+        # 顶部工具栏区域（新增）
+        toolbar_frame = ttk.Frame(main_container)
+        toolbar_frame.pack(fill=X, pady=(0, 10), side=TOP)
         
+        # 主题选择组件（新增）
+        theme_label = ttk.Label(toolbar_frame, text="界面主题:", bootstyle="info")
+        theme_label.pack(side=LEFT, padx=(0,5))
+        
+        self.theme_combobox = ttk.Combobox(
+            toolbar_frame,
+            values=[
+                "cosmo", "flatly", "litera", "minty", 
+                "lumen", "sandstone", "yeti", "pulse",
+                "united", "morph", "journal", "darkly",
+                "superhero", "solar", "cyborg", "vapor"
+            ],
+            width=12,
+            state="readonly"
+        )
+        self.theme_combobox.set("cosmo")
+        self.theme_combobox.pack(side=LEFT)
+        self.theme_combobox.bind("<<ComboboxSelected>>", self.change_theme)
+        
+        # 原有状态标签位置调整
         self.status_label = ttk.Label(
-            status_frame,
+            toolbar_frame,
             text="状态: 未启动",
             font=("微软雅黑", 10),
             bootstyle="info"
         )
-        self.status_label.pack(side=LEFT)
+        self.status_label.pack(side=RIGHT, padx=(10,0))
         
         # 间隔调整区域
         interval_frame = ttk.Labelframe(
@@ -288,6 +308,14 @@ class RecycleBinCleaner:
             return
             
         self.root.mainloop()
+
+    def change_theme(self, event=None):
+        selected_theme = self.theme_combobox.get()
+        try:
+            self.root.style.theme_use(selected_theme)
+            logging.info(f"已切换至 {selected_theme} 主题")
+        except Exception as e:
+            logging.error(f"主题切换失败: {str(e)}")
 
 def hide_console():
     """使用更安全的方式隐藏命令行窗口"""
