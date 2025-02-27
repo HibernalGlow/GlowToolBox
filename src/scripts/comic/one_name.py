@@ -486,18 +486,25 @@ def process_files_in_directory(directory, artist_name):
         original_file_path = os.path.join(directory, filename)
         filename = detect_and_decode_filename(filename)
         new_filename = filename
+        
         # 对所有文件应用格式化，包括排除文件夹中的文件
+        # 注意：这里需要传入原始文件路径
         new_filename = get_unique_filename(directory, new_filename, artist_name, is_excluded)
         
         # 只有在非排除文件夹、启用了画师名添加、不包含禁止关键词时才添加画师名
         if not is_excluded and not has_forbidden_keyword and add_artist_name_enabled and artist_name not in exclude_keywords and not has_artist_name(new_filename, artist_name):
             new_filename = append_artist_name(new_filename, artist_name)
-            
-        # 确保文件名唯一（传入原始文件路径以排除自身）
-        new_filename = get_unique_filename_with_samename(directory, new_filename, original_file_path)
         
-        if new_filename != filename:
-            files_to_modify.append((filename, new_filename, original_file_path))
+        # 确保文件名唯一（传入原始文件路径以排除自身）
+        # 注意：如果文件名没有改变，我们应该传入原始路径；如果改变了，应该传入None
+        if new_filename == filename:
+            final_filename = get_unique_filename_with_samename(directory, new_filename, original_file_path)
+        else:
+            # 如果文件名已经改变，说明这是一个新文件名，不需要排除自身
+            final_filename = get_unique_filename_with_samename(directory, new_filename, None)
+        
+        if final_filename != filename:
+            files_to_modify.append((filename, final_filename, original_file_path))
 
     # 如果有文件需要修改，显示进度条并处理
     if files_to_modify:
@@ -508,24 +515,28 @@ def process_files_in_directory(directory, artist_name):
                 
                 new_file_path = os.path.join(directory, new_filename)
                 
-                # 重命名文件
-                os.rename(original_file_path, new_file_path)
-                
-                # 恢复时间戳
-                os.utime(new_file_path, (original_stat.st_atime, original_stat.st_mtime))
-                
                 try:
-                    rel_old_path = os.path.relpath(original_file_path, base_path)
-                    rel_new_path = os.path.relpath(new_file_path, base_path)
-                except ValueError:
-                    rel_old_path = original_file_path
-                    rel_new_path = new_file_path
+                    # 重命名文件
+                    os.rename(original_file_path, new_file_path)
                     
-                log_message = f"重命名: {rel_old_path} -> {rel_new_path}"
-                logging.info(log_message)
+                    # 恢复时间戳
+                    os.utime(new_file_path, (original_stat.st_atime, original_stat.st_mtime))
+                    
+                    try:
+                        rel_old_path = os.path.relpath(original_file_path, base_path)
+                        rel_new_path = os.path.relpath(new_file_path, base_path)
+                    except ValueError:
+                        rel_old_path = original_file_path
+                        rel_new_path = new_file_path
+                        
+                    log_message = f"重命名: {rel_old_path} -> {rel_new_path}"
+                    logging.info(log_message)
+                except OSError as e:
+                    logging.error(f"重命名文件失败 {original_file_path}: {str(e)}")
+                    continue
+                    
                 # 更新进度条，但不显示文件名（避免重复）
                 pbar.update(1)
-                
                 modified_files_count += 1
 
     return modified_files_count
