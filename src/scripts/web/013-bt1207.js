@@ -4,7 +4,7 @@
 // @version      0.7.1
 // @description  为BT1207搜索结果添加磁力链接快速显示和批量获取功能
 // @author       Your name
-// @match        https://bt1207xz.top/search*
+// @match        https://bt1207wx.top/search*
 // @match        https://bt1207gb.top/*
 // @match        https://*.bt1207.*/search*
 // @require      https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js
@@ -262,6 +262,23 @@
             background: #45a049;
             transform: scale(1.05);
         }
+        .retry-btn {
+            display: inline-block;
+            cursor: pointer;
+            margin: 0 5px;
+            padding: 2px 6px;
+            border: none;
+            border-radius: 3px;
+            background: #FF9800;
+            color: white;
+            font-size: 12px;
+            vertical-align: middle;
+            transition: all 0.2s;
+        }
+        .retry-btn:hover {
+            background: #F57C00;
+            transform: scale(1.05);
+        }
     `;
     document.head.appendChild(style);
 
@@ -351,11 +368,99 @@
         }
     }
 
-    // 获取磁力链接（恢复原来的逻辑）
+    // 添加磁力图标的辅助函数
+    function addMagnetIcon(container, magnetLink) {
+        const magnetIcon = document.createElement('img');
+        magnetIcon.src = 'https://cdn.jsdelivr.net/gh/zxf10608/JavaScript/icon/magnet00.png';
+        magnetIcon.className = 'magnet-icon';
+        magnetIcon.title = `识别到磁力链接，左键打开，右键复制\n${magnetLink}`;
+        magnetIcon.dataset.magnet = magnetLink;
+        
+        magnetIcon.addEventListener('click', () => window.open(magnetLink));
+        magnetIcon.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            GM_setClipboard(magnetLink);
+            if (GM_getValue('notificationEnabled')) {
+                GM_notification({
+                    title: '磁力链接已复制',
+                    text: '磁力链接已成功复制到剪贴板！',
+                    timeout: 2000
+                });
+            }
+        });
+
+        container.appendChild(magnetIcon);
+        return magnetIcon;
+    }
+
+    // 添加重试按钮的辅助函数
+    function addRetryButton(container, detailLink, magnetSelectors) {
+        if (container.querySelector('.retry-btn')) return;
+
+        const retryBtn = DOM.createElement('button', {
+            className: 'retry-btn',
+            textContent: '重试',
+            onclick: async (e) => {
+                e.stopPropagation();
+                const btn = e.target;
+                btn.disabled = true;
+                btn.textContent = '重试中...';
+                
+                try {
+                    const magnetLink = await new Promise((resolve, reject) => {
+                        GM_xmlhttpRequest({
+                            method: 'GET',
+                            url: detailLink,
+                            onload: function(response) {
+                                const parser = new DOMParser();
+                                const doc = parser.parseFromString(response.responseText, 'text/html');
+                                
+                                for (const sel of magnetSelectors) {
+                                    const element = doc.querySelector(sel);
+                                    if (element) {
+                                        resolve(element.href || element.textContent);
+                                        return;
+                                    }
+                                }
+                                reject(new Error('未找到磁力链接'));
+                            },
+                            onerror: reject
+                        });
+                    });
+
+                    if (magnetLink) {
+                        btn.remove();
+                        addMagnetIcon(container, magnetLink);
+                        if (GM_getValue('notificationEnabled')) {
+                            GM_notification({
+                                title: '重试成功',
+                                text: '成功获取磁力链接！',
+                                timeout: 2000
+                            });
+                        }
+                    }
+                } catch (error) {
+                    debugLog('重试获取磁力链接失败: ' + error.message);
+                    btn.disabled = false;
+                    btn.textContent = '重试';
+                    if (GM_getValue('notificationEnabled')) {
+                        GM_notification({
+                            title: '重试失败',
+                            text: '获取磁力链接失败，请稍后再试！',
+                            timeout: 2000
+                        });
+                    }
+                }
+            }
+        });
+        
+        container.appendChild(retryBtn);
+    }
+
+    // 修改processSearchResults函数
     async function processSearchResults(searchResults) {
         debugLog('开始处理搜索结果，数量：' + searchResults.length);
         
-        // 将搜索结果转换为数组并过滤
         const items = Array.from(searchResults).filter(item => {
             const container = item.querySelector('.magnet-container');
             if (!container) return false;
@@ -364,92 +469,54 @@
             return magnetIcons.length === 0 || !Array.from(magnetIcons).some(icon => icon.dataset.magnet);
         });
         
-        debugLog(`找到 ${items.length} 个需要处理的项目`);
-        
-        // 每次处理两个请求
+        const magnetSelectors = [
+            '.magnet-link',
+            '[href^="magnet:"]',
+            'a[href*="magnet:?xt=urn:btih:"]',
+            '#magnetLink',
+            '.magnet'
+        ];
+
         for (let i = 0; i < items.length; i += Config.batchSize) {
             const currentBatch = items.slice(i, i + Config.batchSize);
-            debugLog(`处理第 ${i/Config.batchSize + 1} 批请求，共 ${currentBatch.length} 个`);
-
-            const batchPromises = currentBatch.map(async (item, batchIndex) => {
-                const actualIndex = i + batchIndex;
-                debugLog('处理搜索结果项 #' + actualIndex);
-
-                // 获取详情页链接
+            
+            const batchPromises = currentBatch.map(async (item) => {
                 const linkElement = item.querySelector('a.rrt');
-                if (!linkElement) {
-                    debugLog('项目 #' + actualIndex + ' 未找到链接元素');
-                    return;
-                }
+                if (!linkElement) return;
 
                 const container = item.querySelector('.magnet-container');
                 if (!container) return;
 
                 const detailLink = linkElement.href;
-                debugLog('获取到详情页链接：' + detailLink);
-
+                
                 try {
                     const response = await fetch(detailLink);
                     const text = await response.text();
-                    const parser = new DOMParser();
-                    const doc = parser.parseFromString(text, 'text/html');
-                    
-                    // 尝试多个可能的选择器来找到磁力链接
-                    const magnetSelectors = [
-                        '.magnet-link',
-                        '[href^="magnet:"]',
-                        'a[href*="magnet:?xt=urn:btih:"]',
-                        '#magnetLink',
-                        '.magnet'
-                    ];
+                    const doc = new DOMParser().parseFromString(text, 'text/html');
                     
                     let magnetLink = null;
                     for (const sel of magnetSelectors) {
                         const element = doc.querySelector(sel);
                         if (element) {
                             magnetLink = element.href || element.textContent;
-                            debugLog('找到磁力链接，使用选择器: ' + sel);
                             break;
                         }
                     }
 
                     if (magnetLink && !container.querySelector(`[data-magnet="${magnetLink}"]`)) {
-                        debugLog('成功获取磁力链接：' + magnetLink.substring(0, 60) + '...');
-                        const magnetIcon = document.createElement('img');
-                        magnetIcon.src = 'https://cdn.jsdelivr.net/gh/zxf10608/JavaScript/icon/magnet00.png';
-                        magnetIcon.className = 'magnet-icon';
-                        magnetIcon.title = `识别到磁力链接，左键打开，右键复制\n${magnetLink}`;
-                        magnetIcon.dataset.magnet = magnetLink;
-                        
-                        // 添加点击和右键事件
-                        magnetIcon.addEventListener('click', (e) => {
-                            window.open(magnetLink);
-                        });
-                        magnetIcon.addEventListener('contextmenu', (e) => {
-                            e.preventDefault();
-                            GM_setClipboard(magnetLink);
-                            if (GM_getValue('notificationEnabled')) {
-                                GM_notification({
-                                    title: '磁力链接已复制',
-                                    text: '磁力链接已成功复制到剪贴板！',
-                                    timeout: 2000
-                                });
-                            }
-                        });
-
-                        container.appendChild(magnetIcon);
+                        addMagnetIcon(container, magnetLink);
                     } else {
-                        debugLog('项目 #' + actualIndex + ' 未找到新的磁力链接');
+                        addRetryButton(container, detailLink, magnetSelectors);
                     }
                 } catch (error) {
                     debugLog('获取磁力链接失败: ' + error.message);
+                    addRetryButton(container, detailLink, magnetSelectors);
                 }
             });
 
             await Promise.all(batchPromises);
             
             if (i + Config.batchSize < items.length) {
-                debugLog(`等待 ${Config.delayBetweenBatches}ms 后处理下一批...`);
                 await delay(Config.delayBetweenBatches);
             }
         }
