@@ -370,6 +370,8 @@ class Converter:
     """图片转换类"""
 
     def __init__(self):
+        self.fs = FileSystem()
+        self.force_delete = ForceDelete()
         self.path_handler = PathHandler()
 
     def convert_with_cjxl(self, input_path, output_path, is_jpeg=False):
@@ -463,7 +465,7 @@ class Converter:
                 # logger.info(f"[#file]{status_message}")
                 try:
                     image = None
-                    if not self.force_delete.safe_delete(file_path):
+                    if not self.fs.safe_delete_file(file_path):  # 使用 FileSystem 的方法
                         error_msg = f'删除原文件失败 {file_path}'
                         logger.info(f"[#image]{error_msg}")
                         return False

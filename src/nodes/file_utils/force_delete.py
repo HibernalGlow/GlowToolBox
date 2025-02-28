@@ -155,6 +155,24 @@ class ForceDelete:
             return False
 
     @staticmethod
+    def _mark_for_deletion(file_path: str) -> bool:
+        """将文件标记为待删除（添加.tdel后缀）"""
+        try:
+            tdel_path = f"{file_path}.tdel"
+            try:
+                os.rename(file_path, tdel_path)
+                return True
+            except Exception:
+                # 如果重命名失败，尝试使用 Windows API
+                kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+                if kernel32.MoveFileW(file_path, tdel_path):
+                    return True
+            return False
+        except Exception as e:
+            logger.error(f"标记文件为待删除失败: {file_path}, 错误: {str(e)}")
+            return False
+
+    @staticmethod
     def force_delete(file_path: str | Path) -> bool:
         """强制删除文件"""
         try:
@@ -187,13 +205,17 @@ class ForceDelete:
 
             # 使用 cmd 强制删除
             try:
-                # 使用 /F /A: 参数强制删除所有属性的文件
                 subprocess.run(['cmd', '/c', f'del /F /S /Q /A: "{file_path}"'], 
                              capture_output=True, check=False)
                 if not os.path.exists(file_path):
                     return True
             except Exception:
                 pass
+
+            # 如果所有删除方法都失败，尝试重命名为.tdel
+            if ForceDelete._mark_for_deletion(file_path):
+                logger.info(f"文件已标记为待删除: {file_path}")
+                return True
 
             return False
         except Exception as e:
