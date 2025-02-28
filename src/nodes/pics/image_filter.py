@@ -390,12 +390,16 @@ class ImageFilter:
             # 获取未被其他过滤器删除的文件
             remaining_files = [f for f in sorted_files if f not in to_delete]
             if remaining_files:
-                if duplicate_filter_mode == 'hash' and self.hash_file:
-                    # 直接使用哈希文件进行过滤
+                # 如果有哈希文件，先进行哈希文件过滤
+                if self.hash_file:
                     hash_to_delete, hash_reasons = self._process_hash_images(remaining_files, ref_hamming_threshold)
                     to_delete.update(hash_to_delete)
                     removal_reasons.update(hash_reasons)
-                else:
+                    # 更新剩余文件列表
+                    remaining_files = [f for f in remaining_files if f not in hash_to_delete]
+
+                # 如果还有剩余文件且不是纯哈希模式，继续进行其他过滤
+                if remaining_files and duplicate_filter_mode != 'hash':
                     # 使用传统的相似图片组过滤
                     similar_groups = self._find_similar_images(remaining_files)
                     for group in similar_groups:
