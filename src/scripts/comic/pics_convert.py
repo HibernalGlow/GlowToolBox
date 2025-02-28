@@ -2075,12 +2075,12 @@ def main():
                     "min_width": "0"
                 }
             },
-            "JXL-75": {
-                "description": "JXL格式 75质量",
+            "JXL-80": {
+                "description": "JXL格式 80质量",
                 "checkbox_options": ["clipboard"],
                 "input_values": {
                     "format": "jxl",
-                    "quality": "75",
+                    "quality": "80",
                     "interval": "10",
                     "min_width": "0"
                 }
