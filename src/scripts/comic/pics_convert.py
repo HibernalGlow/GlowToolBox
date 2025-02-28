@@ -1,7 +1,8 @@
 from nodes.config.import_bundles import *
 
-import fsspec
 
+import fsspec
+from nodes.file_utils.force_delete import ForceDelete
 import importlib.util
 import tempfile
 import sys
@@ -176,6 +177,7 @@ class FileSystem:
     def __init__(self):
         self.path_handler = PathHandler()
         self.fs = fsspec.filesystem('file')
+        self.force_delete = ForceDelete()
 
     def ensure_directory_exists(self, directory):
         """确保目录存在，如果不存在则创建"""
@@ -189,15 +191,20 @@ class FileSystem:
             return False
 
     def safe_delete_file(self, file_path):
-        """安全删除文件"""
+        """
+        安全删除文件，优先移动到回收站，失败时尝试强制删除
+        """
         try:
-            if self.fs.exists(file_path):
-                self.fs.delete(file_path)
-                logger.info(f"[#file]删除文件: {file_path}")
+            if not os.path.exists(file_path):
                 return True
-            return False
+                
+            # 首先尝试移动到回收站
+            if not self.force_delete.safe_delete(file_path):
+                # 如果移动到回收站失败，尝试强制删除
+                return self.force_delete.safe_delete(file_path, force=True)
+            return True
         except Exception as e:
-            logger.info(f"[#file]删除文件失败 {file_path}: {e}")
+            logger.error(f"删除文件失败: {file_path}, 错误: {str(e)}")
             return False
 
     def safe_move_file(self, src_path, dst_path):
@@ -456,7 +463,10 @@ class Converter:
                 # logger.info(f"[#file]{status_message}")
                 try:
                     image = None
-                    fs.delete(file_path)
+                    if not self.force_delete.safe_delete(file_path):
+                        error_msg = f'删除原文件失败 {file_path}'
+                        logger.info(f"[#image]{error_msg}")
+                        return False
                     return (True, original_size, new_size)
                 except Exception as e:
                     error_msg = f'删除原文件失败 {file_path}: {e}'

@@ -458,14 +458,12 @@ def run_application(args):
         )
 
         # 如果是去汉化模式且没有指定哈希文件，自动准备哈希文件
-        if (is_dehash_mode or args.duplicate_filter_mode == 'watermark') and not args.hash_file:
+        if is_dehash_mode and not args.hash_file:
             recruit_folder = r"E:\1EHV\[01杂]\zzz去图"
             hash_file = filter_instance.prepare_hash_file(recruit_folder)
-            if is_dehash_mode and not hash_file:
+            if not hash_file:
                 logger.error("[#sys_log]❌ 去汉化模式需要哈希文件，但准备失败")
                 return False
-            elif not hash_file:
-                logger.warning("[#sys_log]⚠️ 去水印模式未能加载哈希文件，将仅使用水印检测")
 
         # 准备解压参数
         extract_params = {
