@@ -205,6 +205,9 @@ def get_unique_filename(directory, filename, artist_name, is_excluded=False):
     """生成唯一文件名"""
     base, ext = os.path.splitext(filename)
     
+    # 预处理：清理所有花括号内容
+    base = re.sub(r'\{[^}]*\}', '', base)
+    
     # 如果包含禁止关键词，删除画师名
     if has_forbidden_keyword(base):
         base = base.replace(artist_name, '')
@@ -477,7 +480,7 @@ def process_files_in_directory(directory, artist_name):
         new_filename = filename
         
         # 对所有文件应用格式化，包括排除文件夹中的文件
-        # new_filename = get_unique_filename(directory, new_filename, artist_name, is_excluded)
+        new_filename = get_unique_filename(directory, new_filename, artist_name, is_excluded)
         
         # 只有在非排除文件夹、启用了画师名添加、不包含禁止关键词时才添加画师名
         if not is_excluded and not has_forbidden_keyword and add_artist_name_enabled and artist_name not in exclude_keywords and not has_artist_name(new_filename, artist_name):
