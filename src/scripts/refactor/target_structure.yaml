@@ -1,0 +1,59 @@
+MangaArchiveClassifier:
+  description: 漫画档案分类器，处理各类漫画压缩文件的分类整理工作
+  variables:
+    - source_dir
+    - target_dir
+    - config
+    - supported_formats
+  functions:
+    - classify_archives()
+    - process_archive()
+    - extract_metadata()
+    - move_archive()
+    - validate_archive()
+  inner_classes:
+    Config:
+      description: 分类器配置管理
+      variables:
+        - settings
+        - rules
+      functions:
+        - load_config()
+        - save_config()
+        - get_rule()
+
+ArchiveProcessor:
+  description: 压缩包处理器，负责压缩包的读取、解压和内容分析
+  variables:
+    - temp_dir
+    - current_archive
+  functions:
+    - open_archive()
+    - extract_files()
+    - get_file_list()
+    - analyze_content()
+    - cleanup()
+
+MetadataExtractor:
+  description: 元数据提取器，从文件名和内容中提取漫画信息
+  variables:
+    - patterns
+    - extracted_info
+  functions:
+    - extract_from_filename()
+    - extract_from_images()
+    - parse_patterns()
+    - get_metadata()
+    - match_patterns()
+
+FileManager:
+  description: 文件管理器，处理文件的移动、重命名和目录创建
+  variables:
+    - processed_files
+    - target_structure
+  functions:
+    - move_with_structure()
+    - rename_by_pattern()
+    - create_directory()
+    - check_exists()
+    - generate_unique_name()

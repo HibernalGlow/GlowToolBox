@@ -6,127 +6,8 @@ from pathlib import Path
 import yaml
 import json
 
-class StructureDefinition:
-    """目标结构定义解析器"""
-    def __init__(self, structure_file: str):
-        self.structure_file = structure_file
-        self.structure: Dict[str, Dict] = {}
-        self.function_mapping: Dict[str, str] = {}  # 函数名到类路径的映射
-        self.variable_mapping: Dict[str, str] = {}  # 变量名到类路径的映射
-        self.class_dependencies: Dict[str, Set[str]] = {}  # 类之间的依赖关系
-        
-    def parse_structure(self) -> None:
-        """解析结构定义文件"""
-        with open(self.structure_file, 'r', encoding='utf-8') as f:
-            content = f.read()
-            
-        # 解析类定义
-        current_class = None
-        current_inner_class = None
-        class_content = []
-        
-        for line in content.split('\n'):
-            line = line.strip()
-            if not line:
-                continue
-                
-            # 检查类定义
-            class_match = re.match(r'class\s+(\w+):', line)
-            if class_match:
-                if current_class:
-                    self.structure[current_class] = self._parse_class_content(class_content)
-                    class_content = []
-                current_class = class_match.group(1)
-                current_inner_class = None
-                self.class_dependencies[current_class] = set()
-                continue
-                
-            # 检查内部类定义
-            inner_class_match = re.match(r'\s+class\s+(\w+):', line)
-            if inner_class_match:
-                current_inner_class = inner_class_match.group(1)
-                continue
-                
-            # 收集类内容
-            if line.startswith('-'):
-                item = line[1:].strip()
-                if current_inner_class:
-                    path = f"{current_class}.{current_inner_class}"
-                else:
-                    path = current_class
-                    
-                # 判断是函数还是变量
-                if '()' in item:
-                    # 是函数
-                    func_name = item.replace('()', '').strip()
-                    self.function_mapping[func_name] = path
-                    
-                    # 分析函数名中的依赖关系
-                    for other_class in self.class_dependencies:
-                        if other_class.lower() in func_name.lower():
-                            self.class_dependencies[current_class].add(other_class)
-                else:
-                    # 是变量
-                    self.variable_mapping[item.strip()] = path
-                    
-                class_content.append(item)
-                
-        # 处理最后一个类
-        if current_class:
-            self.structure[current_class] = self._parse_class_content(class_content)
-            
-    def _parse_class_content(self, content: List[str]) -> Dict:
-        """解析类内容"""
-        result = {
-            'functions': [],
-            'variables': [],
-            'inner_classes': {}
-        }
-        
-        current_inner_class = None
-        
-        for item in content:
-            item = item.strip()
-            if not item:
-                continue
-                
-            if item.startswith('class'):
-                current_inner_class = item.split(':')[0].split()[-1]
-                result['inner_classes'][current_inner_class] = {
-                    'functions': [],
-                    'variables': []
-                }
-            elif '()' in item:
-                # 函数定义
-                func_name = item.replace('()', '').strip()
-                if current_inner_class:
-                    result['inner_classes'][current_inner_class]['functions'].append(func_name)
-                else:
-                    result['functions'].append(func_name)
-            else:
-                # 变量定义
-                if current_inner_class:
-                    result['inner_classes'][current_inner_class]['variables'].append(item)
-                else:
-                    result['variables'].append(item)
-                    
-        return result
-
-    def get_class_order(self) -> List[str]:
-        """获取类的依赖顺序"""
-        # 创建有向图
-        graph = nx.DiGraph()
-        for class_name, deps in self.class_dependencies.items():
-            graph.add_node(class_name)
-            for dep in deps:
-                graph.add_edge(class_name, dep)
-                
-        try:
-            # 尝试拓扑排序
-            return list(nx.topological_sort(graph))
-        except nx.NetworkXUnfeasible:
-            # 如果有循环依赖，返回原始顺序
-            return list(self.structure.keys())
+# 导入新的YAML结构解析器
+from nodes.refactor.structure_parser import StructureDefinition
 
 class CodeAnalyzer:
     def __init__(self, source_file: str):
@@ -554,7 +435,7 @@ class CodeRestructurer:
 def process_python_file(source_file: str, structure_file: str, output_file: str) -> None:
     """处理Python文件并生成重组后的代码"""
     try:
-        # 解析目标结构
+        # 解析目标结构 (使用YAML解析器)
         structure = StructureDefinition(structure_file)
         structure.parse_structure()
         
@@ -578,7 +459,7 @@ def process_python_file(source_file: str, structure_file: str, output_file: str)
 
 if __name__ == "__main__":
     source_file = r"D:\1VSCODE\GlowToolBox\src\scripts\comic\manga_archive_classifier.py"  # 源文件
-    structure_file = r"D:\1VSCODE\GlowToolBox\src\scripts\refactor\target_structure.py"  # 目标结构文件
+    structure_file = r"D:\1VSCODE\GlowToolBox\src\scripts\refactor\target_structure.yaml"  # 目标结构文件 (.yaml扩展名)
     output_file = r"D:\1VSCODE\GlowToolBox\src\scripts\refactor\restructured_code.py"  # 输出文件
     
     process_python_file(source_file, structure_file, output_file)
