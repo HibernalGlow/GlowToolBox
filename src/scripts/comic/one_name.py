@@ -172,13 +172,12 @@ def normalize_filename(filename):
     normalized = ''.join(filename.split()).lower()
     return normalized
 
-def get_unique_filename_with_suffix(directory: str, filename: str, suffix_type: str = 'rename', original_path: str = None) -> str:
+def get_unique_filename_with_samename(directory: str, filename: str, original_path: str = None) -> str:
     """
-    检查文件名是否存在，如果存在则添加指定类型的后缀
+    检查文件名是否存在，如果存在则添加[samename_n]后缀
     Args:
         directory: 文件所在目录
         filename: 完整文件名（包含扩展名）
-        suffix_type: 后缀类型，'rename' 或 'samename'
         original_path: 原始文件的完整路径，用于排除自身
     Returns:
         str: 唯一的文件名
@@ -190,15 +189,20 @@ def get_unique_filename_with_suffix(directory: str, filename: str, suffix_type: 
     
     # 如果文件不存在，或者是自身，直接返回
     new_path = os.path.join(directory, new_filename)
-    if not os.path.exists(new_path) or (original_path and os.path.samefile(new_path, original_path)):
+    if not os.path.exists(new_path):
+        logging.debug(f"文件不存在，使用原始文件名: {new_filename}")
+        return new_filename
+    elif original_path and os.path.samefile(new_path, original_path):
+        logging.debug(f"文件是自身，保留原始文件名: {new_filename}")
         return new_filename
         
     # 如果存在同名文件，添加编号
     counter = 1
     while True:
-        current_filename = f"{base}[{suffix_type}_{counter}]{ext}"
+        current_filename = f"{base}[samename_{counter}]{ext}"
         current_path = os.path.join(directory, current_filename)
         if not os.path.exists(current_path):
+            logging.debug(f"检测到文件名冲突，生成新文件名: {current_filename}")
             return current_filename
         counter += 1
 
@@ -222,7 +226,7 @@ def get_unique_filename(directory, filename, artist_name, is_excluded=False):
     # 如果是排除的文件夹，直接返回处理后的文件名
     if is_excluded:
         filename = f"{base}{ext}"
-        return get_unique_filename_with_suffix(directory, filename, 'samename')
+        return get_unique_filename_with_samename(directory, filename)
 
     # 修改正则替换模式，更谨慎地处理日文字符
     basic_patterns = [
@@ -447,7 +451,7 @@ def get_unique_filename(directory, filename, artist_name, is_excluded=False):
     
     # 检查文件是否存在，如果存在则添加[samename_n]后缀
     filename = f"{new_base}{ext}"
-    return get_unique_filename_with_suffix(directory, filename, 'samename')
+    return get_unique_filename_with_samename(directory, filename)
 
 def has_artist_name(filename, artist_name):
     """检查文件名是否包含画师名"""
@@ -478,9 +482,7 @@ def process_files_in_directory(directory, artist_name):
     for filename in files:
         original_file_path = os.path.join(directory, filename)
         filename = detect_and_decode_filename(filename)
-        
-        # 先检查重名并处理
-        new_filename = get_unique_filename_with_suffix(directory, filename, 'rename')
+        new_filename = filename
         
         # 对所有文件应用格式化，包括排除文件夹中的文件
         new_filename = get_unique_filename(directory, new_filename, artist_name, is_excluded)
@@ -490,7 +492,7 @@ def process_files_in_directory(directory, artist_name):
             new_filename = append_artist_name(new_filename, artist_name)
         
         # 确保文件名唯一（始终传入原始路径以排除自身）
-        final_filename = get_unique_filename_with_suffix(directory, new_filename, 'samename', original_file_path)
+        final_filename = get_unique_filename_with_samename(directory, new_filename, original_file_path)
         
         if final_filename != filename:
             files_to_modify.append((filename, final_filename, original_file_path))
