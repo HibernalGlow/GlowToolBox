@@ -36,13 +36,17 @@ TEXTUAL_LAYOUT = {
     "update_log": {"ratio": 2, "title": "ℹ️ 更新日志", "style": "lightblue"}
 }
 
-# 初始化Textual日志界面
-TextualLoggerManager.set_layout(TEXTUAL_LAYOUT)
 
 # 创建全局日志记录器
-logger, _ = setup_logger({
-    'script_name': '012-低于指定宽度',
+logger, config_info = setup_logger({
+    'script_name': 'width_filter',
+    'console_enabled': False
 })
+
+def init_TextualLogger():
+    TextualLoggerManager.set_layout(TEXTUAL_LAYOUT, config_info['log_file'])
+    
+    
 
 class ImageProcessor:
     def __init__(self, source_dir, target_dir, min_width=1800, cut_mode=False, max_workers=16, 
@@ -66,7 +70,8 @@ class ImageProcessor:
         self.exclude_formats = {'.avif', '.jxl', '.gif', '.mp4', '.webm', '.mkv', '.avi', '.mov'}
         # 添加7z路径
         self.seven_zip_path = r"C:\Program Files\7-Zip\7z.exe"
-        
+        init_TextualLogger()
+
         # 记录初始化信息到Textual日志
         self.logger.info(f"[#current_stats]初始化处理器 - 模式: {'大于等于' if self.compare_larger else '小于'} {self.min_width}px, 动作: {'移动' if self.cut_mode else '复制'}")
 
@@ -85,11 +90,11 @@ class ImageProcessor:
             for keyword in self.exclude_paths:
                 # 如果关键词作为独立的词出现
                 if keyword in words:
-                    self.logger.info(f"排除文件 {path_str} 因为包含关键词: {keyword}")
+                    self.logger.info(f"[#update_log]排除文件 {path_str} 因为包含关键词: {keyword}")
                     return True
                 # 或者作为路径的一部分完整出现
                 if keyword in part:
-                    self.logger.info(f"排除文件 {path_str} 因为包含关键词: {keyword}")
+                    self.logger.info(f"[#update_log]排除文件 {path_str} 因为包含关键词: {keyword}")
                     return True
         return False
 
@@ -100,7 +105,7 @@ class ImageProcessor:
                 with Image.open(img_data) as img:
                     return img.size[0]
         except Exception as e:
-            self.logger.error(f"读取图片出错 {image_path}: {str(e)}")
+            self.logger.error(f"[#update_log]读取图片出错 {image_path}: {str(e)}")
             return 0
 
     def get_zip_images_info(self, zip_path):
@@ -110,7 +115,7 @@ class ImageProcessor:
                     ('.jpg', '.jpeg', '.png', '.webp', '.bmp', '.avif', '.jxl'))]
                 
                 if not image_files:
-                    self.logger.warning(f"ZIP文件 {zip_path} 中没有找到图片")
+                    self.logger.warning(f"[#update_log]ZIP文件 {zip_path} 中没有找到图片")
                     return 0, 0
                 
                 # 改进的抽样算法
@@ -143,7 +148,7 @@ class ImageProcessor:
                         middle_files = []
                     
                     sampled_files = head_files + middle_files + tail_files
-                    self.logger.debug(f"抽样数量: {len(sampled_files)}/{total_images} (头部:{len(head_files)}, 中间:{len(middle_files)}, 尾部:{len(tail_files)})")
+                    self.logger.debug(f"[#process_log]抽样数量: {len(sampled_files)}/{total_images} (头部:{len(head_files)}, 中间:{len(middle_files)}, 尾部:{len(tail_files)})")
 
                 match_count = 0
                 large_image_count = 0
@@ -158,37 +163,37 @@ class ImageProcessor:
                         if width >= 1800:
                             large_image_count += 1
                             if large_image_count > 3:  # 如果超过3张图片宽度大于1800，提前返回
-                                self.logger.info(f"ZIP文件 {zip_path} 超过3张图片宽度大于1800px")
+                                self.logger.info(f"[#process_log]ZIP文件 {zip_path} 超过3张图片宽度大于1800px")
                                 return min_width if min_width != float('inf') else 0, 0
                         
                         matches_condition = (self.compare_larger and width >= self.min_width) or \
                                          (not self.compare_larger and width < self.min_width)
                         if matches_condition:
                             match_count += 1
-                            self.logger.debug(f"图片 {img} 符合条件: {width}px")
+                            self.logger.debug(f"[#process_log]图片 {img} 符合条件: {width}px")
                         
                         # 如果已经达到阈值，可以提前返回
                         if match_count >= self.threshold_count:
-                            self.logger.info(f"ZIP文件 {zip_path} 已达到阈值 ({match_count}/{self.threshold_count})")
+                            self.logger.info(f"[#process_log]ZIP文件 {zip_path} 已达到阈值 ({match_count}/{self.threshold_count})")
                             return min_width if min_width != float('inf') else 0, match_count
 
                 final_width = min_width if min_width != float('inf') else 0
-                self.logger.info(f"ZIP文件 {zip_path} - 最小宽度: {final_width}px, 符合条件数量: {match_count}/{self.threshold_count}, "
+                self.logger.info(f"[#process_log]ZIP文件 {zip_path} - 最小宽度: {final_width}px, 符合条件数量: {match_count}/{self.threshold_count}, "
                                f"大于1800px的图片数量: {large_image_count}, 总图片: {total_images}, 抽样: {len(sampled_files)}")
                 return final_width, match_count
                 
         except Exception as e:
-            self.logger.error(f"处理ZIP文件出错 {zip_path}: {str(e)}")
+            self.logger.error(f"[#update_log]处理ZIP文件出错 {zip_path}: {str(e)}")
             return 0, 0
 
     def should_process_zip(self, width, match_count, zip_path):
         if width == 0:
-            self.logger.warning(f"跳过处理 {zip_path}: 无效的宽度")
+            self.logger.warning(f"[#update_log]跳过处理 {zip_path}: 无效的宽度")
             return False
         
         should_process = match_count >= self.threshold_count
         
-        self.logger.info(f"文件 {zip_path} - 宽度: {width}px, 符合条件数量: {match_count}/{self.threshold_count}, "
+        self.logger.info(f"[#process_log]文件 {zip_path} - 宽度: {width}px, 符合条件数量: {match_count}/{self.threshold_count}, "
                         f"{'大于等于' if self.compare_larger else '小于'}模式, "
                         f"结果: {'处理' if should_process else '跳过'}")
         return should_process
@@ -198,7 +203,7 @@ class ImageProcessor:
         try:
             # 1. 首先检查是否包含排除格式
             if self.has_excluded_formats(zip_path):
-                self.logger.info(f"跳过包含排除格式的文件: {zip_path}")
+                self.logger.info(f"[#update_log]跳过包含排除格式的文件: {zip_path}")
                 return zip_path, False
             
             # 2. 只有不包含排除格式的文件才检查宽度
@@ -208,7 +213,7 @@ class ImageProcessor:
             return zip_path, should_process
             
         except Exception as e:
-            self.logger.error(f"处理压缩包时出错 {zip_path}: {str(e)}")
+            self.logger.error(f"[#update_log]处理压缩包时出错 {zip_path}: {str(e)}")
             return zip_path, False
 
     def run_7z_command(self, command, zip_path, operation="", additional_args=None):
@@ -255,7 +260,7 @@ class ImageProcessor:
                 return False, error_text
             
         except Exception as e:
-            self.logger.error(f"执行7z命令出错: {e}")
+            self.logger.error(f"[#update_log]执行7z命令出错: {e}")
             return False, str(e)
 
     def check_7z_contents(self, zip_path):
@@ -269,12 +274,12 @@ class ImageProcessor:
             output = output.lower()
             for ext in self.exclude_formats:
                 if ext in output:
-                    self.logger.info(f"跳过压缩包 {zip_path.name} 因为包含排除格式: {ext}")
+                    self.logger.info(f"[#update_log]跳过压缩包 {zip_path.name} 因为包含排除格式: {ext}")
                     return True
             return False
             
         except Exception as e:
-            self.logger.error(f"检查压缩包格式时出错 {zip_path}: {str(e)}")
+            self.logger.error(f"[#update_log]检查压缩包格式时出错 {zip_path}: {str(e)}")
             return True
 
     def has_excluded_formats(self, zip_path):
