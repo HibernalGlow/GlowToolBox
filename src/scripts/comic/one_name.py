@@ -172,19 +172,20 @@ def normalize_filename(filename):
     normalized = ''.join(filename.split()).lower()
     return normalized
 
-def get_unique_filename_with_samename(directory: str, filename: str, original_path: str = None) -> str:
+def get_unique_filename_with_suffix(directory: str, filename: str, suffix_type: str = 'rename', original_path: str = None) -> str:
     """
-    检查文件名是否存在，如果存在则添加[samename_n]后缀
+    检查文件名是否存在，如果存在则添加指定类型的后缀
     Args:
         directory: 文件所在目录
         filename: 完整文件名（包含扩展名）
+        suffix_type: 后缀类型，'rename' 或 'samename'
         original_path: 原始文件的完整路径，用于排除自身
     Returns:
         str: 唯一的文件名
     """
     base, ext = os.path.splitext(filename)
     # 对文件名进行pangu格式化
-    base = pangu.spacing_text(base)
+    # base = pangu.spacing_text(base)
     new_filename = f"{base}{ext}"
     
     # 如果文件不存在，或者是自身，直接返回
@@ -195,7 +196,7 @@ def get_unique_filename_with_samename(directory: str, filename: str, original_pa
     # 如果存在同名文件，添加编号
     counter = 1
     while True:
-        current_filename = f"{base}[samename_{counter}]{ext}"
+        current_filename = f"{base}[{suffix_type}_{counter}]{ext}"
         current_path = os.path.join(directory, current_filename)
         if not os.path.exists(current_path):
             return current_filename
@@ -221,7 +222,7 @@ def get_unique_filename(directory, filename, artist_name, is_excluded=False):
     # 如果是排除的文件夹，直接返回处理后的文件名
     if is_excluded:
         filename = f"{base}{ext}"
-        return get_unique_filename_with_samename(directory, filename)
+        return get_unique_filename_with_suffix(directory, filename, 'samename')
 
     # 修改正则替换模式，更谨慎地处理日文字符
     basic_patterns = [
@@ -446,7 +447,7 @@ def get_unique_filename(directory, filename, artist_name, is_excluded=False):
     
     # 检查文件是否存在，如果存在则添加[samename_n]后缀
     filename = f"{new_base}{ext}"
-    return get_unique_filename_with_samename(directory, filename)
+    return get_unique_filename_with_suffix(directory, filename, 'samename')
 
 def has_artist_name(filename, artist_name):
     """检查文件名是否包含画师名"""
@@ -460,6 +461,31 @@ def append_artist_name(filename, artist_name):
     """将画师名追加到文件名末尾"""
     base, ext = os.path.splitext(filename)
     return f"{base}{artist_name}{ext}"
+
+def check_duplicate_filename(directory: str, filename: str) -> str:
+    """
+    检查文件名是否重复，如果重复则添加[rename_n]后缀
+    Args:
+        directory: 文件所在目录
+        filename: 完整文件名（包含扩展名）
+    Returns:
+        str: 处理后的文件名
+    """
+    base, ext = os.path.splitext(filename)
+    new_filename = f"{base}{ext}"
+    
+    # 如果文件不存在，直接返回原文件名
+    if not os.path.exists(os.path.join(directory, new_filename)):
+        return new_filename
+        
+    # 如果存在同名文件，添加[rename_n]后缀
+    counter = 1
+    while True:
+        current_filename = f"{base}[rename_{counter}]{ext}"
+        current_path = os.path.join(directory, current_filename)
+        if not os.path.exists(current_path):
+            return current_filename
+        counter += 1
 
 def process_files_in_directory(directory, artist_name):
     files = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f)) and f.lower().endswith(ARCHIVE_EXTENSIONS)]
@@ -477,7 +503,9 @@ def process_files_in_directory(directory, artist_name):
     for filename in files:
         original_file_path = os.path.join(directory, filename)
         filename = detect_and_decode_filename(filename)
-        new_filename = filename
+        
+        # 先检查重名并处理
+        new_filename = get_unique_filename_with_suffix(directory, filename, 'rename')
         
         # 对所有文件应用格式化，包括排除文件夹中的文件
         new_filename = get_unique_filename(directory, new_filename, artist_name, is_excluded)
@@ -487,7 +515,7 @@ def process_files_in_directory(directory, artist_name):
             new_filename = append_artist_name(new_filename, artist_name)
         
         # 确保文件名唯一（始终传入原始路径以排除自身）
-        final_filename = get_unique_filename_with_samename(directory, new_filename, original_file_path)
+        final_filename = get_unique_filename_with_suffix(directory, new_filename, 'samename', original_file_path)
         
         if final_filename != filename:
             files_to_modify.append((filename, final_filename, original_file_path))
