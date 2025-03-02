@@ -21,9 +21,23 @@ warnings.filterwarnings('ignore', category=Image.DecompressionBombWarning)
 Image.MAX_IMAGE_PIXELS = None
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-# 加载环境变量并初始化日志记录器
+# 加载环境变量
 load_dotenv()
+
+# 导入正确路径的日志记录器配置
 from nodes.record.logger_config import setup_logger
+from nodes.tui.textual_logger import TextualLoggerManager
+
+# 设置Textual日志界面布局
+TEXTUAL_LAYOUT = {
+    "current_stats": {"ratio": 2, "title": "📊 总体进度", "style": "lightyellow"},
+    "current_progress": {"ratio": 2, "title": "🔄 当前处理", "style": "lightcyan"},
+    "process_log": {"ratio": 3, "title": "📝 处理日志", "style": "lightgreen"},
+    "update_log": {"ratio": 2, "title": "ℹ️ 更新日志", "style": "lightblue"}
+}
+
+# 初始化Textual日志界面
+TextualLoggerManager.set_layout(TEXTUAL_LAYOUT)
 
 # 创建全局日志记录器
 logger, _ = setup_logger({
@@ -52,6 +66,9 @@ class ImageProcessor:
         self.exclude_formats = {'.avif', '.jxl', '.gif', '.mp4', '.webm', '.mkv', '.avi', '.mov'}
         # 添加7z路径
         self.seven_zip_path = r"C:\Program Files\7-Zip\7z.exe"
+        
+        # 记录初始化信息到Textual日志
+        self.logger.info(f"[#current_stats]初始化处理器 - 模式: {'大于等于' if self.compare_larger else '小于'} {self.min_width}px, 动作: {'移动' if self.cut_mode else '复制'}")
 
     def should_exclude_path(self, path_str):
         """检查路径是否应该被排除"""
@@ -276,13 +293,13 @@ class ImageProcessor:
             zip_files.append(f)
 
         if not zip_files:
-            self.logger.info("没有找到需要处理的文件")
+            self.logger.info("[#update_log]没有找到需要处理的文件")
             return
 
-        self.logger.info(f"开始处理 {len(zip_files)} 个文件")
-        self.logger.info(f"已排除包含关键词的路径: {', '.join(self.exclude_paths)}")
-        self.logger.info(f"模式: {'大于等于' if self.compare_larger else '小于'} {self.min_width}px")
-        self.logger.info(f"操作: {'移动' if self.cut_mode else '复制'}")
+        self.logger.info(f"[#current_stats]开始处理 {len(zip_files)} 个文件")
+        self.logger.info(f"[#performance]已排除包含关键词的路径: {', '.join(self.exclude_paths)}")
+        self.logger.info(f"[#performance]模式: {'大于等于' if self.compare_larger else '小于'} {self.min_width}px")
+        self.logger.info(f"[#performance]操作: {'移动' if self.cut_mode else '复制'}")
         
         processed_folders = set()
         processed_count = 0
@@ -290,16 +307,19 @@ class ImageProcessor:
         # 处理文件
         operation = "移动" if self.cut_mode else "复制"
         moved_count = 0
+        total_files = len(zip_files)
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             for zip_path, should_process in tqdm(
                 executor.map(self.process_single_zip, zip_files),
-                total=len(zip_files),
+                total=total_files,
                 desc="处理文件"
             ):
+                processed_count += 1
+                self.logger.info(f"[@current_progress]总体进度 ({processed_count}/{total_files}) {processed_count/total_files*100:.1f}%")
+                
                 if should_process:
                     processed_folders.add(zip_path.parent)
-                    processed_count += 1
                     
                     # 处理文件
                     rel_path = zip_path.relative_to(self.source_dir)
@@ -312,9 +332,9 @@ class ImageProcessor:
                         else:
                             shutil.copy2(str(zip_path), str(new_folder / zip_path.name))
                         moved_count += 1
-                        self.logger.info(f"成功{operation}: {zip_path.name}")
+                        self.logger.info(f"[#process_log]成功{operation}: {zip_path.name}")
                     except Exception as e:
-                        self.logger.error(f"{operation}失败 {zip_path}: {str(e)}")
+                        self.logger.error(f"[#update_log]{operation}失败 {zip_path}: {str(e)}")
 
         # 如果是移动模式，清理空文件夹
         if self.cut_mode:
@@ -322,39 +342,48 @@ class ImageProcessor:
                 if not any(folder.iterdir()):
                     try:
                         folder.rmdir()
-                        self.logger.info(f"删除空文件夹: {folder}")
+                        self.logger.info(f"[#update_log]删除空文件夹: {folder}")
                     except Exception as e:
-                        self.logger.error(f"删除文件夹失败 {folder}: {str(e)}")
+                        self.logger.error(f"[#update_log]删除文件夹失败 {folder}: {str(e)}")
 
-        self.logger.info(f"处理完成: 成功{operation} {moved_count} 个文件")
+        self.logger.info(f"[#current_stats]处理完成: 成功{operation} {moved_count} 个文件")
 
 def main():
     # 创建命令行参数解析器
     parser = argparse.ArgumentParser(description='图片宽度过滤工具')
     parser.add_argument('-c', '--clipboard', action='store_true', help='从剪贴板读取源目录路径')
+    parser.add_argument('-s', '--source', type=str, help='源目录路径', default=r"E:\999EHV")
+    parser.add_argument('-t', '--target', type=str, help='目标目录路径', default=r"E:\7EHV")
+    parser.add_argument('-w', '--width', type=int, help='宽度阈值', default=1800)
+    parser.add_argument('-l', '--larger', action='store_true', help='选择大于等于指定宽度的文件')
+    parser.add_argument('-m', '--move', action='store_true', help='移动文件而不是复制')
+    parser.add_argument('-j', '--jobs', type=int, help='并行处理线程数', default=16)
+    parser.add_argument('-n', '--number', type=int, help='符合条件的图片数量阈值', default=3)
+
     args = parser.parse_args()
 
     # 配置参数
     config = {
-        "source_dir": pyperclip.paste().strip() if args.clipboard else r"E:\999EHV",
-        "target_dir": r"E:\7EHV",
-        "min_width": 1800,
-        "cut_mode": False,
-        "max_workers": 16,
-        "compare_larger": False,
-        "threshold_count": 3
+        "source_dir": pyperclip.paste().strip() if args.clipboard else args.source,
+        "target_dir": args.target,
+        "min_width": args.width,
+        "cut_mode": args.move,
+        "max_workers": args.jobs,
+        "compare_larger": args.larger,
+        "threshold_count": args.number
     }
 
     # 验证源目录路径
     if not os.path.exists(config["source_dir"]):
-        logger.error(f"源目录不存在: {config['source_dir']}")
+        logger.error(f"[#update_log]源目录不存在: {config['source_dir']}")
         return
 
     try:
+        logger.info(f"[#current_stats]开始处理 - 源: {config['source_dir']} 目标: {config['target_dir']}")
         processor = ImageProcessor(**config)
         processor.process()
     except Exception as e:
-        logger.exception("程序执行出错")  # 使用全局logger
+        logger.exception(f"[#update_log]程序执行出错: {e}")
 
 if __name__ == "__main__":
     # Windows长路径支持
@@ -364,6 +393,6 @@ if __name__ == "__main__":
             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem", 0, winreg.KEY_SET_VALUE) as key:
                 winreg.SetValueEx(key, "LongPathsEnabled", 0, winreg.REG_DWORD, 1)
         except Exception as e:
-            logger.error(f"无法启用长路径支持: {e}")  # 使用全局logger
+            logger.error(f"[#update_log]无法启用长路径支持: {e}")
     
-    main() 
+    main()
