@@ -73,91 +73,6 @@ def normalize_chinese(text):
     # return cc_t2s.convert(text)
     return text
     
-CATEGORY_RULES = {
-    "1. 同人志": {
-        "patterns": [
-            r'\[C\d+\]',           # [C97], [C98] 等
-            r'\(C\d+\)',           # (C97), (C98) 等
-            r'コミケ\d+',           # コミケ97 等
-            r'COMIC\s*MARKET',      # COMIC MARKET
-            r'COMIC1',              # COMIC1
-            r'同人誌',              # 同人志（日文）
-            r'同人志',              # 同人志（中文）
-            r'コミケ',              # コミケ
-            r'コミックマーケット',   # コミックマーケット
-            r'例大祭',              # 例大祭
-            r'サンクリ',            # サンクリ
-            r'(?i)doujin',         # doujin（不区分大小写）
-            r'COMIC1☆\d+',         # COMIC1☆17等
-        ],
-        "exclude_patterns": [
-            r'画集',                # 排除画集
-            r'artbook',
-            r'art\s*works',
-            r'01视频',
-            r'02动图',
-            r'art\s*works'
-        ]
-    },
-    "2. 商业志": {
-        "patterns": [
-            r'(?i)magazine',        # magazine（不区分大小写）
-            r'(?i)COMIC',      # commercial（不区分大小写）
-            r'雑誌',                # 杂志（日文）
-            r'杂志',                # 杂志（中文）
-            r'商业',
-            r'週刊',                # 周刊
-            r'月刊',                # 月刊
-            r'月号',                # 月号
-            r'COMIC\s*REX',         # COMIC REX
-            r'コミック',      # 青年JUMP
-            r'ヤングマガジン',      # 青年Magazine
-            r'\d{4}年\d{1,2}月号',  # yyyy年m月号
-        ],
-        "exclude_patterns": [
-            r'同人',
-            r'(?i)doujin',
-            r'単行本',
-            r'画集'
-        ]
-    },
-    "3. 单行本": {
-        "patterns": [
-            r'単行本',              # 单行本（日文）
-            r'单行本',              # 单行本（中文）
-            r'(?i)tankoubon',       # tankoubon（不区分大小写）
-            r'第\d+巻',             # 第X巻
-            r'vol\.?\d+',          # vol.X 或 volX
-            r'volume\s*\d+'        # volume X
-        ],
-        "exclude_patterns": [
-            r'画集',
-            r'artbook',
-            r'art\s*works'
-        ]
-    },
-    "4. 画集": {
-        "patterns": [
-            r'画集',                # 画集
-            r'(?i)art\s*book',     # artbook/art book（不区分大小写）
-            r'(?i)art\s*works',    # artworks/art works（不区分大小写）
-            r'イラスト集',          # 插画集（日文）
-            r'杂图合集',              # 插画集（中文）
-            r'作品集',              # 作品集
-            r'illustrations?',      # illustration/illustrations
-            r'(?i)illust\s*collection'  # Illust Collection
-        ],
-        "exclude_patterns": []
-    },
-    "5. 同人CG": {
-        "patterns": [
-            r'同人CG',
-        ],
-        "exclude_patterns": []
-    }
-}
-
-
 # 设置文件系统编码
 if sys.platform == 'win32':
     try:
@@ -336,6 +251,90 @@ def is_archive(path):
     return Path(path).suffix.lower() in {'.zip', '.rar', '.7z', '.cbz', '.cbr'}
 
 # 定义分类规则
+CATEGORY_RULES = {
+    "1. 同人志": {
+        "patterns": [
+            r'\[C\d+\]',           # [C97], [C98] 等
+            r'\(C\d+\)',           # (C97), (C98) 等
+            r'コミケ\d+',           # コミケ97 等
+            r'COMIC\s*MARKET',      # COMIC MARKET
+            r'COMIC1',              # COMIC1
+            r'同人誌',              # 同人志（日文）
+            r'同人志',              # 同人志（中文）
+            r'コミケ',              # コミケ
+            r'コミックマーケット',   # コミックマーケット
+            r'例大祭',              # 例大祭
+            r'サンクリ',            # サンクリ
+            r'(?i)doujin',         # doujin（不区分大小写）
+            r'COMIC1☆\d+',         # COMIC1☆17等
+        ],
+        "exclude_patterns": [
+            r'画集',                # 排除画集
+            r'artbook',
+            r'art\s*works',
+            r'01视频',
+            r'02动图',
+            r'art\s*works'
+        ]
+    },
+    "2. 商业志": {
+        "patterns": [
+            r'(?i)magazine',        # magazine（不区分大小写）
+            r'(?i)COMIC',      # commercial（不区分大小写）
+            r'雑誌',                # 杂志（日文）
+            r'杂志',                # 杂志（中文）
+            r'商业',
+            r'週刊',                # 周刊
+            r'月刊',                # 月刊
+            r'月号',                # 月号
+            r'COMIC\s*REX',         # COMIC REX
+            r'コミック',      # 青年JUMP
+            r'ヤングマガジン',      # 青年Magazine
+            r'\d{4}年\d{1,2}月号',  # yyyy年m月号
+        ],
+        "exclude_patterns": [
+            r'同人',
+            r'(?i)doujin',
+            r'単行本',
+            r'画集'
+        ]
+    },
+    "3. 单行本": {
+        "patterns": [
+            r'単行本',              # 单行本（日文）
+            r'单行本',              # 单行本（中文）
+            r'(?i)tankoubon',       # tankoubon（不区分大小写）
+            r'第\d+巻',             # 第X巻
+            r'vol\.?\d+',          # vol.X 或 volX
+            r'volume\s*\d+'        # volume X
+        ],
+        "exclude_patterns": [
+            r'画集',
+            r'artbook',
+            r'art\s*works'
+        ]
+    },
+    "4. 画集": {
+        "patterns": [
+            r'画集',                # 画集
+            r'(?i)art\s*book',     # artbook/art book（不区分大小写）
+            r'(?i)art\s*works',    # artworks/art works（不区分大小写）
+            r'イラスト集',          # 插画集（日文）
+            r'杂图合集',              # 插画集（中文）
+            r'作品集',              # 作品集
+            r'illustrations?',      # illustration/illustrations
+            r'(?i)illust\s*collection'  # Illust Collection
+        ],
+        "exclude_patterns": []
+    },
+    "5. 同人CG": {
+        "patterns": [
+            r'同人CG',
+        ],
+        "exclude_patterns": []
+    }
+}
+
 def get_category(path, handler=None):
     """根据路径名判断类别，使用正则表达式进行匹配"""
     filename = os.path.basename(path)
@@ -1623,44 +1622,48 @@ def process_args():
         # 预设配置
         presets = {
             "默认配置": {
-                "features": "1,2,3,4",
-                "similarity": "80",
-                "ratio": "75",
-                "partial": "85",
-                "token": "80",
-                "length_diff": "0.3",
-                "clipboard": True,
-                "wait": False
+                "description": "启用所有功能的默认配置",
+                "checkbox_options": ["clipboard", "feature1", "feature2", "feature3", "feature4"],
+                "input_values": {
+                    "similarity": "80",
+                    "ratio": "75",
+                    "partial": "85",
+                    "token": "80",
+                    "length_diff": "0.3"
+                }
             },
             "仅分类": {
-                "features": "1",
-                "similarity": "80",
-                "ratio": "75",
-                "partial": "85",
-                "token": "80",
-                "length_diff": "0.3",
-                "clipboard": True,
-                "wait": False
+                "description": "只启用分类功能",
+                "checkbox_options": ["clipboard", "feature1"],
+                "input_values": {
+                    "similarity": "80",
+                    "ratio": "75",
+                    "partial": "85",
+                    "token": "80",
+                    "length_diff": "0.3"
+                }
             },
             "仅系列提取": {
-                "features": "2",
-                "similarity": "80",
-                "ratio": "75",
-                "partial": "85",
-                "token": "80",
-                "length_diff": "0.3",
-                "clipboard": True,
-                "wait": False
+                "description": "只启用系列提取功能",
+                "checkbox_options": ["clipboard", "feature2"],
+                "input_values": {
+                    "similarity": "80",
+                    "ratio": "75",
+                    "partial": "85",
+                    "token": "80",
+                    "length_diff": "0.3"
+                }
             },
             "分类+系列": {
-                "features": "1,2",
-                "similarity": "80",
-                "ratio": "75",
-                "partial": "85",
-                "token": "80",
-                "length_diff": "0.3",
-                "clipboard": True,
-                "wait": False
+                "description": "启用分类和系列提取功能",
+                "checkbox_options": ["clipboard", "feature1", "feature2"],
+                "input_values": {
+                    "similarity": "80",
+                    "ratio": "75",
+                    "partial": "85",
+                    "token": "80",
+                    "length_diff": "0.3"
+                }
             }
         }
 

@@ -1,59 +1,106 @@
-MangaArchiveClassifier:
-  description: 漫画档案分类器，处理各类漫画压缩文件的分类整理工作
+# 漫画压缩包分类与整理系统的结构定义
+
+MainController:
+  description: 主控制器，负责协调各个组件工作和处理命令行参数
   variables:
-    - source_dir
-    - target_dir
+    - enabled_features
+    - similarity_config
+    - paths
+    - TEXTUAL_LAYOUT
     - config
+  functions:
+    - process_args()
+    - run_classifier()
+    - process_paths()
+    - main()
+    - init_TextualLogger()
+
+ArchiveValidator:
+  description: 压缩包验证器，负责检查压缩包完整性和内容
+  variables:
+    - timeout_seconds
+    - IMAGE_EXTENSIONS
     - supported_formats
   functions:
-    - classify_archives()
-    - process_archive()
-    - extract_metadata()
-    - move_archive()
+    - is_archive()
+    - is_archive_corrupted()
+    - count_images_in_archive()
+    - run_7z_command()
     - validate_archive()
-  inner_classes:
-    Config:
-      description: 分类器配置管理
-      variables:
-        - settings
-        - rules
-      functions:
-        - load_config()
-        - save_config()
-        - get_rule()
+    - timeout()
 
-ArchiveProcessor:
-  description: 压缩包处理器，负责压缩包的读取、解压和内容分析
+CategoryClassifier:
+  description: 分类系统，根据规则对压缩包进行分类
   variables:
-    - temp_dir
-    - current_archive
+    - CATEGORY_RULES
+    - PATH_BLACKLIST
   functions:
-    - open_archive()
-    - extract_files()
-    - get_file_list()
-    - analyze_content()
-    - cleanup()
+    - get_category()
+    - create_category_folders()
+    - is_path_blacklisted()
+    - process_single_file()
+    - move_file_to_category()
 
-MetadataExtractor:
-  description: 元数据提取器，从文件名和内容中提取漫画信息
+SeriesExtractor:
+  description: 系列提取器，识别并分组相同系列的压缩包
   variables:
-    - patterns
-    - extracted_info
+    - SERIES_PREFIXES
+    - SIMILARITY_CONFIG
+    - SERIES_BLACKLIST_PATTERNS
   functions:
-    - extract_from_filename()
-    - extract_from_images()
-    - parse_patterns()
-    - get_metadata()
-    - match_patterns()
+    - preprocess_filename()
+    - get_series_key()
+    - find_series_groups()
+    - validate_series_name()
+    - extract_keywords()
+    - is_series_blacklisted()
+    - create_series_folders()
+    - is_in_series_folder()
+    - update_series_folder_name()
+    - find_keyword_based_groups()
+    - update_all_series_folders()
+    - is_similar_to_existing_folder()
+    - is_essentially_same_file()
+    - find_similar_files()
+    - preprocess_filenames()
+    - process_file_keywords()
+    - get_keywords()
+    - find_longest_common_keywords()
 
 FileManager:
-  description: 文件管理器，处理文件的移动、重命名和目录创建
+  description: 文件管理器，处理文件移动和目录结构
   variables:
     - processed_files
-    - target_structure
+    - win32_path_exists
   functions:
-    - move_with_structure()
-    - rename_by_pattern()
-    - create_directory()
-    - check_exists()
-    - generate_unique_name()
+    - move_corrupted_archive()
+    - validate_directory()
+    - collect_archives_for_category()
+    - collect_archives_for_series()
+    - process_directory()
+    - run_post_processing()
+    - win32_path_exists()
+
+TextProcessor:
+  description: 文本处理工具，负责文件名和文本的标准化处理
+  variables:
+    - cc_t2s
+    - cc_s2t
+  functions:
+    - normalize_chinese()
+    - normalize_filename()
+    - calculate_similarity()
+    - get_base_filename()
+    - handler()
+    - wrapper()
+    - decorator()
+
+LoggerManager:
+  description: 日志管理器，配置和处理日志系统
+  variables:
+    - textual_layout
+    - logger
+    - config_info
+  functions:
+    - setup_logger()
+    - create_config_app()
