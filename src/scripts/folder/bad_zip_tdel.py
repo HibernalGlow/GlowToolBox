@@ -9,12 +9,50 @@ import argparse
 import pyperclip
 from pathlib import Path
 import sys
+import logging
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from nodes.tui.rich_logger import RichProgressHandler
+from nodes.tui.textual_logger import TextualLoggerManager
+from nodes.record.logger_config import setup_logger
 
 # 获取脚本所在目录
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 HISTORY_FILE = os.path.join(SCRIPT_DIR, 'archive_check_history.yaml')
+
+# 配置日志面板布局
+TEXTUAL_LAYOUT = {
+    "status": {
+        "ratio": 2,
+        "title": "📊 状态信息",
+        "style": "lightblue"
+    },
+    "progress": {
+        "ratio": 2,
+        "title": "🔄 处理进度",
+        "style": "lightcyan"
+    },
+    "success": {
+        "ratio": 3,
+        "title": "✅ 成功信息",
+        "style": "lightgreen"
+    },
+    "warning": {
+        "ratio": 2,
+        "title": "⚠️ 警告信息",
+        "style": "lightyellow"
+    },
+    "error": {
+        "ratio": 2,
+        "title": "❌ 错误信息",
+        "style": "lightred"
+    }
+}
+
+# 初始化日志
+config = {
+    'script_name': 'bad_zip_tdel',
+    'console_enabled': False
+}
+logger, config_info = setup_logger(config)
 
 def load_check_history():
     """加载检测历史记录"""
@@ -36,7 +74,7 @@ def check_archive(file_path):
                               text=True)
         return result.returncode == 0
     except Exception as e:
-        print(f"❌ 检测文件 {file_path} 时发生错误: {str(e)}")
+        logger.error(f"❌ 检测文件 {file_path} 时发生错误: {str(e)}")
         return False
 
 def get_archive_files(directory, archive_extensions):
@@ -65,17 +103,17 @@ def get_paths_from_clipboard():
         ]
         
         if valid_paths:
-            print(f"📋 从剪贴板读取到 {len(valid_paths)} 个有效路径")
+            logger.info(f"📋 从剪贴板读取到 {len(valid_paths)} 个有效路径")
         else:
-            print("⚠️ 剪贴板中没有有效路径")
+            logger.warning("⚠️ 剪贴板中没有有效路径")
             
         return valid_paths
         
     except Exception as e:
-        print(f"❌ 读取剪贴板时出错: {e}")
+        logger.error(f"❌ 读取剪贴板时出错: {e}")
         return []
 
-def process_directory(directory, handler, skip_checked=False, max_workers=4):
+def process_directory(directory, skip_checked=False, max_workers=4):
     """处理目录下的所有压缩包文件"""
     archive_extensions = ('.zip', '.rar', '.7z', '.cbz')
     check_history = load_check_history()
@@ -86,10 +124,10 @@ def process_directory(directory, handler, skip_checked=False, max_workers=4):
             if dir_name.startswith('temp_'):
                 try:
                     dir_path = os.path.join(root, dir_name)
-                    handler.add_status_log(f"🗑️ 正在删除临时文件夹: {dir_path}")
+                    logger.info(f"[@status]🗑️ 正在删除临时文件夹: {dir_path}")
                     shutil.rmtree(dir_path)
                 except Exception as e:
-                    handler.add_error_log(f"删除文件夹 {dir_path} 时发生错误: {str(e)}")
+                    logger.error(f"[@error]删除文件夹 {dir_path} 时发生错误: {str(e)}")
 
     # 收集需要处理的文件
     files_to_process = []
@@ -100,20 +138,21 @@ def process_directory(directory, handler, skip_checked=False, max_workers=4):
                 if file_path.endswith('.tdel'):
                     continue
                 if skip_checked and file_path in check_history and check_history[file_path]['valid']:
-                    handler.add_status_log(f"⏭️ 跳过已检查且完好的文件: {file_path}")
+                    logger.info(f"[@status]⏭️ 跳过已检查且完好的文件: {file_path}")
                     continue
                 files_to_process.append(file_path)
 
     if not files_to_process:
-        handler.add_status_log("✨ 没有需要处理的文件")
+        logger.info("[@status]✨ 没有需要处理的文件")
         return
 
-    # 创建进度任务
-    task_id = handler.create_progress_task(len(files_to_process), "检测压缩包完整性")
+    # 更新进度信息
+    total_files = len(files_to_process)
+    logger.info(f"[@progress]检测压缩包完整性 (0/{total_files}) 0%")
 
     # 定义单个文件处理函数
     def process_single_file(file_path):
-        handler.add_status_log(f"🔍 正在检测: {file_path}")
+        logger.info(f"[@status]🔍 正在检测: {file_path}")
         is_valid = check_archive(file_path)
         result = {
             'path': file_path,
@@ -133,7 +172,8 @@ def process_directory(directory, handler, skip_checked=False, max_workers=4):
         completed = 0
         for future in concurrent.futures.as_completed(futures):
             completed += 1
-            handler.progress.update(task_id, completed=completed)
+            progress_percentage = int(completed / total_files * 100)
+            logger.info(f"[@progress]检测压缩包完整性 ({completed}/{total_files}) {progress_percentage}%")
             
             result = future.result()
             file_path = result['path']
@@ -150,18 +190,18 @@ def process_directory(directory, handler, skip_checked=False, max_workers=4):
                 if os.path.exists(new_path):
                     try:
                         os.remove(new_path)
-                        handler.add_status_log(f"🗑️ 删除已存在的文件: {new_path}")
+                        logger.info(f"[@status]🗑️ 删除已存在的文件: {new_path}")
                     except Exception as e:
-                        handler.add_error_log(f"删除文件 {new_path} 时发生错误: {str(e)}")
+                        logger.error(f"[@error]删除文件 {new_path} 时发生错误: {str(e)}")
                         continue
                 
                 try:
                     os.rename(file_path, new_path)
-                    handler.add_warning_log(f"⚠️ 文件损坏,已重命名为: {new_path}")
+                    logger.warning(f"[@warning]⚠️ 文件损坏,已重命名为: {new_path}")
                 except Exception as e:
-                    handler.add_error_log(f"重命名文件时发生错误: {str(e)}")
+                    logger.error(f"[@error]重命名文件时发生错误: {str(e)}")
             else:
-                handler.add_success_log(f"✅ 文件完好: {file_path}")
+                logger.info(f"[@success]✅ 文件完好: {file_path}")
             
             # 定期保存检查历史
             save_check_history(check_history)
@@ -175,12 +215,12 @@ def process_directory(directory, handler, skip_checked=False, max_workers=4):
                 if not os.listdir(dir_path):  # 检查文件夹是否为空
                     os.rmdir(dir_path)
                     removed_count += 1
-                    handler.add_status_log(f"🗑️ 已删除空文件夹: {dir_path}")
+                    logger.info(f"[@status]🗑️ 已删除空文件夹: {dir_path}")
             except Exception as e:
-                handler.add_error_log(f"删除空文件夹失败 {dir_path}: {str(e)}")
+                logger.error(f"[@error]删除空文件夹失败 {dir_path}: {str(e)}")
     
     if removed_count > 0:
-        handler.add_success_log(f"✨ 共删除了 {removed_count} 个空文件夹")
+        logger.info(f"[@success]✨ 共删除了 {removed_count} 个空文件夹")
 
 def main():
     parser = argparse.ArgumentParser(description='压缩包完整性检查工具')
@@ -188,6 +228,9 @@ def main():
     parser.add_argument('-c', '--clipboard', action='store_true', help='从剪贴板读取路径')
     args = parser.parse_args()
 
+    # 初始化TextualLogger
+    TextualLoggerManager.set_layout(TEXTUAL_LAYOUT, config_info['log_file'])
+    
     # 获取要处理的路径
     directories = []
     
@@ -199,31 +242,29 @@ def main():
             if path.exists():
                 directories.append(path)
             else:
-                print(f"⚠️ 警告：路径不存在 - {path_str}")
+                logger.warning(f"⚠️ 警告：路径不存在 - {path_str}")
     else:
         default_path = Path(r"D:\3EHV")
         if default_path.exists():
             directories.append(default_path)
-            print(f"📂 使用默认路径: {default_path}")
+            logger.info(f"📂 使用默认路径: {default_path}")
         else:
-            print("❌ 默认路径不存在")
+            logger.error("❌ 默认路径不存在")
             return
 
     if not directories:
-        print("❌ 未提供任何有效的路径")
+        logger.error("❌ 未提供任何有效的路径")
         return
 
-    # 创建rich handler
-    with RichProgressHandler() as handler:
-        skip_checked = True
-        # 可以根据CPU核心数调整线程数
-        max_workers = os.cpu_count() or 4
-        
-        # 处理每个目录
-        for directory in directories:
-            handler.add_status_log(f"📂 开始处理目录: {directory}")
-            process_directory(directory, handler, skip_checked, max_workers=max_workers)
-            handler.add_success_log(f"✅ 目录处理完成: {directory}")
+    skip_checked = True
+    # 可以根据CPU核心数调整线程数
+    max_workers = os.cpu_count() or 4
+    
+    # 处理每个目录
+    for directory in directories:
+        logger.info(f"[@status]📂 开始处理目录: {directory}")
+        process_directory(directory, skip_checked, max_workers=max_workers)
+        logger.info(f"[@success]✅ 目录处理完成: {directory}")
     
 if __name__ == "__main__":
     main()
