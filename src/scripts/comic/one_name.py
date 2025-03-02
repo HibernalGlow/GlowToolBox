@@ -30,6 +30,8 @@ init()
 
 # 全局配置变量
 add_artist_name_enabled = True
+# 支持的压缩文件扩展名
+ARCHIVE_EXTENSIONS = ('.zip', '.rar', '.7z', '.cbz', '.cbr')
 
 def highlight_diff(old_str: str, new_str: str) -> str:
     """使用 difflib 高亮显示字符串差异"""
@@ -457,7 +459,7 @@ def append_artist_name(filename, artist_name):
     return f"{base}{artist_name}{ext}"
 
 def process_files_in_directory(directory, artist_name):
-    files = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f)) and f.lower().endswith(('.zip', '.rar', '.7z'))]
+    files = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f)) and f.lower().endswith(ARCHIVE_EXTENSIONS)]
     
     modified_files_count = 0
     
@@ -632,7 +634,7 @@ def process_folders(base_path):
             
             # 统计该文件夹中的压缩文件总数
             for root, _, files in os.walk(artist_path):
-                total_files += len([f for f in files if f.lower().endswith(('.zip', '.rar', '.7z'))])
+                total_files += len([f for f in files if f.lower().endswith(ARCHIVE_EXTENSIONS)])
             
         except Exception as e:
             logging.error(f"处理文件夹 {folder} 出错: {e}")
@@ -800,7 +802,7 @@ if __name__ == "__main__":
             restore_folder_timestamps(older_timestamps)
         
         # 统计该文件夹中的压缩文件总数
-        total_files = sum(len([f for f in files if f.lower().endswith(('.zip', '.rar', '.7z'))])
+        total_files = sum(len([f for f in files if f.lower().endswith(ARCHIVE_EXTENSIONS)])
                          for _, _, files in os.walk(artist_path))
         
         print(f"\n{Fore.GREEN}处理完成:{Style.RESET_ALL}")
