@@ -4,32 +4,14 @@ import pangu  # 新增
 import logging
 import os
 from datetime import datetime
+from nodes.record.logger_config import setup_logger
 
 # 设置日志
-def setup_logging():
-    """设置日志配置"""
-    # 创建logs目录（如果不存在）
-    log_dir = 'logs'
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-    
-    # 生成日志文件名
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_file = os.path.join(log_dir, f'format_log_{timestamp}.log')
-    
-    # 配置日志
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_file, encoding='utf-8'),
-            logging.StreamHandler()
-        ]
-    )
-    return logging.getLogger(__name__)
+logger, config_info = setup_logger({
+    'script_name': 'contents_replacer',
+    'console_enabled': True
+})
 
-# 获取logger
-logger = setup_logging()
 
 class CodeBlockProtector:
     def __init__(self):

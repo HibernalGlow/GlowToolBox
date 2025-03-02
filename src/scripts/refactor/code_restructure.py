@@ -577,8 +577,8 @@ def process_python_file(source_file: str, structure_file: str, output_file: str)
         raise
 
 if __name__ == "__main__":
-    source_file = r"D:\1VSCODE\1ehv\archive\011-去重复 not-in-mem.py"  # 源文件
-    structure_file = "target_structure.py"  # 目标结构文件
-    output_file = "restructured_code.py"  # 输出文件
+    source_file = r"D:\1VSCODE\GlowToolBox\src\scripts\comic\manga_archive_classifier.py"  # 源文件
+    structure_file = r"D:\1VSCODE\GlowToolBox\src\scripts\refactor\target_structure.py"  # 目标结构文件
+    output_file = r"D:\1VSCODE\GlowToolBox\src\scripts\refactor\restructured_code.py"  # 输出文件
     
-    process_python_file(source_file, structure_file, output_file) 
+    process_python_file(source_file, structure_file, output_file)
