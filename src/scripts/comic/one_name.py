@@ -462,31 +462,6 @@ def append_artist_name(filename, artist_name):
     base, ext = os.path.splitext(filename)
     return f"{base}{artist_name}{ext}"
 
-def check_duplicate_filename(directory: str, filename: str) -> str:
-    """
-    检查文件名是否重复，如果重复则添加[rename_n]后缀
-    Args:
-        directory: 文件所在目录
-        filename: 完整文件名（包含扩展名）
-    Returns:
-        str: 处理后的文件名
-    """
-    base, ext = os.path.splitext(filename)
-    new_filename = f"{base}{ext}"
-    
-    # 如果文件不存在，直接返回原文件名
-    if not os.path.exists(os.path.join(directory, new_filename)):
-        return new_filename
-        
-    # 如果存在同名文件，添加[rename_n]后缀
-    counter = 1
-    while True:
-        current_filename = f"{base}[rename_{counter}]{ext}"
-        current_path = os.path.join(directory, current_filename)
-        if not os.path.exists(current_path):
-            return current_filename
-        counter += 1
-
 def process_files_in_directory(directory, artist_name):
     files = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f)) and f.lower().endswith(ARCHIVE_EXTENSIONS)]
     
