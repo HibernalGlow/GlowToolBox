@@ -1142,7 +1142,7 @@ class ArchiveProcessor:
         
         # 检查是否需要更新
         if not JsonHandler.check_and_update_record(json_content, archive_name, artist_name, relative_path, timestamp):
-            logger.info(f"[#process]记录无需更新: {os.path.basename(archive_path)}")
+            # logger.info(f"[#process]记录无需更新: {os.path.basename(archive_path)}")
             return True
             
         # 更新记录
