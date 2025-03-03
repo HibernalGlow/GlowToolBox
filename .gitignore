@@ -62,3 +62,5 @@ src/nodes/config/performance_config.json
 
 src/scripts/folder/archive_check_history.yaml
 src/scripts/md/1.md
+src/scripts/archive/011-记录时间戳.py
+src/scripts/folder/timestamp_backups/*

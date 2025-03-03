@@ -4,10 +4,13 @@ from tqdm import tqdm
 from datetime import datetime
 
 class TimestampManager:
-    def __init__(self, backup_dir='1ehv/timestamp_backups'):
-        self.backup_dir = backup_dir
-        if not os.path.exists(backup_dir):
-            os.makedirs(backup_dir)
+    def __init__(self, backup_dir='timestamp_backups'):
+        # 获取脚本所在目录
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        # 将备份目录设置为脚本目录下的子目录
+        self.backup_dir = os.path.join(script_dir, backup_dir)
+        if not os.path.exists(self.backup_dir):
+            os.makedirs(self.backup_dir)
 
     def save_timestamps(self, directory, version_name=None):
         if version_name is None:
