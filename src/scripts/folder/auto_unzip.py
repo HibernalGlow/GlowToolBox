@@ -22,7 +22,7 @@ from nodes.record.timestamp_manager import TimestampManager
 
 # 设置日志记录器
 config = {
-    'script_name': 'name',
+    'script_name': 'auto_unzip',
     'console_enabled': False
 }
 logger, config_info = setup_logger(config)
