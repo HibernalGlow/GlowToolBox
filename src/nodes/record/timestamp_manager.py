@@ -5,8 +5,6 @@ from datetime import datetime
 from threading import Lock
 from typing import Dict, Optional
 
-logger = logging.getLogger(__name__)
-
 class TimestampManager:
     """线程安全的时间戳管理器类"""
     
@@ -29,12 +27,12 @@ class TimestampManager:
                 with self._lock:
                     with open(self.json_file, 'r', encoding='utf-8') as file:
                         self._timestamps = json.load(file)
-                logger.info(f"[#process]✅ 成功加载时间戳文件: {self.json_file}")
+                logging.info(f"[#process]✅ 成功加载时间戳文件: {self.json_file}")
         except json.JSONDecodeError as e:
-            logger.error(f"[#update]❌ JSON解析错误: {str(e)}")
+            logging.error(f"[#update]❌ JSON解析错误: {str(e)}")
             self._timestamps = {}
         except Exception as e:
-            logger.error(f"[#update]❌ 读取时间戳文件失败: {str(e)}")
+            logging.error(f"[#update]❌ 读取时间戳文件失败: {str(e)}")
             self._timestamps = {}
     
     def save_json(self) -> None:
@@ -52,9 +50,9 @@ class TimestampManager:
                 else:
                     os.rename(temp_file, self.json_file)
                     
-                logger.info(f"[#process]✅ 成功保存时间戳文件: {self.json_file}")
+                logging.info(f"[#process]✅ 成功保存时间戳文件: {self.json_file}")
         except Exception as e:
-            logger.error(f"[#update]❌ 保存时间戳文件失败: {str(e)}")
+            logging.error(f"[#update]❌ 保存时间戳文件失败: {str(e)}")
             # 清理临时文件
             if os.path.exists(temp_file):
                 try:
@@ -73,8 +71,9 @@ class TimestampManager:
             with self._lock:
                 self._timestamps[file_path] = os.path.getmtime(file_path)
                 self.save_json()
+                logging.info(f"[#process]✅ 已记录时间戳: {file_path} -> {datetime.fromtimestamp(self._timestamps[file_path])}")
         except Exception as e:
-            logger.error(f"[#update]❌ 记录时间戳失败: {str(e)}")
+            logging.error(f"[#update]❌ 记录时间戳失败: {str(e)}")
     
     def restore_timestamp(self, file_path: str) -> None:
         """
@@ -88,11 +87,11 @@ class TimestampManager:
                 if file_path in self._timestamps:
                     timestamp = self._timestamps[file_path]
                     os.utime(file_path, (timestamp, timestamp))
-                    logger.info(f"[#process]✅ 已恢复时间戳: {file_path} -> {datetime.fromtimestamp(timestamp)}")
+                    logging.info(f"[#process]✅ 已恢复时间戳: {file_path} -> {datetime.fromtimestamp(timestamp)}")
                 else:
-                    logger.warning(f"[#update]⚠️ 未找到时间戳记录: {file_path}")
+                    logging.warning(f"[#update]⚠️ 未找到时间戳记录: {file_path}")
         except Exception as e:
-            logger.error(f"[#update]❌ 恢复时间戳失败: {str(e)}")
+            logging.error(f"[#update]❌ 恢复时间戳失败: {str(e)}")
     
     def get_timestamp(self, file_path: str) -> Optional[float]:
         """
@@ -112,4 +111,4 @@ class TimestampManager:
         with self._lock:
             self._timestamps.clear()
             self.save_json()
-            logger.info("[#process]✅ 已清除所有时间戳记录") 
+            logging.info("[#process]✅ 已清除所有时间戳记录") 

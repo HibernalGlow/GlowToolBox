@@ -18,11 +18,9 @@ from nodes.tui.textual_logger import TextualLoggerManager
 from nodes.record.logger_config import setup_logger
 from nodes.tui.textual_preset import create_config_app
 from nodes.tui.mode_manager import create_mode_manager
-from nodes.record.timestamp_manager import TimestampManager
-
 # 设置日志记录器
 config = {
-    'script_name': 'auto_unzip',
+    'script_name': 'name',
     'console_enabled': False
 }
 logger, config_info = setup_logger(config)
@@ -180,6 +178,55 @@ class Config:
         else:
             # 默认支持所有格式
             return ['.zip', '.cbz', '.rar', '.cbr', '.7z']
+
+
+class TimestampManager:
+    def __init__(self, yaml_file):
+        # 将.yaml后缀改为.json
+        self.json_file = yaml_file.replace('.yaml', '.json')
+        self.file_timestamps = self._load_json()
+        
+    def _load_json(self):
+        """加载JSON文件,添加错误处理"""
+        try:
+            if os.path.exists(self.json_file):
+                with open(self.json_file, 'r', encoding='utf-8') as file:
+                    import json
+                    return json.load(file)
+            return {}
+        except json.JSONDecodeError as e:
+            logger.error(f"[#update]❌ JSON解析错误: {str(e)}")
+            return {}
+        except Exception as e:
+            logger.error(f"[#update]❌ 读取时间戳文件失败: {str(e)}")
+            return {}
+    
+    def save_json(self):
+        """保存JSON文件,添加错误处理"""
+        try:
+            with open(self.json_file, 'w', encoding='utf-8') as file:
+                import json
+                json.dump(self.file_timestamps, file, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"[#update]❌ 保存时间戳文件失败: {str(e)}")
+            
+    def record_timestamp(self, file_path):
+        try:
+            self.file_timestamps[file_path] = os.path.getmtime(file_path)
+            self.save_json()
+        except Exception as e:
+            logger.error(f"[#update]❌ 记录时间戳失败: {str(e)}")
+        
+    def restore_timestamp(self, file_path):
+        try:
+            if file_path in self.file_timestamps:
+                timestamp = self.file_timestamps[file_path]
+                os.utime(file_path, (timestamp, timestamp))
+                logger.info(f"[#process]✅ 已恢复时间戳: {file_path} -> {datetime.fromtimestamp(timestamp)}")
+            else:
+                logger.warning(f"[#update]⚠️ 未找到时间戳记录: {file_path}")
+        except Exception as e:
+            logger.error(f"[#update]❌ 恢复时间戳失败: {str(e)}")
 
 class ArchiveProcessor:
     def __init__(self, config):
