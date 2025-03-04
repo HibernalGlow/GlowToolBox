@@ -298,6 +298,28 @@ def rename_images_in_zip(zip_path, input_base_path):
                 
                 # 重命名文件
                 renamed = False
+                # 用于检测重名文件
+                filename_count = {}
+                
+                # 第一遍扫描，统计文件名
+                for root, _, files in os.walk(temp_dir):
+                    for filename in files:
+                        new_filename = re.sub(r'\[hash-[0-9a-fA-F]+\]', '', filename)
+                        if new_filename in filename_count:
+                            filename_count[new_filename] += 1
+                        else:
+                            filename_count[new_filename] = 1
+                
+                # 检查是否有重名文件
+                duplicate_files = {name: count for name, count in filename_count.items() if count > 1}
+                if duplicate_files:
+                    print(f"⚠️ 检测到压缩包内有重名文件:")
+                    for name, count in duplicate_files.items():
+                        print(f"   - {name}: {count}个文件")
+                    print("❌ 可能是压缩包损坏或混入其他文件，跳过处理")
+                    return
+                
+                # 第二遍扫描，执行重命名
                 for root, _, files in os.walk(temp_dir):
                     for filename in files:
                         new_filename = re.sub(r'\[hash-[0-9a-fA-F]+\]', '', filename)
@@ -305,24 +327,12 @@ def rename_images_in_zip(zip_path, input_base_path):
                             old_path = os.path.join(root, filename)
                             new_path = os.path.join(root, new_filename)
                             try:
-                                if os.path.exists(new_path):
-                                    # 如果目标文件已存在，先删除
-                                    os.remove(new_path)
                                 os.rename(old_path, new_path)
                                 print(f"重命名: {filename} -> {new_filename}")
                                 renamed = True
                             except Exception as e:
-                                print(f"⚠️ 7z重命名失败 {filename}: {str(e)}")
-                                # 如果重命名失败，尝试使用临时文件名
-                                try:
-                                    temp_new_path = new_path + '.tmp'
-                                    os.rename(old_path, temp_new_path)
-                                    os.replace(temp_new_path, new_path)
-                                    print(f"✅ 使用临时文件重命名成功: {filename} -> {new_filename}")
-                                    renamed = True
-                                except Exception as e2:
-                                    print(f"❌ 临时文件重命名也失败 {filename}: {str(e2)}")
-                                    continue
+                                print(f"⚠️ 重命名失败 {filename}: {str(e)}")
+                                continue
                 
                 if renamed:
                     try:
