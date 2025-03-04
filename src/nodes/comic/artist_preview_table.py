@@ -42,29 +42,31 @@ class ArtistPreviewGenerator:
             clean_name = artist_name.strip('[]')
             search_url = f"{self.base_url}/search/?q={clean_name}"
             
-            async with self.session.get(search_url) as response:
-                if response.status != 200:
-                    logger.warning(f"搜索画师 {clean_name} 失败: {response.status}")
-                    return None
+            try:
+                async with self.session.get(search_url) as response:
+                    if response.status != 200:
+                        logger.warning(f"搜索画师 {clean_name} 失败: {response.status}")
+                        return None
                     
-                html = await response.text()
-                soup = BeautifulSoup(html, 'html.parser')
-                
-                # 查找所有预览图
-                gallery_items = soup.select('.gallary_item')
-                for item in gallery_items:
-                    img = item.select_one('img')
-                    if img and img.get('src'):
-                        img_url = f"https:{img['src']}"
-                        # 验证图片是否可访问
-                        try:
-                            async with self.session.head(img_url) as img_response:
-                                if img_response.status == 200:
-                                    return img_url
-                        except Exception:
-                            continue
+                    html = await response.text()
+                    soup = BeautifulSoup(html, 'html.parser')
+                    
+                    # 查找所有预览图
+                    gallery_items = soup.select('.gallary_item')
+                    for item in gallery_items:
+                        img = item.select_one('img')
+                        if img and img.get('src'):
+                            img_url = img['src']
+                            if not img_url.startswith('http'):
+                                img_url = f"https:{img_url}"
+                            return img_url  # 直接返回第一个找到的图片URL
             
-            return None
+                    logger.warning(f"未找到画师 {clean_name} 的预览图")
+                    return None
+            except aiohttp.ClientError as e:
+                logger.warning(f"请求画师 {clean_name} 预览图时网络错误: {e}")
+                return None
+        
         except Exception as e:
             logger.error(f"获取画师 {clean_name} 预览图失败: {e}")
             return None
@@ -91,21 +93,53 @@ class ArtistPreviewGenerator:
         existing_artists = data['artists']['existing_artists']
         new_artists = data['artists']['new_artists']
         
+        # 计算总数
+        total_artists = len(existing_artists) + len(new_artists)
+        processed_count = 0
+        
         # 异步处理所有画师
-        existing_tasks = [
-            self.process_artist(folder, files, True)
-            for folder, files in existing_artists.items()
-        ]
+        existing_previews = []
+        new_previews = []
         
-        new_tasks = [
-            self.process_artist(folder, files, False)
-            for folder, files in new_artists.items()
-        ]
+        # 处理已存在的画师
+        logger.info(f"开始处理已存在画师 ({len(existing_artists)} 个)...")
+        for folder, files in existing_artists.items():
+            try:
+                preview = await self.process_artist(folder, files, True)
+                existing_previews.append(preview)
+            except Exception as e:
+                logger.error(f"处理已存在画师失败 {folder}: {e}")
+                # 添加一个空的预览，保持数据完整性
+                existing_previews.append(ArtistPreview(
+                    name=folder.strip('[]'),
+                    folder=folder,
+                    preview_url="",
+                    files=files,
+                    is_existing=True
+                ))
+            processed_count += 1
+            logger.info(f"进度: [{processed_count}/{total_artists}] - {folder}")
         
-        # 等待所有任务完成
-        existing_previews = await asyncio.gather(*existing_tasks)
-        new_previews = await asyncio.gather(*new_tasks)
+        # 处理新画师
+        logger.info(f"\n开始处理新画师 ({len(new_artists)} 个)...")
+        for folder, files in new_artists.items():
+            try:
+                preview = await self.process_artist(folder, files, False)
+                new_previews.append(preview)
+            except Exception as e:
+                logger.error(f"处理新画师失败 {folder}: {e}")
+                # 添加一个空的预览，保持数据完整性
+                new_previews.append(ArtistPreview(
+                    name=folder.strip('[]'),
+                    folder=folder,
+                    preview_url="",
+                    files=files,
+                    is_existing=False
+                ))
+            processed_count += 1
+            logger.info(f"进度: [{processed_count}/{total_artists}] - {folder}")
         
+        logger.info(f"\n处理完成! 总共处理了 {total_artists} 个画师")
         return existing_previews, new_previews
 
     def generate_html(self, existing_previews: List[ArtistPreview], 
@@ -633,7 +667,10 @@ class ArtistPreviewGenerator:
 async def generate_preview_tables(yaml_path: str, output_path: str = None):
     """生成画师预览表格的主函数"""
     if output_path is None:
-        output_path = Path(yaml_path).parent / 'artist_preview.html'
+        # 生成带中文时间戳的文件名
+        current_time = datetime.now()
+        timestamp = current_time.strftime("%Y年%m月%d日_%H时%M分%S秒")
+        output_path = Path(yaml_path).parent / f'画师预览_{timestamp}.html'
     
     async with ArtistPreviewGenerator() as generator:
         # 处理yaml文件
@@ -666,8 +703,10 @@ if __name__ == "__main__":
         print(f"文件不存在: {yaml_path}")
         sys.exit(1)
     
-    # 设置输出路径
-    output_path = Path(yaml_path).parent / 'artist_preview.html'
+    # 设置输出路径（带中文时间戳）
+    current_time = datetime.now()
+    timestamp = current_time.strftime("%Y年%m月%d日_%H时%M分%S秒")
+    output_path = Path(yaml_path).parent / f'画师预览_{timestamp}.html'
     
     print(f"处理文件: {yaml_path}")
     print(f"输出文件: {output_path}")
