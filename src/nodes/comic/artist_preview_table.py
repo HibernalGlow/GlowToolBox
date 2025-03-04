@@ -119,18 +119,18 @@ class ArtistPreviewGenerator:
     <meta charset="UTF-8">
     <title>画师预览表格</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .table-container { margin-bottom: 20px; }
-        .preview-table { border-collapse: collapse; width: 100%; }
-        .preview-table th, .preview-table td { 
+        body {{ font-family: Arial, sans-serif; margin: 20px; }}
+        .table-container {{ margin-bottom: 20px; }}
+        .preview-table {{ border-collapse: collapse; width: 100%; }}
+        .preview-table th, .preview-table td {{ 
             border: 1px solid #ddd; 
             padding: 8px; 
             text-align: left; 
-        }
-        .preview-table th { background-color: #f4f4f4; }
-        .preview-img { max-width: 100px; max-height: 150px; }
-        .files-list { max-height: 150px; overflow-y: auto; margin: 0; }
-        .collapsible { 
+        }}
+        .preview-table th {{ background-color: #f4f4f4; }}
+        .preview-img {{ max-width: 100px; max-height: 150px; }}
+        .files-list {{ max-height: 150px; overflow-y: auto; margin: 0; }}
+        .collapsible {{ 
             background-color: #f4f4f4;
             cursor: pointer;
             padding: 18px;
@@ -140,18 +140,18 @@ class ArtistPreviewGenerator:
             outline: none;
             font-size: 15px;
             margin-bottom: 10px;
-        }
-        .active, .collapsible:hover { background-color: #ddd; }
-        .content { 
+        }}
+        .active, .collapsible:hover {{ background-color: #ddd; }}
+        .content {{ 
             display: none;
             overflow: hidden;
             background-color: #f9f9f9;
             padding: 0 18px;
-        }
-        .checkbox-container { margin-bottom: 10px; }
-        .preview-cell { width: 100px; }
-        .name-cell { width: 200px; }
-        .export-container {
+        }}
+        .checkbox-container {{ margin-bottom: 10px; }}
+        .preview-cell {{ width: 100px; }}
+        .name-cell {{ width: 200px; }}
+        .export-container {{
             position: fixed;
             top: 0;
             left: 0;
@@ -161,8 +161,8 @@ class ArtistPreviewGenerator:
             text-align: center;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             z-index: 1000;
-        }
-        .export-btn, .import-btn {
+        }}
+        .export-btn, .import-btn {{
             background-color: #4CAF50;
             color: white;
             padding: 10px 20px;
@@ -170,14 +170,14 @@ class ArtistPreviewGenerator:
             border-radius: 4px;
             cursor: pointer;
             margin: 0 10px;
-        }
-        .export-btn:hover, .import-btn:hover {
+        }}
+        .export-btn:hover, .import-btn:hover {{
             background-color: #45a049;
-        }
-        .main-content {
+        }}
+        .main-content {{
             margin-top: 60px;
-        }
-        .preview-link {
+        }}
+        .preview-link {{
             background-color: #2196F3;
             color: white;
             padding: 4px 8px;
@@ -186,11 +186,11 @@ class ArtistPreviewGenerator:
             cursor: pointer;
             margin-left: 10px;
             font-size: 12px;
-        }
-        .preview-link:hover {
+        }}
+        .preview-link:hover {{
             background-color: #0b7dda;
-        }
-        .import-container {
+        }}
+        .import-container {{
             display: none;
             position: fixed;
             top: 50%;
@@ -201,13 +201,13 @@ class ArtistPreviewGenerator:
             border-radius: 5px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             z-index: 1001;
-        }
-        .import-textarea {
+        }}
+        .import-textarea {{
             width: 100%;
             min-height: 200px;
             margin: 10px 0;
-        }
-        .overlay {
+        }}
+        .overlay {{
             display: none;
             position: fixed;
             top: 0;
@@ -216,7 +216,7 @@ class ArtistPreviewGenerator:
             bottom: 0;
             background: rgba(0,0,0,0.5);
             z-index: 1000;
-        }
+        }}
     </style>
 </head>
 <body>
