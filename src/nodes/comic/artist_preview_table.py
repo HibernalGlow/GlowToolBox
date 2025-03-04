@@ -193,12 +193,18 @@ class ArtistPreviewGenerator:
         """生成HTML预览页面"""
         print("\n开始生成HTML预览页面...")
         
+        # 生成带时间戳的文件名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = os.path.dirname(output_path)
+        output_basename = os.path.splitext(os.path.basename(output_path))[0]
+        output_path = os.path.join(output_dir, f"{output_basename}_{timestamp}.html")
+        
         html_template = '''
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>画师预览表格</title>
+    <title>画师预览表格 - {timestamp}</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; }
         .table-container { margin-bottom: 20px; }
@@ -272,9 +278,27 @@ class ArtistPreviewGenerator:
             margin: 10px 0;
             display: none;
         }
+        .info-header {
+            background-color: #f8f9fa;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+        }
+        .info-header p {
+            margin: 5px 0;
+            color: #666;
+        }
     </style>
 </head>
 <body>
+    <div class="info-header">
+        <h2>画师预览表格</h2>
+        <p>生成时间：{datetime}</p>
+        <p>总画师数：{total_artists} (已存在: {existing_count}, 新增: {new_count})</p>
+        <p>缓存命中：{cache_hits} / {new_count}</p>
+    </div>
+
     <div class="export-container">
         <button class="control-btn" onclick="exportSelected('artists')">导出选中画师</button>
         <button class="control-btn" onclick="exportSelected('files')">导出选中压缩包</button>
@@ -324,6 +348,15 @@ class ArtistPreviewGenerator:
     </div>
 
     <script>
+        // 页面信息
+        const pageInfo = {{
+            generatedTime: "{datetime}",
+            totalArtists: {total_artists},
+            existingCount: {existing_count},
+            newCount: {new_count},
+            cacheHits: {cache_hits}
+        }};
+        
         // 折叠面板功能
         var coll = document.getElementsByClassName("collapsible");
         for (var i = 0; i < coll.length; i++) {{
@@ -527,12 +560,21 @@ class ArtistPreviewGenerator:
         existing_rows = '\n'.join(generate_table_row(p) for p in existing_previews)
         new_rows = '\n'.join(generate_table_row(p) for p in new_previews)
         
+        # 准备模板变量
+        template_vars = {
+            'timestamp': timestamp,
+            'datetime': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'total_artists': len(existing_previews) + len(new_previews),
+            'existing_count': len(existing_previews),
+            'new_count': len(new_previews),
+            'cache_hits': len([p for p in new_previews if p.preview_url]),
+            'existing_rows': existing_rows,
+            'new_rows': new_rows
+        }
+        
         # 生成完整HTML
         print("组装HTML内容...")
-        html_content = html_template.format(
-            existing_rows=existing_rows,
-            new_rows=new_rows
-        )
+        html_content = html_template.format(**template_vars)
         
         # 保存HTML文件
         print(f"保存预览页面到: {output_path}")
@@ -540,15 +582,19 @@ class ArtistPreviewGenerator:
             f.write(html_content)
         
         print("\n✨ 预览页面生成完成!")
-        print(f"- 已处理画师总数: {len(existing_previews) + len(new_previews)}")
-        print(f"- 已存在画师: {len(existing_previews)} 个")
-        print(f"- 新增画师: {len(new_previews)} 个")
+        print(f"- 生成时间: {template_vars['datetime']}")
+        print(f"- 已处理画师总数: {template_vars['total_artists']}")
+        print(f"- 已存在画师: {template_vars['existing_count']} 个")
+        print(f"- 新增画师: {template_vars['new_count']} 个")
+        print(f"- 缓存命中: {template_vars['cache_hits']} 个")
         print(f"- 输出文件: {output_path}")
 
 async def generate_preview_tables(yaml_path: str, output_path: str = None, cache_file: str = None):
     """生成画师预览表格的主函数"""
     if output_path is None:
-        output_path = Path(yaml_path).parent / 'artist_preview.html'
+        output_dir = Path(yaml_path).parent
+        output_basename = 'artist_preview'
+        output_path = output_dir / f"{output_basename}.html"
     
     if cache_file is None:
         cache_file = Path(yaml_path).parent / 'artist_cache.json'
