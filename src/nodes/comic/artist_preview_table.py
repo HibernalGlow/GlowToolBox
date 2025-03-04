@@ -188,10 +188,13 @@ class ArtistPreviewGenerator:
             <button class="btn" onclick="exportSelectionState()">导出选中状态</button>
             <input type="file" id="importState" style="display: none" onchange="importSelectionState(event)">
             <button class="btn" onclick="document.getElementById('importState').click()">导入选中状态</button>
+            <input type="file" id="importArtists" style="display: none" accept=".txt" onchange="importArtistsList(event)">
+            <button class="btn" onclick="document.getElementById('importArtists').click()">导入画师列表</button>
         </div>
-        <div class="view-controls">
-            <button class="mode-switch active" data-mode="table">表格模式</button>
-            <button class="mode-switch" data-mode="grid">图墙模式</button>
+        <div class="btn-group">
+            <button class="btn" onclick="refreshImages()">刷新未加载图片</button>
+            <div class="mode-switch active" data-mode="table">表格模式</div>
+            <div class="mode-switch" data-mode="grid">图墙模式</div>
         </div>
     </div>
     
@@ -472,6 +475,119 @@ class ArtistPreviewGenerator:
             cell.innerHTML = `${{artistName}} `;
             cell.appendChild(previewLink);
         }});
+
+        // 刷新未加载图片
+        async function refreshImages() {{
+            const refreshButton = document.querySelector('button[onclick="refreshImages()"]');
+            refreshButton.disabled = true;
+            refreshButton.textContent = '刷新中...';
+            
+            try {{
+                const images = document.querySelectorAll('.preview-cell');
+                let refreshCount = 0;
+                
+                for (const cell of images) {{
+                    if (cell.textContent === '无预览图' || cell.querySelector('img[src=""]')) {{
+                        const row = cell.closest('tr');
+                        const artistName = row.querySelector('.name-cell').textContent.trim();
+                        const searchUrl = generatePreviewUrl(artistName);
+                        
+                        try {{
+                            const response = await fetch(searchUrl);
+                            const html = await response.text();
+                            const parser = new DOMParser();
+                            const doc = parser.parseFromString(html, 'text/html');
+                            
+                            const galleryItems = doc.querySelectorAll('.gallary_item');
+                            for (const item of galleryItems) {{
+                                const img = item.querySelector('img');
+                                if (img && img.src) {{
+                                    const imgUrl = 'https:' + img.getAttribute('src');
+                                    try {{
+                                        const imgResponse = await fetch(imgUrl);
+                                        if (imgResponse.ok) {{
+                                            cell.innerHTML = `<img src="${imgUrl}" class="preview-img">`;
+                                            refreshCount++;
+                                            break;
+                                        }}
+                                    }} catch (error) {{
+                                        continue;
+                                    }}
+                                }}
+                            }}
+                        }} catch (error) {{
+                            console.error(`刷新 ${artistName} 的预览图失败:`, error);
+                        }}
+                    }}
+                }}
+                
+                alert(`刷新完成！成功加载 ${refreshCount} 张预览图`);
+            }} catch (error) {{
+                console.error('刷新图片时出错:', error);
+                alert('刷新图片时出错，请查看控制台了解详情');
+            }} finally {{
+                refreshButton.disabled = false;
+                refreshButton.textContent = '刷新未加载图片';
+            }}
+        }}
+
+        // 导入画师列表
+        async function importArtistsList(event) {{
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {{
+                try {{
+                    const artists = e.target.result.split('\\n')
+                        .map(line => line.trim())
+                        .filter(line => line.length > 0);
+                    
+                    // 取消所有选中状态
+                    ['existing-table', 'new-table'].forEach(tableId => {{
+                        const table = document.getElementById(tableId);
+                        const checkboxes = table.querySelectorAll('tbody input[type="checkbox"]');
+                        checkboxes.forEach(checkbox => checkbox.checked = false);
+                    }});
+                    
+                    // 选中匹配的画师
+                    let matchCount = 0;
+                    artists.forEach(artistName => {{
+                        ['existing-table', 'new-table'].forEach(tableId => {{
+                            const table = document.getElementById(tableId);
+                            table.querySelectorAll('tbody tr').forEach(row => {{
+                                const nameCell = row.querySelector('.name-cell');
+                                const rowArtistName = nameCell.textContent.trim();
+                                if (rowArtistName === artistName) {{
+                                    const checkbox = row.querySelector('input[type="checkbox"]');
+                                    if (checkbox) {{
+                                        checkbox.checked = true;
+                                        matchCount++;
+                                    }}
+                                }}
+                            }});
+                        }});
+                    }});
+                    
+                    // 更新全选框状态
+                    ['existing-table', 'new-table'].forEach(tableId => {{
+                        const selectAllId = tableId === 'existing-table' ? 'existing-select-all' : 'new-select-all';
+                        const selectAll = document.getElementById(selectAllId);
+                        const table = document.getElementById(tableId);
+                        const checkboxes = table.querySelectorAll('tbody input[type="checkbox"]');
+                        const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+                        selectAll.checked = allChecked;
+                    }});
+                    
+                    alert(`导入完成！匹配到 ${matchCount} 个画师`);
+                }} catch (error) {{
+                    console.error('导入画师列表失败:', error);
+                    alert('导入画师列表失败，请检查文件格式');
+                }}
+            }};
+            reader.readAsText(file);
+            event.target.value = ''; // 清除文件选择，允许重复导入同一个文件
+        }}
     </script>
 </body>
 </html>
