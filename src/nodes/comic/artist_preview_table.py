@@ -11,6 +11,9 @@ from dataclasses import dataclass
 from datetime import datetime
 import os
 import sys
+import shutil
+from tqdm import tqdm
+from tqdm.asyncio import tqdm as atqdm
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +29,7 @@ class ArtistPreviewGenerator:
     def __init__(self, base_url: str = "https://www.wn01.uk"):
         self.base_url = base_url
         self.session = None
+        self.template_dir = Path(__file__).parent / 'artist_preview'
         
     async def __aenter__(self):
         self.session = aiohttp.ClientSession()
@@ -42,31 +46,29 @@ class ArtistPreviewGenerator:
             clean_name = artist_name.strip('[]')
             search_url = f"{self.base_url}/search/?q={clean_name}"
             
-            try:
-                async with self.session.get(search_url) as response:
-                    if response.status != 200:
-                        logger.warning(f"搜索画师 {clean_name} 失败: {response.status}")
-                        return None
-                    
-                    html = await response.text()
-                    soup = BeautifulSoup(html, 'html.parser')
-                    
-                    # 查找所有预览图
-                    gallery_items = soup.select('.gallary_item')
-                    for item in gallery_items:
-                        img = item.select_one('img')
-                        if img and img.get('src'):
-                            img_url = img['src']
-                            if not img_url.startswith('http'):
-                                img_url = f"https:{img_url}"
-                            return img_url  # 直接返回第一个找到的图片URL
-            
-                    logger.warning(f"未找到画师 {clean_name} 的预览图")
+            async with self.session.get(search_url) as response:
+                if response.status != 200:
+                    logger.warning(f"搜索画师 {clean_name} 失败: {response.status}")
                     return None
-            except aiohttp.ClientError as e:
-                logger.warning(f"请求画师 {clean_name} 预览图时网络错误: {e}")
-                return None
-        
+                    
+                html = await response.text()
+                soup = BeautifulSoup(html, 'html.parser')
+                
+                # 查找所有预览图
+                gallery_items = soup.select('.gallary_item')
+                for item in gallery_items:
+                    img = item.select_one('img')
+                    if img and img.get('src'):
+                        img_url = f"https:{img['src']}"
+                        # 验证图片是否可访问
+                        try:
+                            async with self.session.head(img_url) as img_response:
+                                if img_response.status == 200:
+                                    return img_url
+                        except Exception:
+                            continue
+            
+            return None
         except Exception as e:
             logger.error(f"获取画师 {clean_name} 预览图失败: {e}")
             return None
@@ -83,6 +85,49 @@ class ArtistPreviewGenerator:
             is_existing=is_existing
         )
 
+    def _generate_table_row(self, preview: ArtistPreview) -> str:
+        """生成表格行HTML"""
+        files_list = '<br>'.join(preview.files)
+        preview_link = f'<a href="#" onclick="openPreview(\'{preview.name}\')" class="preview-link">预览</a>'
+        
+        if preview.is_existing:
+            return f"""
+                <tr>
+                    <td><input type="checkbox" data-artist="{preview.name}" checked></td>
+                    <td class="artist-name">{preview.name}</td>
+                    <td>{preview_link}</td>
+                    <td><div class="files-list">{files_list}</div></td>
+                </tr>
+            """
+        else:
+            preview_img = f'<img src="{preview.preview_url}" class="preview-img" onclick="openPreview(\'{preview.name}\')">' if preview.preview_url else '无预览图'
+            return f"""
+                <tr>
+                    <td><input type="checkbox" data-artist="{preview.name}"></td>
+                    <td class="preview-cell">{preview_img}</td>
+                    <td class="artist-name">{preview.name}</td>
+                    <td>{preview_link}</td>
+                    <td><div class="files-list">{files_list}</div></td>
+                </tr>
+            """
+
+    def _generate_grid_item(self, preview: ArtistPreview) -> str:
+        """生成网格视图项HTML"""
+        files_list = '<br>'.join(preview.files)
+        preview_img = preview.preview_url if not preview.is_existing else ""
+        
+        return f"""
+            <div class="grid-item">
+                <img src="{preview_img}" class="preview-img" onclick="openPreview('{preview.name}')" 
+                     onerror="this.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='">
+                <h4>{preview.name}</h4>
+                <div class="checkbox-wrapper">
+                    <input type="checkbox" data-artist="{preview.name}" {' checked' if preview.is_existing else ''}>
+                </div>
+                <div class="files-list">{files_list}</div>
+            </div>
+        """
+
     async def process_yaml(self, yaml_path: str) -> Tuple[List[ArtistPreview], List[ArtistPreview]]:
         """处理yaml文件，返回新旧画师预览信息"""
         # 读取yaml文件
@@ -93,596 +138,90 @@ class ArtistPreviewGenerator:
         existing_artists = data['artists']['existing_artists']
         new_artists = data['artists']['new_artists']
         
-        # 计算总数
-        total_artists = len(existing_artists) + len(new_artists)
-        processed_count = 0
+        # 创建进度条
+        print("处理已存在画师...")
+        existing_tasks = [
+            self.process_artist(folder, files, True)
+            for folder, files in existing_artists.items()
+        ]
         
-        # 创建进度更新函数
-        async def update_progress(folder: str):
-            nonlocal processed_count
-            processed_count += 1
-            logger.info(f"进度: [{processed_count}/{total_artists}] - {folder}")
-
-        # 并行处理画师的函数
-        async def process_artist_batch(artists_dict: Dict[str, List[str]], is_existing: bool, 
-                                     batch_size: int = 10) -> List[ArtistPreview]:
-            results = []
-            artists_items = list(artists_dict.items())
-            
-            for i in range(0, len(artists_items), batch_size):
-                batch = artists_items[i:i + batch_size]
-                tasks = []
-                
-                for folder, files in batch:
-                    tasks.append(asyncio.create_task(self.process_artist(folder, files, is_existing)))
-                
-                # 等待当前批次完成
-                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-                
-                # 更新进度并处理结果
-                for folder, result in zip([f[0] for f in batch], batch_results):
-                    await update_progress(folder)
-                    if isinstance(result, Exception):
-                        logger.error(f"处理画师失败 {folder}: {result}")
-                        # 添加空预览保持数据完整性
-                        results.append(ArtistPreview(
-                            name=folder.strip('[]'),
-                            folder=folder,
-                            preview_url="",
-                            files=artists_dict[folder],
-                            is_existing=is_existing
-                        ))
-                    else:
-                        results.append(result)
-            
-            return results
-
-        # 设置更大的批次大小以提高性能
-        BATCH_SIZE = 20
-
-        # 处理已存在的画师
-        logger.info(f"开始处理已存在画师 ({len(existing_artists)} 个)...")
-        existing_previews = await process_artist_batch(existing_artists, True, BATCH_SIZE)
-
-        # 处理新画师
-        logger.info(f"\n开始处理新画师 ({len(new_artists)} 个)...")
-        new_previews = await process_artist_batch(new_artists, False, BATCH_SIZE)
-
-        logger.info(f"\n处理完成! 总共处理了 {total_artists} 个画师")
+        print("处理新画师...")
+        new_tasks = [
+            self.process_artist(folder, files, False)
+            for folder, files in new_artists.items()
+        ]
+        
+        # 使用tqdm显示进度
+        existing_previews = await atqdm.gather(*existing_tasks, 
+                                             desc="处理已存在画师",
+                                             ncols=80,
+                                             colour="green")
+        
+        new_previews = await atqdm.gather(*new_tasks,
+                                         desc="处理新画师",
+                                         ncols=80,
+                                         colour="blue")
+        
         return existing_previews, new_previews
+
+    def _ensure_template_files(self):
+        """确保模板文件存在"""
+        if not self.template_dir.exists():
+            logger.info("创建模板目录结构...")
+            self.template_dir.mkdir(parents=True, exist_ok=True)
+            (self.template_dir / 'templates').mkdir(exist_ok=True)
+            (self.template_dir / 'static' / 'js').mkdir(parents=True, exist_ok=True)
+            (self.template_dir / 'static' / 'css').mkdir(parents=True, exist_ok=True)
 
     def generate_html(self, existing_previews: List[ArtistPreview], 
                      new_previews: List[ArtistPreview], 
                      output_path: str):
         """生成HTML预览页面"""
-        html_template = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>画师预览表格</title>
-    <link rel="stylesheet" href="https://cdn.datatables.net/1.11.5/css/jquery.dataTables.min.css">
-    <link rel="stylesheet" href="https://cdn.datatables.net/select/1.3.4/css/select.dataTables.min.css">
-    <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.2.2/css/buttons.dataTables.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/viewerjs/1.10.2/viewer.min.css">
-    <style>
-        body {{ font-family: Arial, sans-serif; margin: 20px; }}
-        .table-container {{ margin: 20px 0; }}
-        .preview-table {{ width: 100%; }}
-        .preview-img {{ max-width: 100px; max-height: 150px; cursor: pointer; }}
-        .files-list {{ max-height: 150px; overflow-y: auto; margin: 0; }}
-        .control-panel {{ 
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            background: #f4f4f4;
-            padding: 10px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            z-index: 1000;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }}
-        .main-content {{ margin-top: 60px; }}
-        .btn {{
-            background-color: #4CAF50;
-            color: white;
-            padding: 8px 16px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            margin: 0 5px;
-        }}
-        .btn:hover {{ background-color: #45a049; }}
-        .btn-group {{ display: flex; gap: 5px; }}
-        .mode-switch {{
-            padding: 5px 10px;
-            background: #fff;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            cursor: pointer;
-        }}
-        .mode-switch.active {{ background: #4CAF50; color: white; }}
-        .grid-view {{ 
-            display: none;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 20px;
-            padding: 20px;
-        }}
-        .grid-item {{
-            border: 1px solid #ddd;
-            padding: 10px;
-            text-align: center;
-        }}
-        .grid-item img {{ max-width: 100%; height: auto; }}
-        .custom-select-all {{
-            margin: 10px 0;
-            font-weight: bold;
-        }}
-        .dt-buttons {{ margin-bottom: 10px; }}
-    </style>
-</head>
-<body>
-    <div class="control-panel">
-        <div class="btn-group">
-            <button class="btn" onclick="exportSelected('artists')">导出选中画师</button>
-            <button class="btn" onclick="exportSelected('files')">导出选中压缩包</button>
-            <button class="btn" onclick="exportSelectionState()">导出选中状态</button>
-            <input type="file" id="importState" style="display: none" onchange="importSelectionState(event)">
-            <button class="btn" onclick="document.getElementById('importState').click()">导入选中状态</button>
-            <input type="file" id="importArtists" style="display: none" accept=".txt" onchange="importArtistsList(event)">
-            <button class="btn" onclick="document.getElementById('importArtists').click()">导入画师列表</button>
-        </div>
-        <div class="btn-group">
-            <button class="btn" onclick="refreshImages()">刷新未加载图片</button>
-            <div class="mode-switch active" data-mode="table">表格模式</div>
-            <div class="mode-switch" data-mode="grid">图墙模式</div>
-        </div>
-    </div>
-    
-    <div class="main-content">
-        <h2>已存在画师</h2>
-        <div class="table-container">
-            <div class="custom-select-all">
-                <input type="checkbox" id="existing-select-all" checked>
-                <label for="existing-select-all">全选/取消全选已存在画师</label>
-                <button class="btn" onclick="invertSelection('existing-table')">反选</button>
-            </div>
-            <table class="preview-table" id="existing-table">
-                <thead>
-                    <tr>
-                        <th>选择</th>
-                        <th>画师名</th>
-                        <th>文件列表</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {existing_rows}
-                </tbody>
-            </table>
-        </div>
-
-        <h2>新画师</h2>
-        <div class="table-container">
-            <div class="custom-select-all">
-                <input type="checkbox" id="new-select-all">
-                <label for="new-select-all">全选/取消全选新画师</label>
-                <button class="btn" onclick="invertSelection('new-table')">反选</button>
-            </div>
-            <table class="preview-table" id="new-table">
-                <thead>
-                    <tr>
-                        <th>选择</th>
-                        <th>预览图</th>
-                        <th>画师名</th>
-                        <th>文件列表</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {new_rows}
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
-    <script src="https://cdn.datatables.net/select/1.3.4/js/dataTables.select.min.js"></script>
-    <script src="https://cdn.datatables.net/buttons/2.2.2/js/dataTables.buttons.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/viewerjs/1.10.2/viewer.min.js"></script>
-    <script>
-        // 初始化 DataTables
-        $(document).ready(function() {{
-            const commonConfig = {{
-                pageLength: 25,
-                dom: 'Bfrtip',
-                select: {{
-                    style: 'multi',
-                    selector: 'td:first-child input[type="checkbox"]'
-                }},
-                buttons: [
-                    'selectAll',
-                    'selectNone'
-                ]
-            }};
-
-            $('#existing-table').DataTable(commonConfig);
-            $('#new-table').DataTable(commonConfig);
-
-            // 初始化图片查看器
-            new Viewer(document.getElementById('new-table'), {{
-                inline: false,
-                viewed() {{
-                    viewer.zoomTo(1);
-                }}
-            }});
-        }});
-
-        // 视图切换
-        document.querySelectorAll('.mode-switch').forEach(btn => {{
-            btn.addEventListener('click', function() {{
-                const mode = this.dataset.mode;
-                document.querySelectorAll('.mode-switch').forEach(b => b.classList.remove('active'));
-                this.classList.add('active');
-                
-                const tables = document.querySelectorAll('.table-container');
-                const gridView = document.querySelector('.grid-view');
-                
-                if (mode === 'grid') {{
-                    tables.forEach(t => t.style.display = 'none');
-                    gridView.style.display = 'grid';
-                }} else {{
-                    tables.forEach(t => t.style.display = 'block');
-                    gridView.style.display = 'none';
-                }}
-            }});
-        }});
-
-        // 全选功能
-        function setupSelectAll(tableId, selectAllId) {{
-            const selectAll = document.getElementById(selectAllId);
-            const table = document.querySelector(tableId);
-            if (!selectAll || !table) return;
-
-            selectAll.addEventListener('change', function() {{
-                const checkboxes = table.querySelectorAll('tbody input[type="checkbox"]');
-                checkboxes.forEach(checkbox => checkbox.checked = this.checked);
-            }});
-
-            table.addEventListener('change', function(e) {{
-                if (e.target.type === 'checkbox' && e.target !== selectAll) {{
-                    const checkboxes = table.querySelectorAll('tbody input[type="checkbox"]');
-                    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
-                    selectAll.checked = allChecked;
-                }}
-            }});
-        }}
-
-        // 反选功能
-        function invertSelection(tableId) {{
-            const table = document.getElementById(tableId);
-            const checkboxes = table.querySelectorAll('tbody input[type="checkbox"]');
-            checkboxes.forEach(checkbox => checkbox.checked = !checkbox.checked);
-            
-            // 更新全选框状态
-            const selectAllId = tableId === 'existing-table' ? 'existing-select-all' : 'new-select-all';
-            const selectAll = document.getElementById(selectAllId);
-            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
-            selectAll.checked = allChecked;
-        }}
-
-        // 导出选中状态
-        function exportSelectionState() {{
-            const state = {{
-                existing: getTableState('existing-table'),
-                new: getTableState('new-table')
-            }};
-            
-            const blob = new Blob([JSON.stringify(state)], {{ type: 'application/json' }});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'selection_state.json';
-            document.body.appendChild(a);
-            a.click();
-            URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-        }}
-
-        // 导入选中状态
-        function importSelectionState(event) {{
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = function(e) {{
-                try {{
-                    const state = JSON.parse(e.target.result);
-                    applyTableState('existing-table', state.existing);
-                    applyTableState('new-table', state.new);
-                }} catch (error) {{
-                    console.error('导入状态失败:', error);
-                    alert('导入状态失败，请检查文件格式');
-                }}
-            }};
-            reader.readAsText(file);
-        }}
-
-        // 获取表格选中状态
-        function getTableState(tableId) {{
-            const table = document.getElementById(tableId);
-            const state = {{}};
-            table.querySelectorAll('tbody tr').forEach(row => {{
-                const checkbox = row.querySelector('input[type="checkbox"]');
-                const artistName = row.querySelector('.name-cell').textContent;
-                state[artistName] = checkbox.checked;
-            }});
-            return state;
-        }}
-
-        // 应用表格选中状态
-        function applyTableState(tableId, state) {{
-            const table = document.getElementById(tableId);
-            table.querySelectorAll('tbody tr').forEach(row => {{
-                const checkbox = row.querySelector('input[type="checkbox"]');
-                const artistName = row.querySelector('.name-cell').textContent;
-                if (state.hasOwnProperty(artistName)) {{
-                    checkbox.checked = state[artistName];
-                }}
-            }});
-        }}
-
-        // 导出功能
-        function exportSelected(type) {{
-            let content = [];
-            let state = {{
-                existing: {{}},
-                new: {{}}
-            }};
-            
-            ['existing-table', 'new-table'].forEach(tableId => {{
-                const table = document.getElementById(tableId);
-                const rows = table.querySelectorAll('tbody tr');
-                rows.forEach(row => {{
-                    const checkbox = row.querySelector('input[type="checkbox"]');
-                    const artistName = row.querySelector('.name-cell').textContent;
-                    if (checkbox) {{
-                        state[tableId === 'existing-table' ? 'existing' : 'new'][artistName] = checkbox.checked;
-                        if (checkbox.checked) {{
-                            if (type === 'artists') {{
-                                content.push(artistName);
-                            }} else if (type === 'files') {{
-                                const filesList = row.querySelector('.files-list').innerHTML;
-                                content.push(...filesList.split('<br>'));
-                            }}
-                        }}
-                    }}
-                }});
-            }});
-            
-            if (content.length > 0) {{
-                // 导出纯文本文件
-                const textBlob = new Blob([content.join('\\n')], {{ type: 'text/plain' }});
-                const textUrl = URL.createObjectURL(textBlob);
-                const textLink = document.createElement('a');
-                textLink.href = textUrl;
-                textLink.download = type === 'artists' ? 'selected_artists.txt' : 'selected_files.txt';
-                document.body.appendChild(textLink);
-                textLink.click();
-                URL.revokeObjectURL(textUrl);
-                document.body.removeChild(textLink);
-
-                // 导出带状态的JSON文件
-                const jsonData = {{
-                    content: content,
-                    state: state,
-                    exportType: type,
-                    exportTime: new Date().toISOString()
-                }};
-                const jsonBlob = new Blob([JSON.stringify(jsonData, null, 2)], {{ type: 'application/json' }});
-                const jsonUrl = URL.createObjectURL(jsonBlob);
-                const jsonLink = document.createElement('a');
-                jsonLink.href = jsonUrl;
-                jsonLink.download = type === 'artists' ? 'selected_artists_with_state.json' : 'selected_files_with_state.json';
-                document.body.appendChild(jsonLink);
-                jsonLink.click();
-                URL.revokeObjectURL(jsonUrl);
-                document.body.removeChild(jsonLink);
-            }} else {{
-                alert('请先选择要导出的内容！');
-            }}
-        }}
-
-        // 生成预览链接
-        function generatePreviewUrl(artistName) {{
-            return `https://www.wn01.uk/search/?q=${{encodeURIComponent(artistName)}}`;
-        }}
-
-        // 初始化
-        setupSelectAll('#existing-table', 'existing-select-all');
-        setupSelectAll('#new-table', 'new-select-all');
-
-        // 为每个画师名添加预览链接
-        document.querySelectorAll('.name-cell').forEach(cell => {{
-            const artistName = cell.textContent;
-            const previewUrl = generatePreviewUrl(artistName);
-            const previewLink = document.createElement('a');
-            previewLink.href = previewUrl;
-            previewLink.target = '_blank';
-            previewLink.className = 'preview-link btn';
-            previewLink.textContent = '预览';
-            previewLink.style.marginLeft = '10px';
-            previewLink.style.fontSize = '12px';
-            previewLink.style.padding = '2px 8px';
-            cell.innerHTML = `${{artistName}} `;
-            cell.appendChild(previewLink);
-        }});
-
-        // 刷新未加载图片
-        async function refreshImages() {{
-            const refreshButton = document.querySelector('button[onclick="refreshImages()"]');
-            refreshButton.disabled = true;
-            refreshButton.textContent = '刷新中...';
-            
-            try {{
-                const images = document.querySelectorAll('.preview-cell');
-                let refreshCount = 0;
-                
-                for (const cell of images) {{
-                    if (cell.textContent === '无预览图' || cell.querySelector('img[src=""]')) {{
-                        const row = cell.closest('tr');
-                        const artistName = row.querySelector('.name-cell').textContent.trim();
-                        const searchUrl = generatePreviewUrl(artistName);
-                        
-                        try {{
-                            const response = await fetch(searchUrl);
-                            const html = await response.text();
-                            const parser = new DOMParser();
-                            const doc = parser.parseFromString(html, 'text/html');
-                            
-                            const galleryItems = doc.querySelectorAll('.gallary_item');
-                            for (const item of galleryItems) {{
-                                const img = item.querySelector('img');
-                                if (img && img.src) {{
-                                    let imgUrl = img.getAttribute('src');
-                                    if (!imgUrl.startsWith('http')) {{
-                                        imgUrl = 'https:' + imgUrl;
-                                    }}
-                                    try {{
-                                        const imgResponse = await fetch(imgUrl);
-                                        if (imgResponse.ok) {{
-                                            cell.innerHTML = `<img src="${imgUrl}" class="preview-img">`;
-                                            refreshCount++;
-                                            break;
-                                        }}
-                                    }} catch (error) {{
-                                        continue;
-                                    }}
-                                }}
-                            }}
-                        }} catch (error) {{
-                            console.error(`刷新 ${artistName} 的预览图失败:`, error);
-                        }}
-                    }}
-                }}
-                
-                alert(`刷新完成！成功加载 ${refreshCount} 张预览图`);
-            }} catch (error) {{
-                console.error('刷新图片时出错:', error);
-                alert('刷新图片时出错，请查看控制台了解详情');
-            }} finally {{
-                refreshButton.disabled = false;
-                refreshButton.textContent = '刷新未加载图片';
-            }}
-        }}
-
-        // 导入画师列表
-        async function importArtistsList(event) {{
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = function(e) {{
-                try {{
-                    const artists = e.target.result.split('\\n')
-                        .map(line => line.trim())
-                        .filter(line => line.length > 0);
-                    
-                    // 取消所有选中状态
-                    ['existing-table', 'new-table'].forEach(tableId => {{
-                        const table = document.getElementById(tableId);
-                        const checkboxes = table.querySelectorAll('tbody input[type="checkbox"]');
-                        checkboxes.forEach(checkbox => checkbox.checked = false);
-                    }});
-                    
-                    // 选中匹配的画师
-                    let matchCount = 0;
-                    artists.forEach(artistName => {{
-                        ['existing-table', 'new-table'].forEach(tableId => {{
-                            const table = document.getElementById(tableId);
-                            table.querySelectorAll('tbody tr').forEach(row => {{
-                                const nameCell = row.querySelector('.name-cell');
-                                const rowArtistName = nameCell.textContent.trim();
-                                if (rowArtistName === artistName) {{
-                                    const checkbox = row.querySelector('input[type="checkbox"]');
-                                    if (checkbox) {{
-                                        checkbox.checked = true;
-                                        matchCount++;
-                                    }}
-                                }}
-                            }});
-                        }});
-                    }});
-                    
-                    // 更新全选框状态
-                    ['existing-table', 'new-table'].forEach(tableId => {{
-                        const selectAllId = tableId === 'existing-table' ? 'existing-select-all' : 'new-select-all';
-                        const selectAll = document.getElementById(selectAllId);
-                        const table = document.getElementById(tableId);
-                        const checkboxes = table.querySelectorAll('tbody input[type="checkbox"]');
-                        const allChecked = Array.from(checkboxes).every(cb => cb.checked);
-                        selectAll.checked = allChecked;
-                    }});
-                    
-                    alert(`导入完成！匹配到 ${matchCount} 个画师`);
-                }} catch (error) {{
-                    console.error('导入画师列表失败:', error);
-                    alert('导入画师列表失败，请检查文件格式');
-                }}
-            }};
-            reader.readAsText(file);
-            event.target.value = ''; // 清除文件选择，允许重复导入同一个文件
-        }}
-    </script>
-</body>
-</html>
-'''
+        self._ensure_template_files()
         
-        def generate_table_row(preview: ArtistPreview) -> str:
-            files_list = '<br>'.join(preview.files)
-            if preview.is_existing:
-                return f"""
-                    <tr>
-                        <td><input type="checkbox" checked></td>
-                        <td class="name-cell">{preview.name}</td>
-                        <td><div class="files-list">{files_list}</div></td>
-                    </tr>
-                """
-            else:
-                preview_img = f'<img src="{preview.preview_url}" class="preview-img">' if preview.preview_url else '无预览图'
-                return f"""
-                    <tr>
-                        <td><input type="checkbox"></td>
-                        <td class="preview-cell">{preview_img}</td>
-                        <td class="name-cell">{preview.name}</td>
-                        <td><div class="files-list">{files_list}</div></td>
-                    </tr>
-                """
-        
-        # 生成表格行
-        existing_rows = '\n'.join(generate_table_row(p) for p in existing_previews)
-        new_rows = '\n'.join(generate_table_row(p) for p in new_previews)
-        
-        # 生成完整HTML
-        html_content = html_template.format(
-            existing_rows=existing_rows,
-            new_rows=new_rows
-        )
-        
-        # 保存HTML文件
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(html_content)
+        print("生成HTML内容...")
+        with tqdm(total=4, desc="生成页面", ncols=80, colour="cyan") as pbar:
+            # 生成表格行和网格项
+            existing_rows = '\n'.join(self._generate_table_row(p) for p in existing_previews)
+            new_rows = '\n'.join(self._generate_table_row(p) for p in new_previews)
+            pbar.update(1)
+            
+            existing_grid = '\n'.join(self._generate_grid_item(p) for p in existing_previews)
+            new_grid = '\n'.join(self._generate_grid_item(p) for p in new_previews)
+            pbar.update(1)
+            
+            # 读取模板文件
+            template_path = self.template_dir / 'templates' / 'index.html'
+            with open(template_path, 'r', encoding='utf-8') as f:
+                template = f.read()
+            pbar.update(1)
+            
+            # 替换模板变量
+            html_content = template.format(
+                existing_rows=existing_rows,
+                new_rows=new_rows,
+                existing_grid=existing_grid,
+                new_grid=new_grid
+            )
+            
+            # 复制静态文件
+            output_dir = Path(output_path).parent
+            static_dir = output_dir / 'static'
+            if static_dir.exists():
+                shutil.rmtree(static_dir)
+            shutil.copytree(self.template_dir / 'static', static_dir)
+            
+            # 保存HTML文件
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            pbar.update(1)
         
         logger.info(f"预览页面已生成: {output_path}")
 
 async def generate_preview_tables(yaml_path: str, output_path: str = None):
     """生成画师预览表格的主函数"""
     if output_path is None:
-        # 生成带中文时间戳的文件名
-        current_time = datetime.now()
-        timestamp = current_time.strftime("%Y年%m月%d日_%H时%M分%S秒")
-        output_path = Path(yaml_path).parent / f'画师预览_{timestamp}.html'
+        output_path = Path(yaml_path).parent / 'artist_preview.html'
     
     async with ArtistPreviewGenerator() as generator:
         # 处理yaml文件
@@ -715,10 +254,8 @@ if __name__ == "__main__":
         print(f"文件不存在: {yaml_path}")
         sys.exit(1)
     
-    # 设置输出路径（带中文时间戳）
-    current_time = datetime.now()
-    timestamp = current_time.strftime("%Y年%m月%d日_%H时%M分%S秒")
-    output_path = Path(yaml_path).parent / f'画师预览_{timestamp}.html'
+    # 设置输出路径
+    output_path = Path(yaml_path).parent / 'artist_preview.html'
     
     print(f"处理文件: {yaml_path}")
     print(f"输出文件: {output_path}")
@@ -727,16 +264,20 @@ if __name__ == "__main__":
         # 安装依赖
         try:
             import aiohttp
+            import bs4
+            import tqdm
         except ImportError:
             print("正在安装必要的依赖...")
-            os.system("pip install aiohttp beautifulsoup4")
+            os.system("pip install aiohttp beautifulsoup4 tqdm")
             import aiohttp
+            import bs4
+            import tqdm
         
         # 运行生成器
         asyncio.run(generate_preview_tables(yaml_path, str(output_path)))
-        print(f"预览页面已生成: {output_path}")
+        print(f"\n预览页面已生成: {output_path}")
     except Exception as e:
-        print(f"生成预览页面时出错: {e}")
+        print(f"\n生成预览页面时出错: {e}")
         if input("是否显示详细错误信息？(y/n): ").lower() == 'y':
             import traceback
             traceback.print_exc() 

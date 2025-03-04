@@ -1,0 +1,102 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 20px;
+}
+
+.export-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: #f8f9fa;
+    padding: 10px;
+    text-align: center;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    z-index: 1000;
+}
+
+.main-content {
+    margin-top: 60px;
+}
+
+.control-panel {
+    margin: 15px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.checkbox-container {
+    margin-right: 15px;
+}
+
+.preview-img {
+    max-width: 100px;
+    max-height: 150px;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.preview-img:hover {
+    transform: scale(1.1);
+}
+
+.files-list {
+    max-height: 150px;
+    overflow-y: auto;
+    margin: 0;
+}
+
+.grid-view {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 20px;
+    padding: 20px;
+}
+
+.grid-item {
+    border: 1px solid #ddd;
+    padding: 10px;
+    text-align: center;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.grid-item img {
+    max-width: 100%;
+    height: auto;
+    margin-bottom: 10px;
+}
+
+.grid-item .checkbox-wrapper {
+    margin: 10px 0;
+}
+
+.grid-item .files-list {
+    font-size: 0.9em;
+    text-align: left;
+}
+
+.preview-link {
+    color: #007bff;
+    text-decoration: none;
+    margin-left: 10px;
+}
+
+.preview-link:hover {
+    text-decoration: underline;
+}
+
+.btn-group {
+    gap: 10px;
+}
+
+#existing-content,
+#new-content {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    margin: 15px 0;
+    padding: 15px;
+} 
