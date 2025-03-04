@@ -7,30 +7,23 @@ from typing import Dict, List, Optional, Tuple
 import sys
 import argparse
 import pyperclip
-from loguru import logger
 from datetime import datetime
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from nodes.tui.textual_preset import create_config_app
+from nodes.record.logger_config import setup_logger
+
+config = {
+    'script_name': 'artist_classify',
+    'console_enabled': False
+}
+logger, config_info = setup_logger(config)
 
 class ArtistClassifier:
     def __init__(self, config_path: str = None):
-        # 配置 loguru
-        logger.remove()  # 移除默认的处理器
-        logger.add(sys.stderr, 
-                  format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-                  level="DEBUG")  # 改为 DEBUG 级别以查看更多信息
-        
         # 如果没有指定配置文件路径，则使用同目录下的默认配置文件
         if config_path is None:
             config_path = Path(__file__).parent / "画师分类.yaml"
         
-        # 添加文件处理器
-        log_path = Path("logs") / "画师分类" / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        logger.add(str(log_path), 
-                  format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
-                  level="DEBUG")
-
         logger.info(f"初始化画师分类器，配置文件路径: {config_path}")
         self.config = self._load_config(config_path)
         self.base_dir = Path(self.config['paths']['base_dir'])
@@ -145,7 +138,7 @@ class ArtistClassifier:
             self._save_config(r"D:\1VSCODE\1ehv\archive\config\画师分类.yaml")
             
             total_artists = len(self.config['artists']['auto_detected']) + len(self.config['artists']['user_defined'])
-            logger.success(f"画师列表更新完成，共 {total_artists} 个画师")
+            logger.info(f"画师列表更新完成，共 {total_artists} 个画师")
             logger.debug(f"自动检测: {len(self.config['artists']['auto_detected'])} 个")
             logger.debug(f"用户自定义: {len(self.config['artists']['user_defined'])} 个")
             
@@ -299,13 +292,13 @@ class ArtistClassifier:
                     target_path = self.found_artists_dir / file_path.name
                     shutil.move(str(file_path), str(target_path))
                     found_files.append((file_path.name, folder_name, artist_name))
-                    logger.success(f"找到画师 {artist_name}，已移动到中间文件夹: {file_path.name}")
+                    logger.info(f"找到画师 {artist_name}，已移动到中间文件夹: {file_path.name}")
                 else:
                     # 直接模式：移动到画师文件夹
                     target_folder = self.base_dir / folder_name
                     try:
                         self.move_file(file_path, target_folder)
-                        logger.success(f"已移动到画师文件夹: {file_path.name} -> {folder_name}")
+                        logger.info(f"已移动到画师文件夹: {file_path.name} -> {folder_name}")
                     except Exception as e:
                         logger.error(f"移动文件失败: {file_path.name} - {str(e)}")
             else:
@@ -443,7 +436,7 @@ class ArtistClassifier:
         with open(output_path, 'w', encoding='utf-8') as f:
             yaml.dump(output_data, f, allow_unicode=True, sort_keys=False)
         
-        logger.success(f"分类结果已保存到: {output_path}")
+        logger.info(f"分类结果已保存到: {output_path}")
 
 def process_args():
     """处理命令行参数"""
