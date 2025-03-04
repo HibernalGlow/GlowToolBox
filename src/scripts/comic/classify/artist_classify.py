@@ -353,7 +353,7 @@ class ArtistClassifier:
         # 初始化结果结构
         result = {
             'artists': {
-                'auto_detected': {},
+                'auto_detected': {},  # 改为 {画师文件夹名: [对应的压缩包文件名列表]}
                 'user_defined': {}
             },
             'unclassified': [],
@@ -372,9 +372,10 @@ class ArtistClassifier:
                 # 如果找到了画师或社团信息
                 folder_name = f"[{info['artists'][0]}]" if info['artists'] else f"[{info['circles'][0]}]"
                 
-                # 合并所有名称作为搜索关键词
-                all_names = info['artists'] + info['circles']
-                result['artists']['auto_detected'][folder_name] = all_names
+                # 将文件名添加到对应的画师/社团文件夹下
+                if folder_name not in result['artists']['auto_detected']:
+                    result['artists']['auto_detected'][folder_name] = []
+                result['artists']['auto_detected'][folder_name].append(filename)
                 result['statistics']['classified_files'] += 1
             else:
                 # 未能分类的文件
