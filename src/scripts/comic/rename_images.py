@@ -8,6 +8,9 @@ import pyperclip
 import sys
 import subprocess
 import time  # 添加time模块导入
+import hashlib
+from PIL import Image
+import io
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 from queue import Queue
@@ -256,6 +259,73 @@ def process_with_bandizip(zip_path, temp_dir):
         print(f"❌ Bandizip 处理出错: {str(e)}")
         return False
 
+def get_image_content_hash(file_path):
+    """获取图片内容的哈希值"""
+    try:
+        with open(file_path, 'rb') as f:
+            # 读取文件内容
+            content = f.read()
+            # 计算SHA256哈希
+            return hashlib.sha256(content).hexdigest()
+    except Exception as e:
+        print(f"⚠️ 计算图片哈希失败 {file_path}: {str(e)}")
+        return None
+
+def get_file_creation_time(file_path):
+    """获取文件创建时间"""
+    try:
+        return os.path.getctime(file_path)
+    except Exception:
+        return 0
+
+def handle_duplicate_files(duplicate_files, temp_dir):
+    """处理重名文件，比较内容并保留最早的版本"""
+    for filename, count in duplicate_files.items():
+        print(f"\n检查重名文件: {filename}")
+        # 收集所有同名文件
+        same_name_files = []
+        for root, _, files in os.walk(temp_dir):
+            for f in files:
+                new_name = re.sub(r'\[hash-[0-9a-fA-F]+\]', '', f)
+                if new_name == filename:
+                    full_path = os.path.join(root, f)
+                    same_name_files.append((full_path, get_file_creation_time(full_path)))
+        
+        if not same_name_files:
+            continue
+            
+        # 按创建时间排序
+        same_name_files.sort(key=lambda x: x[1])
+        
+        # 获取第一个文件的哈希值作为参考
+        reference_hash = get_image_content_hash(same_name_files[0][0])
+        if reference_hash is None:
+            print(f"❌ 无法比较文件内容，跳过处理: {filename}")
+            continue
+            
+        # 保留最早的文件，删除其他相同内容的文件
+        keep_file = same_name_files[0][0]
+        for file_path, _ in same_name_files[1:]:
+            current_hash = get_image_content_hash(file_path)
+            if current_hash == reference_hash:
+                print(f"删除重复文件: {os.path.basename(file_path)}")
+                os.remove(file_path)
+            else:
+                print(f"⚠️ 发现内容不同的同名文件: {os.path.basename(file_path)}")
+                # 为不同内容的文件添加序号
+                dir_path = os.path.dirname(file_path)
+                base_name, ext = os.path.splitext(filename)
+                new_name = f"{base_name}_1{ext}"
+                counter = 1
+                while os.path.exists(os.path.join(dir_path, new_name)):
+                    counter += 1
+                    new_name = f"{base_name}_{counter}{ext}"
+                os.rename(file_path, os.path.join(dir_path, new_name))
+                print(f"重命名为: {new_name}")
+        
+        print(f"保留最早的文件: {os.path.basename(keep_file)}")
+    return True
+
 def rename_images_in_zip(zip_path, input_base_path):
     if not has_hash_files_in_zip(zip_path):
         return
@@ -292,11 +362,12 @@ def rename_images_in_zip(zip_path, input_base_path):
         temp_dir = tempfile.mkdtemp()
         try:
             success = False
+            need_repack = False  # 添加标志，表示是否需要重新打包
             
             # 首先尝试使用7z
             try:
                 # 解压文件
-                extract_cmd = ['7z', 'x', zip_path, f'-o{temp_dir}']  # 修改命令格式
+                extract_cmd = ['7z', 'x', zip_path, f'-o{temp_dir}']
                 subprocess.run(extract_cmd, check=True, capture_output=True, encoding='utf-8', errors='ignore')
                 
                 # 重命名文件
@@ -316,13 +387,14 @@ def rename_images_in_zip(zip_path, input_base_path):
                 # 检查是否有重名文件
                 duplicate_files = {name: count for name, count in filename_count.items() if count > 1}
                 if duplicate_files:
-                    print(f"⚠️ 检测到压缩包内有重名文件:")
-                    for name, count in duplicate_files.items():
-                        print(f"   - {name}: {count}个文件")
-                    print("❌ 可能是压缩包损坏或混入其他文件，跳过处理")
-                    return
+                    print(f"\n⚠️ 检测到压缩包内有重名文件，开始比较内容:")
+                    if handle_duplicate_files(duplicate_files, temp_dir):
+                        need_repack = True  # 如果成功处理了重名文件，需要重新打包
+                    else:
+                        print("❌ 处理重名文件失败，跳过压缩包处理")
+                        return
                 
-                # 第二遍扫描，执行重命名
+                # 重命名剩余文件
                 for root, _, files in os.walk(temp_dir):
                     for filename in files:
                         new_filename = re.sub(r'\[hash-[0-9a-fA-F]+\]', '', filename)
@@ -333,22 +405,26 @@ def rename_images_in_zip(zip_path, input_base_path):
                                 os.rename(old_path, new_path)
                                 print(f"重命名: {filename} -> {new_filename}")
                                 renamed = True
+                                need_repack = True  # 如果有文件重命名，需要重新打包
                             except Exception as e:
                                 print(f"⚠️ 重命名失败 {filename}: {str(e)}")
                                 continue
                 
-                if renamed:
+                if need_repack:  # 只在需要时重新打包
                     try:
                         # 重新打包前先删除原文件
                         os.remove(zip_path)
                         # 重新打包
-                        create_cmd = ['7z', 'a', '-tzip', zip_path, os.path.join(temp_dir, '*')]  # 修改命令格式
+                        create_cmd = ['7z', 'a', '-tzip', zip_path, os.path.join(temp_dir, '*')]
                         subprocess.run(create_cmd, check=True, capture_output=True, encoding='utf-8', errors='ignore')
                         print(f"✅ 7z处理完成：{zip_path}")
                         success = True
                     except Exception as e:
                         print(f"❌ 7z打包失败: {str(e)}")
                         success = False
+                else:
+                    print("✅ 无需修改，跳过重新打包")
+                    success = True
                     
             except Exception as e:
                 print(f"⚠️ 7z处理失败，尝试使用Bandizip: {str(e)}")
