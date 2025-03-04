@@ -13,6 +13,8 @@ import os
 import sys
 from tqdm import tqdm
 import time
+import json
+from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +27,48 @@ class ArtistPreview:
     is_existing: bool
 
 class ArtistPreviewGenerator:
-    def __init__(self, base_url: str = "https://www.wn01.uk"):
+    def __init__(self, base_url: str = "https://www.wn01.uk", cache_file: str = "artist_cache.json"):
         self.base_url = base_url
         self.session = None
         self.pbar = None
         self.current_task = ""
+        self.cache_file = cache_file
+        self.cache = self.load_cache()
+        
+    def load_cache(self) -> Dict[str, Any]:
+        """加载缓存文件"""
+        try:
+            if os.path.exists(self.cache_file):
+                with open(self.cache_file, 'r', encoding='utf-8') as f:
+                    cache = json.load(f)
+                print(f"已加载缓存文件: {self.cache_file}")
+                print(f"缓存中的画师数量: {len(cache)}")
+                return cache
+            return {}
+        except Exception as e:
+            logger.warning(f"加载缓存文件失败: {e}")
+            return {}
+            
+    def save_cache(self):
+        """保存缓存到文件"""
+        try:
+            with open(self.cache_file, 'w', encoding='utf-8') as f:
+                json.dump(self.cache, f, ensure_ascii=False, indent=2)
+            print(f"\n缓存已更新: {self.cache_file}")
+            print(f"当前缓存画师数量: {len(self.cache)}")
+        except Exception as e:
+            logger.error(f"保存缓存文件失败: {e}")
+            
+    def get_from_cache(self, artist_name: str) -> Optional[str]:
+        """从缓存中获取画师信息"""
+        return self.cache.get(artist_name, {}).get('preview_url')
+        
+    def update_cache(self, artist_name: str, preview_url: str):
+        """更新缓存信息"""
+        self.cache[artist_name] = {
+            'preview_url': preview_url,
+            'last_updated': datetime.now().isoformat()
+        }
         
     async def __aenter__(self):
         self.session = aiohttp.ClientSession()
@@ -38,6 +77,8 @@ class ArtistPreviewGenerator:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if self.session:
             await self.session.close()
+        # 保存缓存
+        self.save_cache()
             
     def update_progress(self, message: str, progress: Optional[float] = None):
         """更新进度信息"""
@@ -51,8 +92,14 @@ class ArtistPreviewGenerator:
         """获取画师作品的预览图URL"""
         try:
             clean_name = artist_name.strip('[]')
-            self.update_progress(f"正在获取画师 {clean_name} 的预览图...")
             
+            # 首先尝试从缓存获取
+            cached_url = self.get_from_cache(clean_name)
+            if cached_url:
+                self.update_progress(f"从缓存获取画师 {clean_name} 的预览图...")
+                return cached_url
+                
+            self.update_progress(f"从网站获取画师 {clean_name} 的预览图...")
             search_url = f"{self.base_url}/search/?q={clean_name}"
             
             async with self.session.get(search_url) as response:
@@ -71,6 +118,8 @@ class ArtistPreviewGenerator:
                         try:
                             async with self.session.head(img_url) as img_response:
                                 if img_response.status == 200:
+                                    # 更新缓存
+                                    self.update_cache(clean_name, img_url)
                                     return img_url
                         except Exception:
                             continue
@@ -107,7 +156,14 @@ class ArtistPreviewGenerator:
         total_artists = len(existing_artists) + len(new_artists)
         print(f"\n总计需要处理 {total_artists} 个画师:")
         print(f"- 已存在画师: {len(existing_artists)} 个")
-        print(f"- 新增画师: {len(new_artists)} 个\n")
+        print(f"- 新增画师: {len(new_artists)} 个")
+        
+        # 显示缓存命中统计
+        cached_artists = set(self.cache.keys())
+        new_artist_names = {name.strip('[]') for name in new_artists.keys()}
+        cache_hits = len(cached_artists & new_artist_names)
+        print(f"- 缓存命中: {cache_hits} 个")
+        print(f"- 需要请求: {len(new_artists) - cache_hits} 个\n")
         
         # 处理已存在画师
         print("处理已存在画师...")
@@ -489,18 +545,22 @@ class ArtistPreviewGenerator:
         print(f"- 新增画师: {len(new_previews)} 个")
         print(f"- 输出文件: {output_path}")
 
-async def generate_preview_tables(yaml_path: str, output_path: str = None):
+async def generate_preview_tables(yaml_path: str, output_path: str = None, cache_file: str = None):
     """生成画师预览表格的主函数"""
     if output_path is None:
         output_path = Path(yaml_path).parent / 'artist_preview.html'
     
+    if cache_file is None:
+        cache_file = Path(yaml_path).parent / 'artist_cache.json'
+    
     print("\n🚀 开始生成画师预览表格...")
     print(f"配置文件: {yaml_path}")
-    print(f"输出路径: {output_path}\n")
+    print(f"输出路径: {output_path}")
+    print(f"缓存文件: {cache_file}\n")
     
     start_time = time.time()
     
-    async with ArtistPreviewGenerator() as generator:
+    async with ArtistPreviewGenerator(cache_file=str(cache_file)) as generator:
         try:
             # 处理yaml文件
             existing_previews, new_previews = await generator.process_yaml(yaml_path)
@@ -544,12 +604,14 @@ if __name__ == "__main__":
         print(f"\n❌ 错误: 文件不存在: {yaml_path}")
         sys.exit(1)
     
-    # 设置输出路径
+    # 设置输出路径和缓存文件路径
     output_path = Path(yaml_path).parent / 'artist_preview.html'
+    cache_file = Path(yaml_path).parent / 'artist_cache.json'
     
     print("\n📁 文件信息:")
     print(f"- 输入文件: {yaml_path}")
     print(f"- 输出文件: {output_path}")
+    print(f"- 缓存文件: {cache_file}")
     
     try:
         # 安装依赖
@@ -562,7 +624,7 @@ if __name__ == "__main__":
         
         # 运行生成器
         print("\n🔄 开始处理...")
-        asyncio.run(generate_preview_tables(yaml_path, str(output_path)))
+        asyncio.run(generate_preview_tables(yaml_path, str(output_path), str(cache_file)))
         
     except Exception as e:
         print(f"\n❌ 生成预览页面时出错: {e}")
