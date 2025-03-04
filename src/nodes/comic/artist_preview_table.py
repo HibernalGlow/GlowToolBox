@@ -11,10 +11,6 @@ from dataclasses import dataclass
 from datetime import datetime
 import os
 import sys
-from tqdm import tqdm
-import time
-import json
-from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -27,48 +23,9 @@ class ArtistPreview:
     is_existing: bool
 
 class ArtistPreviewGenerator:
-    def __init__(self, base_url: str = "https://www.wn01.uk", cache_file: str = "artist_cache.json"):
+    def __init__(self, base_url: str = "https://www.wn01.uk"):
         self.base_url = base_url
         self.session = None
-        self.pbar = None
-        self.current_task = ""
-        self.cache_file = cache_file
-        self.cache = self.load_cache()
-        
-    def load_cache(self) -> Dict[str, Any]:
-        """加载缓存文件"""
-        try:
-            if os.path.exists(self.cache_file):
-                with open(self.cache_file, 'r', encoding='utf-8') as f:
-                    cache = json.load(f)
-                print(f"已加载缓存文件: {self.cache_file}")
-                print(f"缓存中的画师数量: {len(cache)}")
-                return cache
-            return {}
-        except Exception as e:
-            logger.warning(f"加载缓存文件失败: {e}")
-            return {}
-            
-    def save_cache(self):
-        """保存缓存到文件"""
-        try:
-            with open(self.cache_file, 'w', encoding='utf-8') as f:
-                json.dump(self.cache, f, ensure_ascii=False, indent=2)
-            print(f"\n缓存已更新: {self.cache_file}")
-            print(f"当前缓存画师数量: {len(self.cache)}")
-        except Exception as e:
-            logger.error(f"保存缓存文件失败: {e}")
-            
-    def get_from_cache(self, artist_name: str) -> Optional[str]:
-        """从缓存中获取画师信息"""
-        return self.cache.get(artist_name, {}).get('preview_url')
-        
-    def update_cache(self, artist_name: str, preview_url: str):
-        """更新缓存信息"""
-        self.cache[artist_name] = {
-            'preview_url': preview_url,
-            'last_updated': datetime.now().isoformat()
-        }
         
     async def __aenter__(self):
         self.session = aiohttp.ClientSession()
@@ -77,29 +34,12 @@ class ArtistPreviewGenerator:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if self.session:
             await self.session.close()
-        # 保存缓存
-        self.save_cache()
-            
-    def update_progress(self, message: str, progress: Optional[float] = None):
-        """更新进度信息"""
-        if progress is not None:
-            percentage = f"{progress:.1%}"
-            print(f"\r[{percentage}] {message}", end="", flush=True)
-        else:
-            print(f"\r{message}", end="", flush=True)
             
     async def _get_preview_url(self, artist_name: str) -> Optional[str]:
         """获取画师作品的预览图URL"""
         try:
+            # 移除方括号获取纯画师名
             clean_name = artist_name.strip('[]')
-            
-            # 首先尝试从缓存获取
-            cached_url = self.get_from_cache(clean_name)
-            if cached_url:
-                self.update_progress(f"从缓存获取画师 {clean_name} 的预览图...")
-                return cached_url
-                
-            self.update_progress(f"从网站获取画师 {clean_name} 的预览图...")
             search_url = f"{self.base_url}/search/?q={clean_name}"
             
             async with self.session.get(search_url) as response:
@@ -110,16 +50,16 @@ class ArtistPreviewGenerator:
                 html = await response.text()
                 soup = BeautifulSoup(html, 'html.parser')
                 
+                # 查找所有预览图
                 gallery_items = soup.select('.gallary_item')
                 for item in gallery_items:
                     img = item.select_one('img')
                     if img and img.get('src'):
                         img_url = f"https:{img['src']}"
+                        # 验证图片是否可访问
                         try:
                             async with self.session.head(img_url) as img_response:
                                 if img_response.status == 200:
-                                    # 更新缓存
-                                    self.update_cache(clean_name, img_url)
                                     return img_url
                         except Exception:
                             continue
@@ -131,6 +71,7 @@ class ArtistPreviewGenerator:
 
     async def process_artist(self, folder_name: str, files: List[str], is_existing: bool) -> ArtistPreview:
         """处理单个画师信息"""
+        # 已存在画师不获取预览图
         preview_url = "" if is_existing else await self._get_preview_url(folder_name)
         return ArtistPreview(
             name=folder_name.strip('[]'),
@@ -142,48 +83,28 @@ class ArtistPreviewGenerator:
 
     async def process_yaml(self, yaml_path: str) -> Tuple[List[ArtistPreview], List[ArtistPreview]]:
         """处理yaml文件，返回新旧画师预览信息"""
-        print("\n开始处理画师信息...")
-        
         # 读取yaml文件
         with open(yaml_path, 'r', encoding='utf-8') as f:
             data = yaml.safe_load(f)
-            print(f"成功读取配置文件: {yaml_path}")
         
         # 获取画师信息
         existing_artists = data['artists']['existing_artists']
         new_artists = data['artists']['new_artists']
         
-        total_artists = len(existing_artists) + len(new_artists)
-        print(f"\n总计需要处理 {total_artists} 个画师:")
-        print(f"- 已存在画师: {len(existing_artists)} 个")
-        print(f"- 新增画师: {len(new_artists)} 个")
+        # 异步处理所有画师
+        existing_tasks = [
+            self.process_artist(folder, files, True)
+            for folder, files in existing_artists.items()
+        ]
         
-        # 显示缓存命中统计
-        cached_artists = set(self.cache.keys())
-        new_artist_names = {name.strip('[]') for name in new_artists.keys()}
-        cache_hits = len(cached_artists & new_artist_names)
-        print(f"- 缓存命中: {cache_hits} 个")
-        print(f"- 需要请求: {len(new_artists) - cache_hits} 个\n")
+        new_tasks = [
+            self.process_artist(folder, files, False)
+            for folder, files in new_artists.items()
+        ]
         
-        # 处理已存在画师
-        print("处理已存在画师...")
-        existing_tasks = []
-        for i, (folder, files) in enumerate(existing_artists.items(), 1):
-            self.update_progress(f"处理已存在画师 ({i}/{len(existing_artists)}): {folder}", i/len(existing_artists))
-            task = self.process_artist(folder, files, True)
-            existing_tasks.append(task)
+        # 等待所有任务完成
         existing_previews = await asyncio.gather(*existing_tasks)
-        print("\n已存在画师处理完成!")
-        
-        # 处理新画师
-        print("\n处理新增画师...")
-        new_tasks = []
-        for i, (folder, files) in enumerate(new_artists.items(), 1):
-            self.update_progress(f"处理新增画师 ({i}/{len(new_artists)}): {folder}", i/len(new_artists))
-            task = self.process_artist(folder, files, False)
-            new_tasks.append(task)
         new_previews = await asyncio.gather(*new_tasks)
-        print("\n新增画师处理完成!")
         
         return existing_previews, new_previews
 
@@ -191,20 +112,12 @@ class ArtistPreviewGenerator:
                      new_previews: List[ArtistPreview], 
                      output_path: str):
         """生成HTML预览页面"""
-        print("\n开始生成HTML预览页面...")
-        
-        # 生成带时间戳的文件名
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir = os.path.dirname(output_path)
-        output_basename = os.path.splitext(os.path.basename(output_path))[0]
-        output_path = os.path.join(output_dir, f"{output_basename}_{timestamp}.html")
-        
         html_template = '''
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>画师预览表格 - {timestamp}</title>
+    <title>画师预览表格</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; }
         .table-container { margin-bottom: 20px; }
@@ -249,7 +162,7 @@ class ArtistPreviewGenerator:
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             z-index: 1000;
         }
-        .control-btn {
+        .export-btn, .import-btn {
             background-color: #4CAF50;
             color: white;
             padding: 10px 20px;
@@ -258,66 +171,79 @@ class ArtistPreviewGenerator:
             cursor: pointer;
             margin: 0 10px;
         }
-        .control-btn:hover {
+        .export-btn:hover, .import-btn:hover {
             background-color: #45a049;
         }
         .main-content {
             margin-top: 60px;
         }
         .preview-link {
-            color: #0066cc;
-            text-decoration: none;
+            background-color: #2196F3;
+            color: white;
+            padding: 4px 8px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
             margin-left: 10px;
+            font-size: 12px;
         }
         .preview-link:hover {
-            text-decoration: underline;
+            background-color: #0b7dda;
         }
-        .import-area {
-            width: 100%;
-            height: 100px;
-            margin: 10px 0;
+        .import-container {
             display: none;
-        }
-        .info-header {
-            background-color: #f8f9fa;
-            padding: 15px;
-            margin-bottom: 20px;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 20px;
             border-radius: 5px;
-            border: 1px solid #dee2e6;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1001;
         }
-        .info-header p {
-            margin: 5px 0;
-            color: #666;
+        .import-textarea {
+            width: 100%;
+            min-height: 200px;
+            margin: 10px 0;
+        }
+        .overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
         }
     </style>
 </head>
 <body>
-    <div class="info-header">
-        <h2>画师预览表格</h2>
-        <p>生成时间：{datetime}</p>
-        <p>总画师数：{total_artists} (已存在: {existing_count}, 新增: {new_count})</p>
-        <p>缓存命中：{cache_hits} / {new_count}</p>
-    </div>
-
     <div class="export-container">
-        <button class="control-btn" onclick="exportSelected('artists')">导出选中画师</button>
-        <button class="control-btn" onclick="exportSelected('files')">导出选中压缩包</button>
-        <button class="control-btn" onclick="toggleImportArea()">导入画师列表</button>
-        <button class="control-btn" onclick="invertSelection()">反选</button>
+        <button class="export-btn" onclick="exportSelected('artists')">导出选中画师</button>
+        <button class="export-btn" onclick="exportSelected('files')">导出选中压缩包</button>
+        <button class="import-btn" onclick="showImportDialog()">导入画师列表</button>
     </div>
     
-    <div class="main-content">
-        <textarea id="importArea" class="import-area" placeholder="请输入画师列表，每行一个画师名"></textarea>
-        <button id="importButton" class="control-btn" style="display: none;" onclick="importArtists()">确认导入</button>
+    <div class="overlay" id="overlay"></div>
+    <div class="import-container" id="importDialog">
+        <h3>导入画师列表</h3>
+        <p>每行一个画师名称</p>
+        <textarea class="import-textarea" id="importText"></textarea>
+        <button class="import-btn" onclick="importArtists()">导入</button>
+        <button class="export-btn" onclick="hideImportDialog()" style="background-color: #f44336;">取消</button>
+    </div>
 
+    <div class="main-content">
         <h2>已存在画师</h2>
         <div class="table-container">
-            <div class="checkbox-container">
-                <input type="checkbox" id="existing-select-all" checked>
-                <label for="existing-select-all">全选/取消全选</label>
-            </div>
-            <button type="button" class="collapsible">显示/隐藏已存在画师</button>
+            <button type="button" class="collapsible">显示/隐藏已存在画师 (已全选)</button>
             <div class="content">
+                <div class="checkbox-container">
+                    <input type="checkbox" id="existing-select-all" checked>
+                    <label for="existing-select-all">全选/取消全选</label>
+                </div>
                 <table class="preview-table" id="existing-table">
                     <tr>
                         <th>选择</th>
@@ -348,15 +274,6 @@ class ArtistPreviewGenerator:
     </div>
 
     <script>
-        // 页面信息
-        const pageInfo = {{
-            generatedTime: "{datetime}",
-            totalArtists: {total_artists},
-            existingCount: {existing_count},
-            newCount: {new_count},
-            cacheHits: {cache_hits}
-        }};
-        
         // 折叠面板功能
         var coll = document.getElementsByClassName("collapsible");
         for (var i = 0; i < coll.length; i++) {{
@@ -378,7 +295,7 @@ class ArtistPreviewGenerator:
             if (!selectAll || !table) return;
 
             selectAll.addEventListener('change', function() {{
-                const checkboxes = table.querySelectorAll('input[type="checkbox"]:not(#' + selectAllId + ')');
+                const checkboxes = table.querySelectorAll('input[type="checkbox"]');
                 checkboxes.forEach(checkbox => checkbox.checked = this.checked);
             }});
 
@@ -391,101 +308,50 @@ class ArtistPreviewGenerator:
             }});
         }}
 
-        setupSelectAll('#existing-table', 'existing-select-all');
-        setupSelectAll('#new-table', 'new-select-all');
+        setupSelectAll('.content table', 'existing-select-all');
+        setupSelectAll('.table-container:nth-of-type(2) table', 'new-select-all');
 
-        // 反选功能
-        function invertSelection() {{
-            const tables = ['existing-table', 'new-table'];
-            tables.forEach(tableId => {{
-                const table = document.getElementById(tableId);
-                if (table) {{
-                    const checkboxes = table.querySelectorAll('input[type="checkbox"]:not([id$="-select-all"])');
-                    checkboxes.forEach(checkbox => {{
-                        checkbox.checked = !checkbox.checked;
-                    }});
-                    // 更新全选框状态
-                    const selectAll = document.getElementById(tableId.split('-')[0] + '-select-all');
-                    if (selectAll) {{
-                        const allChecked = Array.from(checkboxes).every(cb => cb.checked);
-                        selectAll.checked = allChecked;
-                    }}
-                }}
-            }});
-        }}
-
-        // 导入/导出功能
-        function toggleImportArea() {{
-            const importArea = document.getElementById('importArea');
-            const importButton = document.getElementById('importButton');
-            importArea.style.display = importArea.style.display === 'none' ? 'block' : 'none';
-            importButton.style.display = importArea.style.display;
-        }}
-
-        function importArtists() {{
-            const importArea = document.getElementById('importArea');
-            const artistsList = importArea.value.split('\\n').filter(name => name.trim());
-            
-            const tables = ['existing-table', 'new-table'];
-            tables.forEach(tableId => {{
-                const table = document.getElementById(tableId);
-                if (table) {{
-                    const rows = table.querySelectorAll('tr');
-                    rows.forEach(row => {{
-                        const nameCell = row.querySelector('.name-cell');
-                        if (nameCell) {{
-                            const artistName = nameCell.textContent.trim();
-                            const checkbox = row.querySelector('input[type="checkbox"]');
-                            if (checkbox) {{
-                                checkbox.checked = artistsList.includes(artistName);
-                            }}
-                        }}
-                    }});
-                }}
-            }});
-
-            // 清空并隐藏导入区域
-            importArea.value = '';
-            toggleImportArea();
-        }}
-
+        // 导出功能
         function exportSelected(type) {{
             let content = [];
-            let exportData = {{'artists': [], 'files': [], 'links': []}};
             
-            function processTable(tableId) {{
-                const table = document.getElementById(tableId);
-                if (table) {{
-                    const rows = table.querySelectorAll('tr');
-                    rows.forEach(row => {{
-                        const checkbox = row.querySelector('input[type="checkbox"]');
-                        if (checkbox && checkbox.checked) {{
-                            const nameCell = row.querySelector('.name-cell');
-                            if (nameCell) {{
-                                const artistName = nameCell.textContent.trim();
-                                exportData.artists.push(artistName);
-                                exportData.links.push(`https://www.wn01.uk/search/?q=${encodeURIComponent(artistName)}`);
-                                
-                                const filesList = row.querySelector('.files-list');
-                                if (filesList) {{
-                                    exportData.files.push(...filesList.innerHTML.split('<br>'));
-                                }}
-                            }}
+            // 获取已存在画师表格中选中的内容
+            const existingTable = document.getElementById('existing-table');
+            if (existingTable) {{
+                const rows = existingTable.querySelectorAll('tr');
+                rows.forEach(row => {{
+                    const checkbox = row.querySelector('input[type="checkbox"]');
+                    if (checkbox && checkbox.checked) {{
+                        if (type === 'artists') {{
+                            const artistName = row.querySelector('.name-cell').textContent.split('[')[0].trim();
+                            content.push(artistName);
+                        }} else if (type === 'files') {{
+                            const filesList = row.querySelector('.files-list').innerHTML;
+                            content.push(...filesList.split('<br>'));
                         }}
-                    }});
-                }}
+                    }}
+                }});
             }}
-
-            processTable('existing-table');
-            processTable('new-table');
-
-            // 根据类型导出不同内容
-            if (type === 'artists') {{
-                content = exportData.artists.map((artist, i) => `${artist}\\t${exportData.links[i]}`);
-            }} else if (type === 'files') {{
-                content = exportData.files;
+            
+            // 获取新画师表格中选中的内容
+            const newTable = document.getElementById('new-table');
+            if (newTable) {{
+                const rows = newTable.querySelectorAll('tr');
+                rows.forEach(row => {{
+                    const checkbox = row.querySelector('input[type="checkbox"]');
+                    if (checkbox && checkbox.checked) {{
+                        if (type === 'artists') {{
+                            const artistName = row.querySelector('.name-cell').textContent.split('[')[0].trim();
+                            content.push(artistName);
+                        }} else if (type === 'files') {{
+                            const filesList = row.querySelector('.files-list').innerHTML;
+                            content.push(...filesList.split('<br>'));
+                        }}
+                    }}
+                }});
             }}
-
+            
+            // 创建并下载文件
             if (content.length > 0) {{
                 const blob = new Blob([content.join('\\n')], {{ type: 'text/plain' }});
                 const url = window.URL.createObjectURL(blob);
@@ -496,37 +362,71 @@ class ArtistPreviewGenerator:
                 a.click();
                 window.URL.revokeObjectURL(url);
                 document.body.removeChild(a);
-
-                // 保存选中状态到localStorage
-                localStorage.setItem('selectedArtists', JSON.stringify(exportData.artists));
             }} else {{
                 alert('请先选择要导出的内容！');
             }}
         }}
 
-        // 页面加载时恢复选中状态
-        window.addEventListener('load', function() {{
-            const savedArtists = JSON.parse(localStorage.getItem('selectedArtists') || '[]');
-            if (savedArtists.length > 0) {{
-                const tables = ['existing-table', 'new-table'];
-                tables.forEach(tableId => {{
-                    const table = document.getElementById(tableId);
-                    if (table) {{
-                        const rows = table.querySelectorAll('tr');
-                        rows.forEach(row => {{
-                            const nameCell = row.querySelector('.name-cell');
-                            if (nameCell) {{
-                                const artistName = nameCell.textContent.trim();
-                                const checkbox = row.querySelector('input[type="checkbox"]');
-                                if (checkbox) {{
-                                    checkbox.checked = savedArtists.includes(artistName);
-                                }}
-                            }}
-                        }});
-                    }}
-                }});
+        // 导入功能
+        function showImportDialog() {{
+            document.getElementById('overlay').style.display = 'block';
+            document.getElementById('importDialog').style.display = 'block';
+        }}
+
+        function hideImportDialog() {{
+            document.getElementById('overlay').style.display = 'none';
+            document.getElementById('importDialog').style.display = 'none';
+            document.getElementById('importText').value = '';
+        }}
+
+        function importArtists() {{
+            const text = document.getElementById('importText').value;
+            const artists = text.split('\\n').filter(line => line.trim());
+            
+            if (artists.length === 0) {{
+                alert('请输入有效的画师列表！');
+                return;
             }}
-        }});
+
+            const tables = [
+                document.getElementById('existing-table'),
+                document.getElementById('new-table')
+            ];
+
+            artists.forEach(artist => {{
+                const artistName = artist.trim();
+                let found = false;
+
+                tables.forEach(table => {{
+                    if (!table) return;
+
+                    const rows = table.querySelectorAll('tr');
+                    rows.forEach(row => {{
+                        const nameCell = row.querySelector('.name-cell');
+                        if (nameCell && nameCell.textContent.toLowerCase().includes(artistName.toLowerCase())) {{
+                            const checkbox = row.querySelector('input[type="checkbox"]');
+                            if (checkbox) {{
+                                checkbox.checked = true;
+                                found = true;
+                            }}
+                        }}
+                    }});
+                }});
+
+                if (!found) {{
+                    console.log(`未找到画师: ${artistName}`);
+                }}
+            }});
+
+            hideImportDialog();
+            alert(`导入完成！成功匹配的画师已被选中。`);
+        }}
+
+        // 打开预览链接
+        function openPreview(artistName) {{
+            const url = `https://www.wn01.uk/search/?q=${encodeURIComponent(artistName)}`;
+            window.open(url, '_blank');
+        }}
     </script>
 </body>
 </html>
@@ -534,9 +434,10 @@ class ArtistPreviewGenerator:
         
         def generate_table_row(preview: ArtistPreview) -> str:
             files_list = '<br>'.join(preview.files)
-            preview_link = f'<a href="https://www.wn01.uk/search/?q={preview.name}" class="preview-link" target="_blank">预览</a>'
+            preview_link = f'<button class="preview-link" onclick="openPreview(\'{preview.name}\')">预览</button>'
             
             if preview.is_existing:
+                # 已存在画师不显示预览图
                 return f"""
                     <tr>
                         <td><input type="checkbox" checked></td>
@@ -545,6 +446,7 @@ class ArtistPreviewGenerator:
                     </tr>
                 """
             else:
+                # 新画师显示预览图
                 preview_img = f'<img src="{preview.preview_url}" class="preview-img">' if preview.preview_url else '无预览图'
                 return f"""
                     <tr>
@@ -556,72 +458,32 @@ class ArtistPreviewGenerator:
                 """
         
         # 生成表格行
-        print("生成预览表格...")
         existing_rows = '\n'.join(generate_table_row(p) for p in existing_previews)
         new_rows = '\n'.join(generate_table_row(p) for p in new_previews)
         
-        # 准备模板变量
-        template_vars = {
-            'timestamp': timestamp,
-            'datetime': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'total_artists': len(existing_previews) + len(new_previews),
-            'existing_count': len(existing_previews),
-            'new_count': len(new_previews),
-            'cache_hits': len([p for p in new_previews if p.preview_url]),
-            'existing_rows': existing_rows,
-            'new_rows': new_rows
-        }
-        
         # 生成完整HTML
-        print("组装HTML内容...")
-        html_content = html_template.format(**template_vars)
+        html_content = html_template.format(
+            existing_rows=existing_rows,
+            new_rows=new_rows
+        )
         
         # 保存HTML文件
-        print(f"保存预览页面到: {output_path}")
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
         
-        print("\n✨ 预览页面生成完成!")
-        print(f"- 生成时间: {template_vars['datetime']}")
-        print(f"- 已处理画师总数: {template_vars['total_artists']}")
-        print(f"- 已存在画师: {template_vars['existing_count']} 个")
-        print(f"- 新增画师: {template_vars['new_count']} 个")
-        print(f"- 缓存命中: {template_vars['cache_hits']} 个")
-        print(f"- 输出文件: {output_path}")
+        logger.info(f"预览页面已生成: {output_path}")
 
-async def generate_preview_tables(yaml_path: str, output_path: str = None, cache_file: str = None):
+async def generate_preview_tables(yaml_path: str, output_path: str = None):
     """生成画师预览表格的主函数"""
     if output_path is None:
-        output_dir = Path(yaml_path).parent
-        output_basename = 'artist_preview'
-        output_path = output_dir / f"{output_basename}.html"
+        output_path = Path(yaml_path).parent / 'artist_preview.html'
     
-    if cache_file is None:
-        cache_file = Path(yaml_path).parent / 'artist_cache.json'
-    
-    print("\n🚀 开始生成画师预览表格...")
-    print(f"配置文件: {yaml_path}")
-    print(f"输出路径: {output_path}")
-    print(f"缓存文件: {cache_file}\n")
-    
-    start_time = time.time()
-    
-    async with ArtistPreviewGenerator(cache_file=str(cache_file)) as generator:
-        try:
-            # 处理yaml文件
-            existing_previews, new_previews = await generator.process_yaml(yaml_path)
-            
-            # 生成HTML页面
-            generator.generate_html(existing_previews, new_previews, output_path)
-            
-            # 显示总耗时
-            elapsed_time = time.time() - start_time
-            print(f"\n⏱️ 总耗时: {elapsed_time:.2f} 秒")
-            print("\n🎉 处理完成!")
-            
-        except Exception as e:
-            print(f"\n❌ 处理过程中出现错误: {str(e)}")
-            raise
+    async with ArtistPreviewGenerator() as generator:
+        # 处理yaml文件
+        existing_previews, new_previews = await generator.process_yaml(yaml_path)
+        
+        # 生成HTML页面
+        generator.generate_html(existing_previews, new_previews, output_path)
 
 if __name__ == "__main__":
     import argparse
@@ -633,12 +495,9 @@ if __name__ == "__main__":
     # 默认yaml路径
     default_yaml = r"d:\1VSCODE\GlowToolBox\src\scripts\comic\classify\classified_result.yaml"
     
-    print("\n🎨 画师预览表格生成工具")
-    print("=" * 50)
-    
     # 如果默认文件不存在，提示输入
     if not os.path.exists(default_yaml):
-        print(f"\n⚠️ 默认配置文件不存在: {default_yaml}")
+        print(f"默认文件不存在: {default_yaml}")
         yaml_path = input("请输入yaml文件路径（直接回车使用默认路径）: ").strip()
         if not yaml_path:
             yaml_path = default_yaml
@@ -647,33 +506,29 @@ if __name__ == "__main__":
     
     # 检查文件是否存在
     if not os.path.exists(yaml_path):
-        print(f"\n❌ 错误: 文件不存在: {yaml_path}")
+        print(f"文件不存在: {yaml_path}")
         sys.exit(1)
     
-    # 设置输出路径和缓存文件路径
+    # 设置输出路径
     output_path = Path(yaml_path).parent / 'artist_preview.html'
-    cache_file = Path(yaml_path).parent / 'artist_cache.json'
     
-    print("\n📁 文件信息:")
-    print(f"- 输入文件: {yaml_path}")
-    print(f"- 输出文件: {output_path}")
-    print(f"- 缓存文件: {cache_file}")
+    print(f"处理文件: {yaml_path}")
+    print(f"输出文件: {output_path}")
     
     try:
         # 安装依赖
         try:
             import aiohttp
         except ImportError:
-            print("\n⚙️ 正在安装必要的依赖...")
-            os.system("pip install aiohttp beautifulsoup4 tqdm")
+            print("正在安装必要的依赖...")
+            os.system("pip install aiohttp beautifulsoup4")
             import aiohttp
         
         # 运行生成器
-        print("\n🔄 开始处理...")
-        asyncio.run(generate_preview_tables(yaml_path, str(output_path), str(cache_file)))
-        
+        asyncio.run(generate_preview_tables(yaml_path, str(output_path)))
+        print(f"预览页面已生成: {output_path}")
     except Exception as e:
-        print(f"\n❌ 生成预览页面时出错: {e}")
-        if input("\n是否显示详细错误信息？(y/n): ").lower() == 'y':
+        print(f"生成预览页面时出错: {e}")
+        if input("是否显示详细错误信息？(y/n): ").lower() == 'y':
             import traceback
             traceback.print_exc() 
