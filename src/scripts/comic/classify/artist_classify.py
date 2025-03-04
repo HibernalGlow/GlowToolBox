@@ -496,11 +496,13 @@ def process_args():
     args = parser.parse_args()
     
     # 获取路径
+    path = None
     if args.clipboard:
         try:
             path = pyperclip.paste().strip('"')
+            logger.info(f"从剪贴板读取路径: {path}")
         except Exception as e:
-            print(f"无法读取剪贴板: {e}")
+            logger.error(f"无法读取剪贴板: {e}")
             sys.exit(1)
     elif args.path:
         path = args.path
@@ -512,8 +514,13 @@ def process_args():
                 path = str(default_txt)
             else:
                 path = None
-        else:
-            path = None
+    
+    # 验证路径
+    if path:
+        path = path.strip('"').strip("'")  # 移除可能的引号
+        if not os.path.exists(path):
+            logger.error(f"路径不存在: {path}")
+            sys.exit(1)
     
     return path, args
 
@@ -593,7 +600,7 @@ def main():
                 classifier.set_pending_dir(path)
                 logger.info(f"设置待处理目录: {path}")
                 classifier.intermediate_mode = args.intermediate
-                classifier.create_artist_folders = args.create_folders  # 设置是否创建画师文件夹
+                classifier.create_artist_folders = args.create_folders
                 classifier.process_files()
                 return
             except ValueError as e:
@@ -605,11 +612,12 @@ def main():
             ("中间模式", "intermediate", "--intermediate"),
             ("更新画师列表", "update_list", "--update-list"),
             ("文本模式", "text_mode", "--text-mode"),
-            ("创建画师文件夹", "create_folders", "--create-folders"),  # 新增选项
+            ("创建画师文件夹", "create_folders", "--create-folders"),
+            ("使用剪贴板路径", "clipboard", "-c"),  # 新增剪贴板选项
         ]
         
         input_options = [
-            ("待处理路径", "path", "-p", "", "输入待处理文件夹路径"),
+            ("待处理路径", "path", "-p", "", "输入待处理文件夹路径（如果使用剪贴板则忽略此项）"),
         ]
 
         app = create_config_app(
