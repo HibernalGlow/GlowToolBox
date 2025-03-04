@@ -10,15 +10,19 @@ import pyperclip
 from loguru import logger
 from datetime import datetime
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from tui.config import create_config_app
+from nodes.tui.textual_preset import create_config_app
 
 class ArtistClassifier:
-    def __init__(self, config_path: str = r"D:\1VSCODE\1ehv\archive\config\画师分类.yaml"):
+    def __init__(self, config_path: str = None):
         # 配置 loguru
         logger.remove()  # 移除默认的处理器
         logger.add(sys.stderr, 
                   format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
                   level="DEBUG")  # 改为 DEBUG 级别以查看更多信息
+        
+        # 如果没有指定配置文件路径，则使用同目录下的默认配置文件
+        if config_path is None:
+            config_path = Path(__file__).parent / "画师分类.yaml"
         
         # 添加文件处理器
         log_path = Path("logs") / "画师分类" / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
