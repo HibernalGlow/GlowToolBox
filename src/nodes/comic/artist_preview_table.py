@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime
 import os
 import sys
+from tqdm import tqdm
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,8 @@ class ArtistPreviewGenerator:
     def __init__(self, base_url: str = "https://www.wn01.uk"):
         self.base_url = base_url
         self.session = None
+        self.pbar = None
+        self.current_task = ""
         
     async def __aenter__(self):
         self.session = aiohttp.ClientSession()
@@ -35,11 +39,20 @@ class ArtistPreviewGenerator:
         if self.session:
             await self.session.close()
             
+    def update_progress(self, message: str, progress: Optional[float] = None):
+        """更新进度信息"""
+        if progress is not None:
+            percentage = f"{progress:.1%}"
+            print(f"\r[{percentage}] {message}", end="", flush=True)
+        else:
+            print(f"\r{message}", end="", flush=True)
+            
     async def _get_preview_url(self, artist_name: str) -> Optional[str]:
         """获取画师作品的预览图URL"""
         try:
-            # 移除方括号获取纯画师名
             clean_name = artist_name.strip('[]')
+            self.update_progress(f"正在获取画师 {clean_name} 的预览图...")
+            
             search_url = f"{self.base_url}/search/?q={clean_name}"
             
             async with self.session.get(search_url) as response:
@@ -50,13 +63,11 @@ class ArtistPreviewGenerator:
                 html = await response.text()
                 soup = BeautifulSoup(html, 'html.parser')
                 
-                # 查找所有预览图
                 gallery_items = soup.select('.gallary_item')
                 for item in gallery_items:
                     img = item.select_one('img')
                     if img and img.get('src'):
                         img_url = f"https:{img['src']}"
-                        # 验证图片是否可访问
                         try:
                             async with self.session.head(img_url) as img_response:
                                 if img_response.status == 200:
@@ -71,7 +82,6 @@ class ArtistPreviewGenerator:
 
     async def process_artist(self, folder_name: str, files: List[str], is_existing: bool) -> ArtistPreview:
         """处理单个画师信息"""
-        # 已存在画师不获取预览图
         preview_url = "" if is_existing else await self._get_preview_url(folder_name)
         return ArtistPreview(
             name=folder_name.strip('[]'),
@@ -83,28 +93,41 @@ class ArtistPreviewGenerator:
 
     async def process_yaml(self, yaml_path: str) -> Tuple[List[ArtistPreview], List[ArtistPreview]]:
         """处理yaml文件，返回新旧画师预览信息"""
+        print("\n开始处理画师信息...")
+        
         # 读取yaml文件
         with open(yaml_path, 'r', encoding='utf-8') as f:
             data = yaml.safe_load(f)
+            print(f"成功读取配置文件: {yaml_path}")
         
         # 获取画师信息
         existing_artists = data['artists']['existing_artists']
         new_artists = data['artists']['new_artists']
         
-        # 异步处理所有画师
-        existing_tasks = [
-            self.process_artist(folder, files, True)
-            for folder, files in existing_artists.items()
-        ]
+        total_artists = len(existing_artists) + len(new_artists)
+        print(f"\n总计需要处理 {total_artists} 个画师:")
+        print(f"- 已存在画师: {len(existing_artists)} 个")
+        print(f"- 新增画师: {len(new_artists)} 个\n")
         
-        new_tasks = [
-            self.process_artist(folder, files, False)
-            for folder, files in new_artists.items()
-        ]
-        
-        # 等待所有任务完成
+        # 处理已存在画师
+        print("处理已存在画师...")
+        existing_tasks = []
+        for i, (folder, files) in enumerate(existing_artists.items(), 1):
+            self.update_progress(f"处理已存在画师 ({i}/{len(existing_artists)}): {folder}", i/len(existing_artists))
+            task = self.process_artist(folder, files, True)
+            existing_tasks.append(task)
         existing_previews = await asyncio.gather(*existing_tasks)
+        print("\n已存在画师处理完成!")
+        
+        # 处理新画师
+        print("\n处理新增画师...")
+        new_tasks = []
+        for i, (folder, files) in enumerate(new_artists.items(), 1):
+            self.update_progress(f"处理新增画师 ({i}/{len(new_artists)}): {folder}", i/len(new_artists))
+            task = self.process_artist(folder, files, False)
+            new_tasks.append(task)
         new_previews = await asyncio.gather(*new_tasks)
+        print("\n新增画师处理完成!")
         
         return existing_previews, new_previews
 
@@ -112,6 +135,8 @@ class ArtistPreviewGenerator:
                      new_previews: List[ArtistPreview], 
                      output_path: str):
         """生成HTML预览页面"""
+        print("\n开始生成HTML预览页面...")
+        
         html_template = '''
 <!DOCTYPE html>
 <html>
@@ -442,32 +467,55 @@ class ArtistPreviewGenerator:
                 """
         
         # 生成表格行
+        print("生成预览表格...")
         existing_rows = '\n'.join(generate_table_row(p) for p in existing_previews)
         new_rows = '\n'.join(generate_table_row(p) for p in new_previews)
         
         # 生成完整HTML
+        print("组装HTML内容...")
         html_content = html_template.format(
             existing_rows=existing_rows,
             new_rows=new_rows
         )
         
         # 保存HTML文件
+        print(f"保存预览页面到: {output_path}")
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
         
-        logger.info(f"预览页面已生成: {output_path}")
+        print("\n✨ 预览页面生成完成!")
+        print(f"- 已处理画师总数: {len(existing_previews) + len(new_previews)}")
+        print(f"- 已存在画师: {len(existing_previews)} 个")
+        print(f"- 新增画师: {len(new_previews)} 个")
+        print(f"- 输出文件: {output_path}")
 
 async def generate_preview_tables(yaml_path: str, output_path: str = None):
     """生成画师预览表格的主函数"""
     if output_path is None:
         output_path = Path(yaml_path).parent / 'artist_preview.html'
     
+    print("\n🚀 开始生成画师预览表格...")
+    print(f"配置文件: {yaml_path}")
+    print(f"输出路径: {output_path}\n")
+    
+    start_time = time.time()
+    
     async with ArtistPreviewGenerator() as generator:
-        # 处理yaml文件
-        existing_previews, new_previews = await generator.process_yaml(yaml_path)
-        
-        # 生成HTML页面
-        generator.generate_html(existing_previews, new_previews, output_path)
+        try:
+            # 处理yaml文件
+            existing_previews, new_previews = await generator.process_yaml(yaml_path)
+            
+            # 生成HTML页面
+            generator.generate_html(existing_previews, new_previews, output_path)
+            
+            # 显示总耗时
+            elapsed_time = time.time() - start_time
+            print(f"\n⏱️ 总耗时: {elapsed_time:.2f} 秒")
+            print("\n🎉 处理完成!")
+            
+        except Exception as e:
+            print(f"\n❌ 处理过程中出现错误: {str(e)}")
+            raise
 
 if __name__ == "__main__":
     import argparse
@@ -479,9 +527,12 @@ if __name__ == "__main__":
     # 默认yaml路径
     default_yaml = r"d:\1VSCODE\GlowToolBox\src\scripts\comic\classify\classified_result.yaml"
     
+    print("\n🎨 画师预览表格生成工具")
+    print("=" * 50)
+    
     # 如果默认文件不存在，提示输入
     if not os.path.exists(default_yaml):
-        print(f"默认文件不存在: {default_yaml}")
+        print(f"\n⚠️ 默认配置文件不存在: {default_yaml}")
         yaml_path = input("请输入yaml文件路径（直接回车使用默认路径）: ").strip()
         if not yaml_path:
             yaml_path = default_yaml
@@ -490,29 +541,31 @@ if __name__ == "__main__":
     
     # 检查文件是否存在
     if not os.path.exists(yaml_path):
-        print(f"文件不存在: {yaml_path}")
+        print(f"\n❌ 错误: 文件不存在: {yaml_path}")
         sys.exit(1)
     
     # 设置输出路径
     output_path = Path(yaml_path).parent / 'artist_preview.html'
     
-    print(f"处理文件: {yaml_path}")
-    print(f"输出文件: {output_path}")
+    print("\n📁 文件信息:")
+    print(f"- 输入文件: {yaml_path}")
+    print(f"- 输出文件: {output_path}")
     
     try:
         # 安装依赖
         try:
             import aiohttp
         except ImportError:
-            print("正在安装必要的依赖...")
-            os.system("pip install aiohttp beautifulsoup4")
+            print("\n⚙️ 正在安装必要的依赖...")
+            os.system("pip install aiohttp beautifulsoup4 tqdm")
             import aiohttp
         
         # 运行生成器
+        print("\n🔄 开始处理...")
         asyncio.run(generate_preview_tables(yaml_path, str(output_path)))
-        print(f"预览页面已生成: {output_path}")
+        
     except Exception as e:
-        print(f"生成预览页面时出错: {e}")
-        if input("是否显示详细错误信息？(y/n): ").lower() == 'y':
+        print(f"\n❌ 生成预览页面时出错: {e}")
+        if input("\n是否显示详细错误信息？(y/n): ").lower() == 'y':
             import traceback
             traceback.print_exc() 
