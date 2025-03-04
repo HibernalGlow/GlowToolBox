@@ -304,16 +304,38 @@ def rename_images_in_zip(zip_path, input_base_path):
                         if new_filename != filename:
                             old_path = os.path.join(root, filename)
                             new_path = os.path.join(root, new_filename)
-                            os.rename(old_path, new_path)
-                            print(f"重命名: {filename} -> {new_filename}")
-                            renamed = True
+                            try:
+                                if os.path.exists(new_path):
+                                    # 如果目标文件已存在，先删除
+                                    os.remove(new_path)
+                                os.rename(old_path, new_path)
+                                print(f"重命名: {filename} -> {new_filename}")
+                                renamed = True
+                            except Exception as e:
+                                print(f"⚠️ 7z重命名失败 {filename}: {str(e)}")
+                                # 如果重命名失败，尝试使用临时文件名
+                                try:
+                                    temp_new_path = new_path + '.tmp'
+                                    os.rename(old_path, temp_new_path)
+                                    os.replace(temp_new_path, new_path)
+                                    print(f"✅ 使用临时文件重命名成功: {filename} -> {new_filename}")
+                                    renamed = True
+                                except Exception as e2:
+                                    print(f"❌ 临时文件重命名也失败 {filename}: {str(e2)}")
+                                    continue
                 
                 if renamed:
-                    # 重新打包
-                    create_cmd = ['7z', 'a', '-tzip', zip_path, f'{temp_dir}\\*']
-                    subprocess.run(create_cmd, check=True)
-                    print(f"✅ 7z处理完成：{zip_path}")
-                    success = True
+                    try:
+                        # 重新打包前先删除原文件
+                        os.remove(zip_path)
+                        # 重新打包
+                        create_cmd = ['7z', 'a', '-tzip', zip_path, f'{temp_dir}\\*']
+                        subprocess.run(create_cmd, check=True)
+                        print(f"✅ 7z处理完成：{zip_path}")
+                        success = True
+                    except Exception as e:
+                        print(f"❌ 7z打包失败: {str(e)}")
+                        success = False
                     
             except Exception as e:
                 print(f"⚠️ 7z处理失败，尝试使用Bandizip: {str(e)}")
@@ -329,7 +351,10 @@ def rename_images_in_zip(zip_path, input_base_path):
             
         finally:
             # 清理临时目录
-            shutil.rmtree(temp_dir, ignore_errors=True)
+            try:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            except Exception as e:
+                print(f"⚠️ 清理临时目录失败: {str(e)}")
             
     except subprocess.CalledProcessError as e:
         print(f"❌ 命令执行失败: {str(e)}")
