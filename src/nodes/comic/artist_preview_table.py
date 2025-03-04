@@ -151,43 +151,76 @@ class ArtistPreviewGenerator:
         .checkbox-container {{ margin-bottom: 10px; }}
         .preview-cell {{ width: 100px; }}
         .name-cell {{ width: 200px; }}
+        .export-container {{
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: #f4f4f4;
+            padding: 10px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            z-index: 1000;
+        }}
+        .export-btn {{
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 0 10px;
+        }}
+        .export-btn:hover {{
+            background-color: #45a049;
+        }}
+        .main-content {{
+            margin-top: 60px;
+        }}
     </style>
 </head>
 <body>
-    <h2>已存在画师</h2>
-    <div class="table-container">
-        <button type="button" class="collapsible">显示/隐藏已存在画师 (已全选)</button>
-        <div class="content">
-            <div class="checkbox-container">
-                <input type="checkbox" id="existing-select-all" checked>
-                <label for="existing-select-all">全选/取消全选</label>
+    <div class="export-container">
+        <button class="export-btn" onclick="exportSelected('artists')">导出选中画师</button>
+        <button class="export-btn" onclick="exportSelected('files')">导出选中压缩包</button>
+    </div>
+    
+    <div class="main-content">
+        <h2>已存在画师</h2>
+        <div class="table-container">
+            <button type="button" class="collapsible">显示/隐藏已存在画师 (已全选)</button>
+            <div class="content">
+                <div class="checkbox-container">
+                    <input type="checkbox" id="existing-select-all" checked>
+                    <label for="existing-select-all">全选/取消全选</label>
+                </div>
+                <table class="preview-table" id="existing-table">
+                    <tr>
+                        <th>选择</th>
+                        <th>画师名</th>
+                        <th>文件列表</th>
+                    </tr>
+                    {existing_rows}
+                </table>
             </div>
-            <table class="preview-table">
+        </div>
+
+        <h2>新画师</h2>
+        <div class="table-container">
+            <div class="checkbox-container">
+                <input type="checkbox" id="new-select-all">
+                <label for="new-select-all">全选/取消全选</label>
+            </div>
+            <table class="preview-table" id="new-table">
                 <tr>
                     <th>选择</th>
+                    <th>预览图</th>
                     <th>画师名</th>
                     <th>文件列表</th>
                 </tr>
-                {existing_rows}
+                {new_rows}
             </table>
         </div>
-    </div>
-
-    <h2>新画师</h2>
-    <div class="table-container">
-        <div class="checkbox-container">
-            <input type="checkbox" id="new-select-all">
-            <label for="new-select-all">全选/取消全选</label>
-        </div>
-        <table class="preview-table">
-            <tr>
-                <th>选择</th>
-                <th>预览图</th>
-                <th>画师名</th>
-                <th>文件列表</th>
-            </tr>
-            {new_rows}
-        </table>
     </div>
 
     <script>
@@ -227,6 +260,62 @@ class ArtistPreviewGenerator:
 
         setupSelectAll('.content table', 'existing-select-all');
         setupSelectAll('.table-container:nth-of-type(2) table', 'new-select-all');
+
+        // 导出功能
+        function exportSelected(type) {{
+            let content = [];
+            
+            // 获取已存在画师表格中选中的内容
+            const existingTable = document.getElementById('existing-table');
+            if (existingTable) {{
+                const rows = existingTable.querySelectorAll('tr');
+                rows.forEach(row => {{
+                    const checkbox = row.querySelector('input[type="checkbox"]');
+                    if (checkbox && checkbox.checked) {{
+                        if (type === 'artists') {{
+                            const artistName = row.querySelector('.name-cell').textContent;
+                            content.push(artistName);
+                        }} else if (type === 'files') {{
+                            const filesList = row.querySelector('.files-list').innerHTML;
+                            content.push(...filesList.split('<br>'));
+                        }}
+                    }}
+                }});
+            }}
+            
+            // 获取新画师表格中选中的内容
+            const newTable = document.getElementById('new-table');
+            if (newTable) {{
+                const rows = newTable.querySelectorAll('tr');
+                rows.forEach(row => {{
+                    const checkbox = row.querySelector('input[type="checkbox"]');
+                    if (checkbox && checkbox.checked) {{
+                        if (type === 'artists') {{
+                            const artistName = row.querySelector('.name-cell').textContent;
+                            content.push(artistName);
+                        }} else if (type === 'files') {{
+                            const filesList = row.querySelector('.files-list').innerHTML;
+                            content.push(...filesList.split('<br>'));
+                        }}
+                    }}
+                }});
+            }}
+            
+            // 创建并下载文件
+            if (content.length > 0) {{
+                const blob = new Blob([content.join('\\n')], {{ type: 'text/plain' }});
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = type === 'artists' ? 'selected_artists.txt' : 'selected_files.txt';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+            }} else {{
+                alert('请先选择要导出的内容！');
+            }}
+        }}
     </script>
 </body>
 </html>
