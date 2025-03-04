@@ -299,25 +299,37 @@ class ArtistClassifier:
             
             # 移动文件
             moved_files = []
-            for folder_dict in [result['artists']['existing_artists'], result['artists']['new_artists']]:
-                for folder_name, files_list in folder_dict.items():
-                    # 如果启用了创建画师文件夹选项，创建对应的文件夹
-                    target_dir = found_dir
-                    if self.create_artist_folders:
-                        artist_folder = found_dir / folder_name
-                        artist_folder.mkdir(exist_ok=True)
-                        target_dir = artist_folder
-                    
-                    for file_name in files_list:
-                        source_path = Path(self.pending_dir) / file_name
-                        if source_path.exists():
-                            target_path = target_dir / file_name
-                            shutil.move(str(source_path), str(target_path))
-                            moved_files.append((file_name, folder_name))
-                            if self.create_artist_folders:
-                                logger.info(f"已移动到画师文件夹: {file_name} -> {folder_name}")
-                            else:
-                                logger.info(f"已移动到中间文件夹: {file_name} -> {folder_name}")
+            
+            # 处理已存在的画师
+            for folder_name, files_list in result['artists']['existing_artists'].items():
+                # 检查画师文件夹是否存在
+                artist_folder = self.base_dir / folder_name
+                if not artist_folder.exists():
+                    logger.warning(f"画师文件夹不存在，跳过移动: {folder_name}")
+                    continue
+
+                # 如果启用了创建画师文件夹选项，创建对应的文件夹
+                target_dir = found_dir
+                if self.create_artist_folders:
+                    artist_folder = found_dir / folder_name
+                    artist_folder.mkdir(exist_ok=True)
+                    target_dir = artist_folder
+                
+                for file_name in files_list:
+                    source_path = Path(self.pending_dir) / file_name
+                    if source_path.exists():
+                        target_path = target_dir / file_name
+                        shutil.move(str(source_path), str(target_path))
+                        moved_files.append((file_name, folder_name))
+                        if self.create_artist_folders:
+                            logger.info(f"已移动到已存在画师文件夹: {file_name} -> {folder_name}")
+                        else:
+                            logger.info(f"已移动到中间文件夹: {file_name} -> {folder_name}")
+            
+            # 处理新画师（不创建文件夹，也不移动到中间文件夹）
+            for folder_name, files_list in result['artists']['new_artists'].items():
+                for file_name in files_list:
+                    logger.info(f"未找到画师文件夹，跳过移动: {file_name} -> {folder_name}")
             
             # 删除临时文件
             temp_txt.unlink()
