@@ -8,7 +8,10 @@ import pyperclip
 import sys
 import subprocess
 import time  # 添加time模块导入
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from queue import Queue
+from threading import Lock
 
 class InputHandler:
     """输入处理类"""
@@ -211,7 +214,7 @@ def process_with_bandizip(zip_path, temp_dir):
     try:
         # 使用 Bandizip 解压文件
         extract_cmd = ['bz', 'x', '-o:', f'"{temp_dir}"', f'"{zip_path}"']
-        result = subprocess.run(' '.join(extract_cmd), shell=True, capture_output=True, text=True)
+        result = subprocess.run(' '.join(extract_cmd), shell=True, capture_output=True, encoding='utf-8', errors='ignore')
         
         if result.returncode != 0:
             print(f"❌ Bandizip 解压失败: {result.stderr}")
@@ -238,7 +241,7 @@ def process_with_bandizip(zip_path, temp_dir):
         if renamed:
             # 使用 Bandizip 重新打包
             create_cmd = ['bz', 'c', '-l:9', f'"{zip_path}"', f'"{temp_dir}\\*"']
-            result = subprocess.run(' '.join(create_cmd), shell=True, capture_output=True, text=True)
+            result = subprocess.run(' '.join(create_cmd), shell=True, capture_output=True, encoding='utf-8', errors='ignore')
             
             if result.returncode == 0:
                 print(f"✅ Bandizip 打包成功：{zip_path}")
@@ -263,7 +266,7 @@ def rename_images_in_zip(zip_path, input_base_path):
         
         # 使用7z列出文件
         list_cmd = ['7z', 'l', '-slt', zip_path]
-        result = subprocess.run(list_cmd, capture_output=True, text=True)
+        result = subprocess.run(list_cmd, capture_output=True, encoding='utf-8', errors='ignore')
         
         # 解析文件列表
         files_to_delete = []
@@ -278,7 +281,7 @@ def rename_images_in_zip(zip_path, input_base_path):
         if files_to_delete:
             # 构建删除命令
             delete_cmd = ['7z', 'd', zip_path] + files_to_delete
-            delete_result = subprocess.run(delete_cmd, capture_output=True, text=True)
+            delete_result = subprocess.run(delete_cmd, capture_output=True, encoding='utf-8', errors='ignore')
             
             if delete_result.returncode == 0:
                 print(f"✅ 已从压缩包中删除 {len(files_to_delete)} 个广告图片")
@@ -293,8 +296,8 @@ def rename_images_in_zip(zip_path, input_base_path):
             # 首先尝试使用7z
             try:
                 # 解压文件
-                extract_cmd = ['7z', 'x', f'"{zip_path}"', f'-o"{temp_dir}"', '*']
-                subprocess.run(extract_cmd, check=True)
+                extract_cmd = ['7z', 'x', zip_path, f'-o{temp_dir}']  # 修改命令格式
+                subprocess.run(extract_cmd, check=True, capture_output=True, encoding='utf-8', errors='ignore')
                 
                 # 重命名文件
                 renamed = False
@@ -339,8 +342,8 @@ def rename_images_in_zip(zip_path, input_base_path):
                         # 重新打包前先删除原文件
                         os.remove(zip_path)
                         # 重新打包
-                        create_cmd = ['7z', 'a', '-tzip', zip_path, f'{temp_dir}\\*']
-                        subprocess.run(create_cmd, check=True)
+                        create_cmd = ['7z', 'a', '-tzip', zip_path, os.path.join(temp_dir, '*')]  # 修改命令格式
+                        subprocess.run(create_cmd, check=True, capture_output=True, encoding='utf-8', errors='ignore')
                         print(f"✅ 7z处理完成：{zip_path}")
                         success = True
                     except Exception as e:
@@ -372,6 +375,86 @@ def rename_images_in_zip(zip_path, input_base_path):
         print(f"❌ 处理压缩包时出错: {str(e)}")
     print("继续处理下一个文件...")
 
+class ProcessStats:
+    """处理统计类"""
+    def __init__(self):
+        self.lock = Lock()
+        self.processed_count = 0
+        self.failed_count = 0
+        self.skipped_count = 0
+        
+    def increment_processed(self):
+        with self.lock:
+            self.processed_count += 1
+            
+    def increment_failed(self):
+        with self.lock:
+            self.failed_count += 1
+            
+    def increment_skipped(self):
+        with self.lock:
+            self.skipped_count += 1
+
+def process_zip_file(args):
+    """处理单个压缩包的包装函数"""
+    zip_path, input_base_path, stats = args
+    try:
+        rename_images_in_zip(zip_path, input_base_path)
+        stats.increment_processed()
+    except Exception as e:
+        print(f"❌ 处理压缩包失败 {zip_path}: {str(e)}")
+        stats.increment_failed()
+
+def process_image_directory(args):
+    """处理单个图片目录的包装函数"""
+    directory, stats = args
+    try:
+        rename_images_in_directory(directory)
+        stats.increment_processed()
+    except Exception as e:
+        print(f"❌ 处理目录失败 {directory}: {str(e)}")
+        stats.increment_failed()
+
+def process_with_threadpool(items, worker_func, max_workers=None):
+    """使用线程池处理任务"""
+    if not items:
+        return
+        
+    # 如果没有指定线程数，使用处理器数量的2倍
+    if max_workers is None:
+        max_workers = os.cpu_count() * 2 or 4
+        
+    stats = ProcessStats()
+    total = len(items)
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+    ) as progress:
+        task = progress.add_task("处理文件...", total=total)
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # 添加统计对象到每个任务的参数中
+            tasks = [executor.submit(worker_func, (*item, stats) if isinstance(item, tuple) else (item, stats)) 
+                    for item in items]
+            
+            # 等待所有任务完成
+            for future in as_completed(tasks):
+                progress.advance(task)
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"❌ 任务执行失败: {str(e)}")
+                    stats.increment_failed()
+    
+    # 打印统计信息
+    print(f"\n📊 处理完成:")
+    print(f"   - 成功处理: {stats.processed_count} 个")
+    print(f"   - 处理失败: {stats.failed_count} 个")
+    print(f"   - 跳过处理: {stats.skipped_count} 个")
+
 if __name__ == "__main__":
     # 获取输入路径
     args = InputHandler.parse_arguments()
@@ -397,27 +480,38 @@ if __name__ == "__main__":
     if not target_paths:
         print("没有有效的输入路径")
         sys.exit(1)
-    # 处理每个路径
+
+    # 收集需要处理的项目
+    items_to_process = []
+    
     for target_path in target_paths:
-        print(f"\n处理路径: {target_path}")
-        input_base_path = os.path.dirname(target_path)  # 获取输入路径的父目录
+        print(f"\n收集路径: {target_path}")
+        input_base_path = os.path.dirname(target_path)
         
         if os.path.isdir(target_path):
             if args.mode == 'image':
-                # 直接处理文件夹中的图片
-                rename_images_in_directory(target_path)
-                print(f"文件夹处理完成：{target_path}")
+                # 收集所有需要处理的图片目录
+                items_to_process.append(target_path)
             else:
-                # 处理文件夹中的压缩包
+                # 收集所有需要处理的压缩包
                 for root, _, files in os.walk(target_path):
                     for file in files:
                         if file.lower().endswith('.zip'):
                             zip_path = os.path.join(root, file)
-                            rename_images_in_zip(zip_path, input_base_path)
+                            items_to_process.append((zip_path, input_base_path))
         elif zipfile.is_zipfile(target_path):
             if args.mode == 'zip':
-                rename_images_in_zip(target_path, input_base_path)
+                items_to_process.append((target_path, input_base_path))
             else:
                 print(f"警告: 当前为图片处理模式，跳过压缩包 {target_path}")
         else:
             print(f"警告: '{target_path}' 不是有效的压缩包或文件夹，跳过处理")
+    
+    # 使用线程池处理收集到的项目
+    if items_to_process:
+        if args.mode == 'image':
+            process_with_threadpool(items_to_process, process_image_directory)
+        else:
+            process_with_threadpool(items_to_process, process_zip_file)
+    else:
+        print("没有找到需要处理的文件")
