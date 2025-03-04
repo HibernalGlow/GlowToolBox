@@ -163,17 +163,19 @@ class Config:
     def _get_archive_types(self):
         """获取要处理的压缩包格式列表"""
         if self.args.archive_types:
-            # 将cbz和cbr也映射到zip和rar
+            # 修正映射关系，每个参数对应特定扩展名
+            type_mapping = {
+                'zip': ['.zip'],
+                'cbz': ['.cbz'],
+                'rar': ['.rar'],
+                'cbr': ['.cbr'],
+                '7z': ['.7z']
+            }
+            
             types = set()
             for t in self.args.archive_types:
-                if t in ['zip', 'cbz']:
-                    types.add('.zip')
-                    types.add('.cbz')
-                elif t in ['rar', 'cbr']:
-                    types.add('.rar')
-                    types.add('.cbr')
-                elif t == '7z':
-                    types.add('.7z')
+                if t in type_mapping:
+                    types.update(type_mapping[t])
             return list(types)
         else:
             # 默认支持所有格式
