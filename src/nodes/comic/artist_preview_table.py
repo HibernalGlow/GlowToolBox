@@ -545,7 +545,10 @@ class ArtistPreviewGenerator:
                             for (const item of galleryItems) {{
                                 const img = item.querySelector('img');
                                 if (img && img.src) {{
-                                    const imgUrl = 'https:' + img.getAttribute('src');
+                                    let imgUrl = img.getAttribute('src');
+                                    if (!imgUrl.startsWith('http')) {{
+                                        imgUrl = 'https:' + imgUrl;
+                                    }}
                                     try {{
                                         const imgResponse = await fetch(imgUrl);
                                         if (imgResponse.ok) {{
