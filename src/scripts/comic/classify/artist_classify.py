@@ -1,3 +1,4 @@
+from pickle import TRUE
 import shutil
 from pathlib import Path
 import os
@@ -14,7 +15,7 @@ from nodes.record.logger_config import setup_logger
 
 config = {
     'script_name': 'artist_classify',
-    'console_enabled': False
+    'console_enabled': TRUE
 }
 logger, config_info = setup_logger(config)
 
@@ -522,20 +523,41 @@ def run_classifier(path: Optional[str], args):
 def main():
     path, args = process_args()
     
-    # 文本模式处理
-    if args.text_mode or (path and path.endswith('to_be_classified.txt')):
-        # 确保txt_path是Path对象
-        txt_path = Path(path) if path else Path(__file__).parent / "to_be_classified.txt"
-        if not txt_path.exists():
-            logger.error(f"文本文件不存在: {txt_path}")
+    try:
+        classifier = ArtistClassifier()
+        logger.info("画师分类器初始化完成")
+        
+        # 更新画师列表
+        if args.update_list:
+            logger.info("手动更新画师列表")
+            classifier.update_artist_list()
             return
         
-        classifier = ArtistClassifier()
-        result = classifier.process_to_be_classified(str(txt_path))
-        output_path = txt_path.parent / 'classified_result.yaml'
-        classifier.save_classification_result(result, str(output_path))
-    else:
-        # 创建TUI配置界面
+        # 文本模式处理
+        if args.text_mode or (path and path.endswith('to_be_classified.txt')):
+            txt_path = Path(path) if path else Path(__file__).parent / "to_be_classified.txt"
+            if not txt_path.exists():
+                logger.error(f"文本文件不存在: {txt_path}")
+                return
+            
+            result = classifier.process_to_be_classified(str(txt_path))
+            output_path = txt_path.parent / 'classified_result.yaml'
+            classifier.save_classification_result(result, str(output_path))
+            return
+        
+        # 如果指定了路径，直接处理文件
+        if path:
+            try:
+                classifier.set_pending_dir(path)
+                logger.info(f"设置待处理目录: {path}")
+                classifier.intermediate_mode = args.intermediate
+                classifier.process_files()
+                return
+            except ValueError as e:
+                logger.error(str(e))
+                return
+        
+        # 如果没有任何参数，显示TUI界面
         checkbox_options = [
             ("中间模式", "intermediate", "--intermediate"),
             ("更新画师列表", "update_list", "--update-list"),
@@ -554,6 +576,9 @@ def main():
         )
         
         app.run()
+    except Exception as e:
+        logger.error(f"运行过程中出现错误: {e}")
+        raise
 
 if __name__ == "__main__":
     main()
