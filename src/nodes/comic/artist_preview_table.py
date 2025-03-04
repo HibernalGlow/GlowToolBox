@@ -118,125 +118,180 @@ class ArtistPreviewGenerator:
 <head>
     <meta charset="UTF-8">
     <title>画师预览表格</title>
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.11.5/css/jquery.dataTables.min.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/select/1.3.4/css/select.dataTables.min.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.2.2/css/buttons.dataTables.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/viewerjs/1.10.2/viewer.min.css">
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; }}
-        .table-container {{ margin-bottom: 20px; }}
-        .preview-table {{ border-collapse: collapse; width: 100%; }}
-        .preview-table th, .preview-table td {{ 
-            border: 1px solid #ddd; 
-            padding: 8px; 
-            text-align: left; 
-        }}
-        .preview-table th {{ background-color: #f4f4f4; }}
-        .preview-img {{ max-width: 100px; max-height: 150px; }}
+        .table-container {{ margin: 20px 0; }}
+        .preview-table {{ width: 100%; }}
+        .preview-img {{ max-width: 100px; max-height: 150px; cursor: pointer; }}
         .files-list {{ max-height: 150px; overflow-y: auto; margin: 0; }}
-        .collapsible {{ 
-            background-color: #f4f4f4;
-            cursor: pointer;
-            padding: 18px;
-            width: 100%;
-            border: none;
-            text-align: left;
-            outline: none;
-            font-size: 15px;
-            margin-bottom: 10px;
-        }}
-        .active, .collapsible:hover {{ background-color: #ddd; }}
-        .content {{ 
-            display: none;
-            overflow: hidden;
-            background-color: #f9f9f9;
-            padding: 0 18px;
-        }}
-        .checkbox-container {{ margin-bottom: 10px; }}
-        .preview-cell {{ width: 100px; }}
-        .name-cell {{ width: 200px; }}
-        .export-container {{
+        .control-panel {{ 
             position: fixed;
             top: 0;
             left: 0;
             right: 0;
             background: #f4f4f4;
             padding: 10px;
-            text-align: center;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             z-index: 1000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }}
-        .export-btn {{
+        .main-content {{ margin-top: 60px; }}
+        .btn {{
             background-color: #4CAF50;
             color: white;
-            padding: 10px 20px;
+            padding: 8px 16px;
             border: none;
             border-radius: 4px;
             cursor: pointer;
-            margin: 0 10px;
+            margin: 0 5px;
         }}
-        .export-btn:hover {{
-            background-color: #45a049;
+        .btn:hover {{ background-color: #45a049; }}
+        .btn-group {{ display: flex; gap: 5px; }}
+        .mode-switch {{
+            padding: 5px 10px;
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
         }}
-        .main-content {{
-            margin-top: 60px;
+        .mode-switch.active {{ background: #4CAF50; color: white; }}
+        .grid-view {{ 
+            display: none;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 20px;
         }}
+        .grid-item {{
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: center;
+        }}
+        .grid-item img {{ max-width: 100%; height: auto; }}
+        .custom-select-all {{
+            margin: 10px 0;
+            font-weight: bold;
+        }}
+        .dt-buttons {{ margin-bottom: 10px; }}
     </style>
 </head>
 <body>
-    <div class="export-container">
-        <button class="export-btn" onclick="exportSelected('artists')">导出选中画师</button>
-        <button class="export-btn" onclick="exportSelected('files')">导出选中压缩包</button>
+    <div class="control-panel">
+        <div class="btn-group">
+            <button class="btn" onclick="exportSelected('artists')">导出选中画师</button>
+            <button class="btn" onclick="exportSelected('files')">导出选中压缩包</button>
+            <button class="btn" onclick="exportSelectionState()">导出选中状态</button>
+            <input type="file" id="importState" style="display: none" onchange="importSelectionState(event)">
+            <button class="btn" onclick="document.getElementById('importState').click()">导入选中状态</button>
+        </div>
+        <div class="view-controls">
+            <button class="mode-switch active" data-mode="table">表格模式</button>
+            <button class="mode-switch" data-mode="grid">图墙模式</button>
+        </div>
     </div>
     
     <div class="main-content">
         <h2>已存在画师</h2>
         <div class="table-container">
-            <button type="button" class="collapsible">显示/隐藏已存在画师 (已全选)</button>
-            <div class="content">
-                <div class="checkbox-container">
-                    <input type="checkbox" id="existing-select-all" checked>
-                    <label for="existing-select-all">全选/取消全选</label>
-                </div>
-                <table class="preview-table" id="existing-table">
+            <div class="custom-select-all">
+                <input type="checkbox" id="existing-select-all" checked>
+                <label for="existing-select-all">全选/取消全选已存在画师</label>
+                <button class="btn" onclick="invertSelection('existing-table')">反选</button>
+            </div>
+            <table class="preview-table" id="existing-table">
+                <thead>
                     <tr>
                         <th>选择</th>
                         <th>画师名</th>
                         <th>文件列表</th>
                     </tr>
+                </thead>
+                <tbody>
                     {existing_rows}
-                </table>
-            </div>
+                </tbody>
+            </table>
         </div>
 
         <h2>新画师</h2>
         <div class="table-container">
-            <div class="checkbox-container">
+            <div class="custom-select-all">
                 <input type="checkbox" id="new-select-all">
-                <label for="new-select-all">全选/取消全选</label>
+                <label for="new-select-all">全选/取消全选新画师</label>
+                <button class="btn" onclick="invertSelection('new-table')">反选</button>
             </div>
             <table class="preview-table" id="new-table">
-                <tr>
-                    <th>选择</th>
-                    <th>预览图</th>
-                    <th>画师名</th>
-                    <th>文件列表</th>
-                </tr>
-                {new_rows}
+                <thead>
+                    <tr>
+                        <th>选择</th>
+                        <th>预览图</th>
+                        <th>画师名</th>
+                        <th>文件列表</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {new_rows}
+                </tbody>
             </table>
         </div>
     </div>
 
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/select/1.3.4/js/dataTables.select.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.2.2/js/dataTables.buttons.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/viewerjs/1.10.2/viewer.min.js"></script>
     <script>
-        // 折叠面板功能
-        var coll = document.getElementsByClassName("collapsible");
-        for (var i = 0; i < coll.length; i++) {{
-            coll[i].addEventListener("click", function() {{
-                this.classList.toggle("active");
-                var content = this.nextElementSibling;
-                if (content.style.display === "block") {{
-                    content.style.display = "none";
-                }} else {{
-                    content.style.display = "block";
+        // 初始化 DataTables
+        $(document).ready(function() {{
+            const commonConfig = {{
+                pageLength: 25,
+                dom: 'Bfrtip',
+                select: {{
+                    style: 'multi',
+                    selector: 'td:first-child input[type="checkbox"]'
+                }},
+                buttons: [
+                    'selectAll',
+                    'selectNone'
+                ]
+            }};
+
+            $('#existing-table').DataTable(commonConfig);
+            $('#new-table').DataTable(commonConfig);
+
+            // 初始化图片查看器
+            new Viewer(document.getElementById('new-table'), {{
+                inline: false,
+                viewed() {{
+                    viewer.zoomTo(1);
                 }}
             }});
-        }}
+        }});
+
+        // 视图切换
+        document.querySelectorAll('.mode-switch').forEach(btn => {{
+            btn.addEventListener('click', function() {{
+                const mode = this.dataset.mode;
+                document.querySelectorAll('.mode-switch').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                
+                const tables = document.querySelectorAll('.table-container');
+                const gridView = document.querySelector('.grid-view');
+                
+                if (mode === 'grid') {{
+                    tables.forEach(t => t.style.display = 'none');
+                    gridView.style.display = 'grid';
+                }} else {{
+                    tables.forEach(t => t.style.display = 'block');
+                    gridView.style.display = 'none';
+                }}
+            }});
+        }});
 
         // 全选功能
         function setupSelectAll(tableId, selectAllId) {{
@@ -245,30 +300,100 @@ class ArtistPreviewGenerator:
             if (!selectAll || !table) return;
 
             selectAll.addEventListener('change', function() {{
-                const checkboxes = table.querySelectorAll('input[type="checkbox"]');
+                const checkboxes = table.querySelectorAll('tbody input[type="checkbox"]');
                 checkboxes.forEach(checkbox => checkbox.checked = this.checked);
             }});
 
             table.addEventListener('change', function(e) {{
                 if (e.target.type === 'checkbox' && e.target !== selectAll) {{
-                    const checkboxes = table.querySelectorAll('input[type="checkbox"]:not(#' + selectAllId + ')');
+                    const checkboxes = table.querySelectorAll('tbody input[type="checkbox"]');
                     const allChecked = Array.from(checkboxes).every(cb => cb.checked);
                     selectAll.checked = allChecked;
                 }}
             }});
         }}
 
-        setupSelectAll('.content table', 'existing-select-all');
-        setupSelectAll('.table-container:nth-of-type(2) table', 'new-select-all');
+        // 反选功能
+        function invertSelection(tableId) {{
+            const table = document.getElementById(tableId);
+            const checkboxes = table.querySelectorAll('tbody input[type="checkbox"]');
+            checkboxes.forEach(checkbox => checkbox.checked = !checkbox.checked);
+            
+            // 更新全选框状态
+            const selectAllId = tableId === 'existing-table' ? 'existing-select-all' : 'new-select-all';
+            const selectAll = document.getElementById(selectAllId);
+            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+            selectAll.checked = allChecked;
+        }}
+
+        // 导出选中状态
+        function exportSelectionState() {{
+            const state = {{
+                existing: getTableState('existing-table'),
+                new: getTableState('new-table')
+            }};
+            
+            const blob = new Blob([JSON.stringify(state)], {{ type: 'application/json' }});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'selection_state.json';
+            document.body.appendChild(a);
+            a.click();
+            URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        }}
+
+        // 导入选中状态
+        function importSelectionState(event) {{
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {{
+                try {{
+                    const state = JSON.parse(e.target.result);
+                    applyTableState('existing-table', state.existing);
+                    applyTableState('new-table', state.new);
+                }} catch (error) {{
+                    console.error('导入状态失败:', error);
+                    alert('导入状态失败，请检查文件格式');
+                }}
+            }};
+            reader.readAsText(file);
+        }}
+
+        // 获取表格选中状态
+        function getTableState(tableId) {{
+            const table = document.getElementById(tableId);
+            const state = {{}};
+            table.querySelectorAll('tbody tr').forEach(row => {{
+                const checkbox = row.querySelector('input[type="checkbox"]');
+                const artistName = row.querySelector('.name-cell').textContent;
+                state[artistName] = checkbox.checked;
+            }});
+            return state;
+        }}
+
+        // 应用表格选中状态
+        function applyTableState(tableId, state) {{
+            const table = document.getElementById(tableId);
+            table.querySelectorAll('tbody tr').forEach(row => {{
+                const checkbox = row.querySelector('input[type="checkbox"]');
+                const artistName = row.querySelector('.name-cell').textContent;
+                if (state.hasOwnProperty(artistName)) {{
+                    checkbox.checked = state[artistName];
+                }}
+            }});
+        }}
 
         // 导出功能
         function exportSelected(type) {{
             let content = [];
             
-            // 获取已存在画师表格中选中的内容
-            const existingTable = document.getElementById('existing-table');
-            if (existingTable) {{
-                const rows = existingTable.querySelectorAll('tr');
+            ['existing-table', 'new-table'].forEach(tableId => {{
+                const table = document.getElementById(tableId);
+                const rows = table.querySelectorAll('tbody tr');
                 rows.forEach(row => {{
                     const checkbox = row.querySelector('input[type="checkbox"]');
                     if (checkbox && checkbox.checked) {{
@@ -281,41 +406,26 @@ class ArtistPreviewGenerator:
                         }}
                     }}
                 }});
-            }}
+            }});
             
-            // 获取新画师表格中选中的内容
-            const newTable = document.getElementById('new-table');
-            if (newTable) {{
-                const rows = newTable.querySelectorAll('tr');
-                rows.forEach(row => {{
-                    const checkbox = row.querySelector('input[type="checkbox"]');
-                    if (checkbox && checkbox.checked) {{
-                        if (type === 'artists') {{
-                            const artistName = row.querySelector('.name-cell').textContent;
-                            content.push(artistName);
-                        }} else if (type === 'files') {{
-                            const filesList = row.querySelector('.files-list').innerHTML;
-                            content.push(...filesList.split('<br>'));
-                        }}
-                    }}
-                }});
-            }}
-            
-            // 创建并下载文件
             if (content.length > 0) {{
                 const blob = new Blob([content.join('\\n')], {{ type: 'text/plain' }});
-                const url = window.URL.createObjectURL(blob);
+                const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
                 a.download = type === 'artists' ? 'selected_artists.txt' : 'selected_files.txt';
                 document.body.appendChild(a);
                 a.click();
-                window.URL.revokeObjectURL(url);
+                URL.revokeObjectURL(url);
                 document.body.removeChild(a);
             }} else {{
                 alert('请先选择要导出的内容！');
             }}
         }}
+
+        // 初始化
+        setupSelectAll('#existing-table', 'existing-select-all');
+        setupSelectAll('#new-table', 'new-select-all');
     </script>
 </body>
 </html>
@@ -324,7 +434,6 @@ class ArtistPreviewGenerator:
         def generate_table_row(preview: ArtistPreview) -> str:
             files_list = '<br>'.join(preview.files)
             if preview.is_existing:
-                # 已存在画师不显示预览图
                 return f"""
                     <tr>
                         <td><input type="checkbox" checked></td>
@@ -333,7 +442,6 @@ class ArtistPreviewGenerator:
                     </tr>
                 """
             else:
-                # 新画师显示预览图
                 preview_img = f'<img src="{preview.preview_url}" class="preview-img">' if preview.preview_url else '无预览图'
                 return f"""
                     <tr>
