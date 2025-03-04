@@ -274,7 +274,6 @@ class ArtistClassifier:
     def process_files(self):
         """处理待分类文件"""
         supported_formats = {'.zip', '.rar', '.7z'}
-        found_files = []
         
         # 获取所有待处理文件
         files = list(Path(self.pending_dir).rglob("*"))
@@ -282,34 +281,62 @@ class ArtistClassifier:
         
         logger.info(f"开始处理 {len(target_files)} 个文件...")
         
-        for i, file_path in enumerate(target_files, 1):
-            logger.info(f"正在检查: {file_path.name} ({i}/{len(target_files)})")
+        if self.intermediate_mode:
+            # 中间模式：使用文本模式的识别算法
+            # 创建临时的文本文件
+            temp_txt = Path(self.pending_dir) / "temp_to_be_classified.txt"
+            with open(temp_txt, 'w', encoding='utf-8') as f:
+                for file_path in target_files:
+                    f.write(f"{file_path.name}\n")
             
-            artist_info = self._find_artist_folder(file_path.name)
-            if artist_info:
-                artist_name, folder_name = artist_info
-                if self.intermediate_mode:
-                    # 中间模式：移动到已找到画师文件夹
-                    target_path = self.found_artists_dir / file_path.name
-                    shutil.move(str(file_path), str(target_path))
-                    found_files.append((file_path.name, folder_name, artist_name))
-                    logger.info(f"找到画师 {artist_name}，已移动到中间文件夹: {file_path.name}")
-                else:
-                    # 直接模式：移动到画师文件夹
+            # 使用文本模式处理
+            result = self.process_to_be_classified(str(temp_txt))
+            
+            # 在输入路径下创建转移文件夹
+            found_dir = Path(self.pending_dir) / "已找到画师"
+            found_dir.mkdir(exist_ok=True)
+            
+            # 移动文件
+            moved_files = []
+            for folder_dict in [result['artists']['existing_artists'], result['artists']['new_artists']]:
+                for folder_name, files_list in folder_dict.items():
+                    for file_name in files_list:
+                        source_path = Path(self.pending_dir) / file_name
+                        if source_path.exists():
+                            target_path = found_dir / file_name
+                            shutil.move(str(source_path), str(target_path))
+                            moved_files.append((file_name, folder_name))
+                            logger.info(f"已移动到中间文件夹: {file_name} -> {folder_name}")
+            
+            # 删除临时文件
+            temp_txt.unlink()
+            
+            # 显示汇总信息
+            if moved_files:
+                logger.info("已找到的文件汇总:")
+                for file_name, folder in moved_files:
+                    logger.info(f"  - {file_name} -> {folder}")
+            
+            # 保存分类结果
+            output_yaml = Path(self.pending_dir) / "classified_result.yaml"
+            self.save_classification_result(result, str(output_yaml))
+            
+        else:
+            # 直接模式：移动到画师文件夹
+            for i, file_path in enumerate(target_files, 1):
+                logger.info(f"正在检查: {file_path.name} ({i}/{len(target_files)})")
+                
+                artist_info = self._find_artist_folder(file_path.name)
+                if artist_info:
+                    artist_name, folder_name = artist_info
                     target_folder = self.base_dir / folder_name
                     try:
                         self.move_file(file_path, target_folder)
                         logger.info(f"已移动到画师文件夹: {file_path.name} -> {folder_name}")
                     except Exception as e:
                         logger.error(f"移动文件失败: {file_path.name} - {str(e)}")
-            else:
-                logger.warning(f"未找到匹配画师: {file_path.name}")
-        
-        # 显示中间模式的汇总信息
-        if self.intermediate_mode and found_files:
-            logger.info("已找到的文件汇总:")
-            for file_name, folder, artist in found_files:
-                logger.info(f"  - {file_name} -> {artist} ({folder})")
+                else:
+                    logger.warning(f"未找到匹配画师: {file_path.name}")
 
     def extract_artist_info_from_filename(self, filename: str) -> Dict[str, List[str]]:
         """从文件名中提取画师信息"""
