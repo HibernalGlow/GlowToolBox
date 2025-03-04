@@ -37,6 +37,7 @@ class ArtistClassifier:
         
         self.found_artists_dir = Path(self.config['paths']['found_artists_dir'])
         self.intermediate_mode = False
+        self.create_artist_folders = False  # 新增：是否创建画师文件夹的标志
         
         # 确保必要的目录存在
         self.found_artists_dir.mkdir(exist_ok=True)
@@ -293,20 +294,30 @@ class ArtistClassifier:
             result = self.process_to_be_classified(str(temp_txt))
             
             # 在输入路径下创建转移文件夹
-            found_dir = Path(self.pending_dir) / "已找到画师"
+            found_dir = Path(self.pending_dir) / "[01已找到画师]"
             found_dir.mkdir(exist_ok=True)
             
             # 移动文件
             moved_files = []
             for folder_dict in [result['artists']['existing_artists'], result['artists']['new_artists']]:
                 for folder_name, files_list in folder_dict.items():
+                    # 如果启用了创建画师文件夹选项，创建对应的文件夹
+                    target_dir = found_dir
+                    if self.create_artist_folders:
+                        artist_folder = found_dir / folder_name
+                        artist_folder.mkdir(exist_ok=True)
+                        target_dir = artist_folder
+                    
                     for file_name in files_list:
                         source_path = Path(self.pending_dir) / file_name
                         if source_path.exists():
-                            target_path = found_dir / file_name
+                            target_path = target_dir / file_name
                             shutil.move(str(source_path), str(target_path))
                             moved_files.append((file_name, folder_name))
-                            logger.info(f"已移动到中间文件夹: {file_name} -> {folder_name}")
+                            if self.create_artist_folders:
+                                logger.info(f"已移动到画师文件夹: {file_name} -> {folder_name}")
+                            else:
+                                logger.info(f"已移动到中间文件夹: {file_name} -> {folder_name}")
             
             # 删除临时文件
             temp_txt.unlink()
@@ -479,6 +490,8 @@ def process_args():
                         help='更新画师列表')
     parser.add_argument('--text-mode', action='store_true',
                         help='启用文本模式')
+    parser.add_argument('--create-folders', action='store_true',
+                        help='在中间模式下创建画师文件夹')
     
     args = parser.parse_args()
     
@@ -523,12 +536,14 @@ def run_classifier(path: Optional[str], args):
                 return
             
             classifier.intermediate_mode = args.intermediate
+            classifier.create_artist_folders = args.create_folders  # 设置是否创建画师文件夹
             classifier.process_files()
         else:
             # 创建TUI配置界面
             checkbox_options = [
                 ("中间模式", "intermediate", "--intermediate"),
                 ("更新画师列表", "update_list", "--update-list"),
+                ("创建画师文件夹", "create_folders", "--create-folders"),  # 新增选项
             ]
             
             input_options = [
@@ -578,6 +593,7 @@ def main():
                 classifier.set_pending_dir(path)
                 logger.info(f"设置待处理目录: {path}")
                 classifier.intermediate_mode = args.intermediate
+                classifier.create_artist_folders = args.create_folders  # 设置是否创建画师文件夹
                 classifier.process_files()
                 return
             except ValueError as e:
@@ -589,6 +605,7 @@ def main():
             ("中间模式", "intermediate", "--intermediate"),
             ("更新画师列表", "update_list", "--update-list"),
             ("文本模式", "text_mode", "--text-mode"),
+            ("创建画师文件夹", "create_folders", "--create-folders"),  # 新增选项
         ]
         
         input_options = [
