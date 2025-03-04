@@ -162,8 +162,17 @@ class ArtistClassifier:
                 return category
         return "一般"
 
-    def _find_artist_folder(self, filename: str) -> Optional[Tuple[str, str]]:
-        """查找匹配的画师文件夹"""
+    def _find_artist_info(self, filename: str) -> Optional[Tuple[str, str, bool]]:
+        """
+        查找画师信息的公共函数
+        
+        Args:
+            filename: 文件名
+            
+        Returns:
+            Optional[Tuple[str, str, bool]]: (画师名, 文件夹名, 是否为已存在画师)
+            如果未找到则返回None
+        """
         # 从文件名中提取画师名称
         name_str = filename
         for keyword in self.config['exclude_keywords']:
@@ -197,7 +206,7 @@ class ArtistClassifier:
                 for names, folder in self.config['artists']['user_defined'].items():
                     if artist_name in names.split():
                         logger.info(f"找到用户自定义画师: {artist_name} ({names}) -> {folder}")
-                        return artist_name, folder
+                        return artist_name, folder, True
         
         # 如果用户自定义中没找到，再检查自动检测的画师
         for artist_name in artist_names:
@@ -205,9 +214,23 @@ class ArtistClassifier:
                 for folder, names in self.config['artists']['auto_detected'].items():
                     if artist_name in names:
                         logger.info(f"找到自动检测画师: {artist_name} -> {folder}")
-                        return artist_name, folder
+                        return artist_name, folder, True
+        
+        # 如果都没找到，但有有效的画师名，返回第一个画师名作为新画师
+        for artist_name in artist_names:
+            if artist_name and not any(k in artist_name for k in self.config['exclude_keywords']):
+                folder_name = f"[{artist_name}]"
+                return artist_name, folder_name, False
         
         logger.debug(f"未找到匹配画师，文件名: {filename}")
+        return None
+
+    def _find_artist_folder(self, filename: str) -> Optional[Tuple[str, str]]:
+        """查找匹配的画师文件夹（为了保持向后兼容）"""
+        result = self._find_artist_info(filename)
+        if result:
+            artist_name, folder_name, _ = result
+            return artist_name, folder_name
         return None
 
     def move_file(self, source_path: Path, target_folder: Path):
@@ -367,27 +390,14 @@ class ArtistClassifier:
             }
         }
         
-        # 获取现有的画师列表
-        existing_artists = set()
-        for folder_name in self.config['artists']['auto_detected'].keys():
-            # 去掉方括号，获取画师名
-            artist_name = folder_name.strip('[]')
-            existing_artists.add(artist_name)
-        
         # 处理每个文件名
         for filename in filenames:
-            info = self.extract_artist_info_from_filename(filename)
+            artist_info = self._find_artist_info(filename)
             
-            if info['artists'] or info['circles']:
-                # 如果找到了画师或社团信息
-                artist_name = info['artists'][0] if info['artists'] else info['circles'][0]
-                folder_name = f"[{artist_name}]"
-                
-                # 检查是否是已存在的画师
-                if artist_name in existing_artists:
-                    target_dict = result['artists']['existing_artists']
-                else:
-                    target_dict = result['artists']['new_artists']
+            if artist_info:
+                artist_name, folder_name, is_existing = artist_info
+                # 根据是否为已存在画师选择目标字典
+                target_dict = result['artists']['existing_artists'] if is_existing else result['artists']['new_artists']
                 
                 # 将文件名添加到对应的画师/社团文件夹下
                 if folder_name not in target_dict:
