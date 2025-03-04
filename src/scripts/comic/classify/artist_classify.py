@@ -9,7 +9,6 @@ import argparse
 import pyperclip
 from loguru import logger
 from datetime import datetime
-import json
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from nodes.tui.textual_preset import create_config_app
 
@@ -354,16 +353,26 @@ class ArtistClassifier:
         # 初始化结果结构
         result = {
             'artists': {
-                'auto_detected': {},  # 改为 {画师文件夹名: [对应的压缩包文件名列表]}
+                'existing_artists': {},  # 已存在的画师
+                'new_artists': {},       # 新画师
                 'user_defined': {}
             },
             'unclassified': [],
             'statistics': {
                 'total_files': len(filenames),
                 'classified_files': 0,
-                'unclassified_files': 0
+                'unclassified_files': 0,
+                'existing_artists_count': 0,
+                'new_artists_count': 0
             }
         }
+        
+        # 获取现有的画师列表
+        existing_artists = set()
+        for folder_name in self.config['artists']['auto_detected'].keys():
+            # 去掉方括号，获取画师名
+            artist_name = folder_name.strip('[]')
+            existing_artists.add(artist_name)
         
         # 处理每个文件名
         for filename in filenames:
@@ -371,22 +380,35 @@ class ArtistClassifier:
             
             if info['artists'] or info['circles']:
                 # 如果找到了画师或社团信息
-                folder_name = f"[{info['artists'][0]}]" if info['artists'] else f"[{info['circles'][0]}]"
+                artist_name = info['artists'][0] if info['artists'] else info['circles'][0]
+                folder_name = f"[{artist_name}]"
+                
+                # 检查是否是已存在的画师
+                if artist_name in existing_artists:
+                    target_dict = result['artists']['existing_artists']
+                else:
+                    target_dict = result['artists']['new_artists']
                 
                 # 将文件名添加到对应的画师/社团文件夹下
-                if folder_name not in result['artists']['auto_detected']:
-                    result['artists']['auto_detected'][folder_name] = []
-                result['artists']['auto_detected'][folder_name].append(filename)
+                if folder_name not in target_dict:
+                    target_dict[folder_name] = []
+                target_dict[folder_name].append(filename)
                 result['statistics']['classified_files'] += 1
             else:
                 # 未能分类的文件
                 result['unclassified'].append(filename)
                 result['statistics']['unclassified_files'] += 1
         
+        # 更新统计信息
+        result['statistics']['existing_artists_count'] = len(result['artists']['existing_artists'])
+        result['statistics']['new_artists_count'] = len(result['artists']['new_artists'])
+        
         logger.info(f"分类完成: ")
         logger.info(f"- 总文件数: {result['statistics']['total_files']}")
         logger.info(f"- 已分类: {result['statistics']['classified_files']}")
         logger.info(f"- 未分类: {result['statistics']['unclassified_files']}")
+        logger.info(f"- 已存在画师数: {result['statistics']['existing_artists_count']}")
+        logger.info(f"- 新画师数: {result['statistics']['new_artists_count']}")
         
         return result
 
@@ -412,183 +434,6 @@ class ArtistClassifier:
             yaml.dump(output_data, f, allow_unicode=True, sort_keys=False)
         
         logger.success(f"分类结果已保存到: {output_path}")
-
-    def generate_html_preview(self, result: Dict, output_path: str):
-        """生成交互式HTML预览页面"""
-        # 获取现有的画师列表
-        existing_artists = set()
-        for folder in self.config['artists']['auto_detected'].keys():
-            if folder.startswith('[') and folder.endswith(']'):
-                existing_artists.add(folder[1:-1])
-        for folder in self.config['artists']['user_defined'].keys():
-            if folder.startswith('[') and folder.endswith(']'):
-                existing_artists.add(folder[1:-1])
-
-        html_template = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <title>画师分类预览</title>
-            <style>
-                body { font-family: Arial, sans-serif; margin: 20px; }
-                .container { max-width: 1200px; margin: 0 auto; }
-                table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-                th, td { padding: 10px; border: 1px solid #ddd; }
-                th { background-color: #f5f5f5; }
-                .preview-img { max-width: 200px; max-height: 200px; }
-                .new-artist { background-color: #fff3cd; }
-                .existing-artist { background-color: #d4edda; }
-                .controls { margin-bottom: 20px; }
-                .select-all { margin-right: 10px; }
-                button { padding: 5px 10px; margin-right: 5px; }
-                .file-list { max-height: 100px; overflow-y: auto; font-size: 12px; }
-                #search-box { width: 200px; padding: 5px; margin-bottom: 10px; }
-                .status { margin-bottom: 10px; }
-            </style>
-            <script>
-                function toggleAll(type) {
-                    const checkboxes = document.querySelectorAll(`.${type} input[type="checkbox"]`);
-                    const selectAllBtn = document.querySelector(`#select-all-${type}`);
-                    const isChecked = selectAllBtn.checked;
-                    checkboxes.forEach(cb => cb.checked = isChecked);
-                    updateStatus();
-                }
-
-                function searchArtist(artistName) {
-                    const searchUrl = `https://www.wn01.uk/search/?q=${encodeURIComponent(artistName)}`;
-                    window.open(searchUrl, '_blank');
-                }
-
-                function updateStatus() {
-                    const total = document.querySelectorAll('tbody tr').length;
-                    const selected = document.querySelectorAll('tbody input[type="checkbox"]:checked').length;
-                    document.getElementById('status').textContent = 
-                        `已选择: ${selected} / 总数: ${total}`;
-                }
-
-                function exportResult() {
-                    const result = {
-                        artists: {
-                            auto_detected: {},
-                            user_defined: {}
-                        },
-                        unclassified: []
-                    };
-
-                    document.querySelectorAll('tbody tr').forEach(row => {
-                        const checkbox = row.querySelector('input[type="checkbox"]');
-                        const artistFolder = row.getAttribute('data-artist-folder');
-                        const files = JSON.parse(row.getAttribute('data-files'));
-                        
-                        if (!checkbox.checked) {  // 未选中的保留
-                            result.artists.auto_detected[artistFolder] = files;
-                        }
-                    });
-
-                    // 创建隐藏的表单并提交
-                    const form = document.createElement('form');
-                    form.method = 'POST';
-                    form.action = window.location.href;
-
-                    const input = document.createElement('input');
-                    input.type = 'hidden';
-                    input.name = 'result';
-                    input.value = JSON.stringify(result);
-
-                    form.appendChild(input);
-                    document.body.appendChild(form);
-                    form.submit();
-                }
-
-                window.onload = function() {
-                    // 默认选中新画师
-                    document.querySelectorAll('.new-artist input[type="checkbox"]').forEach(cb => {
-                        cb.checked = true;
-                    });
-                    updateStatus();
-                }
-            </script>
-        </head>
-        <body>
-            <div class="container">
-                <h1>画师分类预览</h1>
-                <div class="controls">
-                    <input type="text" id="search-box" placeholder="搜索画师...">
-                    <div class="select-all">
-                        <label>
-                            <input type="checkbox" id="select-all-new" onchange="toggleAll('new-artist')">
-                            全选新画师
-                        </label>
-                        <label>
-                            <input type="checkbox" id="select-all-existing" onchange="toggleAll('existing-artist')">
-                            全选已存在画师
-                        </label>
-                    </div>
-                    <button onclick="exportResult()">导出结果</button>
-                </div>
-                <div id="status" class="status"></div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>选择</th>
-                            <th>画师</th>
-                            <th>预览</th>
-                            <th>文件列表</th>
-                            <th>操作</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-        """
-
-        # 添加每个画师的行
-        for folder, files in result['artists']['auto_detected'].items():
-            artist_name = folder[1:-1] if folder.startswith('[') and folder.endswith(']') else folder
-            is_new = artist_name not in existing_artists
-            row_class = 'new-artist' if is_new else 'existing-artist'
-            
-            html_template += f"""
-                <tr class="{row_class}" data-artist-folder="{folder}" data-files='{json.dumps(files)}'>
-                    <td><input type="checkbox" onchange="updateStatus()"></td>
-                    <td>{artist_name}</td>
-                    <td>
-                        <button onclick="searchArtist('{artist_name}')">搜索预览</button>
-                    </td>
-                    <td>
-                        <div class="file-list">
-                            {'<br>'.join(files)}
-                        </div>
-                    </td>
-                    <td>
-                        <button onclick="searchArtist('{artist_name}')">搜索画师</button>
-                    </td>
-                </tr>
-            """
-
-        html_template += """
-                    </tbody>
-                </table>
-            </div>
-        </body>
-        </html>
-        """
-
-        # 保存HTML文件
-        html_path = Path(output_path).with_suffix('.html')
-        with open(html_path, 'w', encoding='utf-8') as f:
-            f.write(html_template)
-        
-        logger.success(f"已生成HTML预览页面: {html_path}")
-        return html_path
-
-    def process_html_result(self, result_json: str, output_path: str):
-        """处理HTML页面提交的结果"""
-        try:
-            result = json.loads(result_json)
-            self.save_classification_result(result, output_path)
-            logger.success("已保存处理后的结果")
-        except Exception as e:
-            logger.error(f"处理结果时出错: {e}")
 
 def process_args():
     """处理命令行参数"""
@@ -684,38 +529,8 @@ def main():
         
         classifier = ArtistClassifier()
         result = classifier.process_to_be_classified(str(txt_path))
-        
-        # 生成HTML预览
-        html_path = classifier.generate_html_preview(result, str(txt_path))
-        
-        # 启动简单的HTTP服务器来显示HTML
-        import http.server
-        import socketserver
-        import webbrowser
-        from urllib.parse import parse_qs
-        
-        class Handler(http.server.SimpleHTTPRequestHandler):
-            def do_POST(self):
-                content_length = int(self.headers['Content-Length'])
-                post_data = self.rfile.read(content_length).decode('utf-8')
-                post_params = parse_qs(post_data)
-                
-                if 'result' in post_params:
-                    result_json = post_params['result'][0]
-                    output_path = txt_path.parent / 'classified_result.yaml'
-                    classifier.process_html_result(result_json, str(output_path))
-                    
-                    self.send_response(200)
-                    self.send_header('Content-type', 'text/html')
-                    self.end_headers()
-                    self.wfile.write(b"<script>window.close();</script>")
-        
-        # 启动服务器
-        port = 8000
-        with socketserver.TCPServer(("", port), Handler) as httpd:
-            logger.info(f"启动预览服务器在 http://localhost:{port}")
-            webbrowser.open(f'http://localhost:{port}/{html_path.name}')
-            httpd.serve_forever()
+        output_path = txt_path.parent / 'classified_result.yaml'
+        classifier.save_classification_result(result, str(output_path))
     else:
         # 创建TUI配置界面
         checkbox_options = [
