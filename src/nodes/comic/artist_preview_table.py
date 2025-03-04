@@ -390,42 +390,88 @@ class ArtistPreviewGenerator:
         // 导出功能
         function exportSelected(type) {{
             let content = [];
+            let state = {{
+                existing: {{}},
+                new: {{}}
+            }};
             
             ['existing-table', 'new-table'].forEach(tableId => {{
                 const table = document.getElementById(tableId);
                 const rows = table.querySelectorAll('tbody tr');
                 rows.forEach(row => {{
                     const checkbox = row.querySelector('input[type="checkbox"]');
-                    if (checkbox && checkbox.checked) {{
-                        if (type === 'artists') {{
-                            const artistName = row.querySelector('.name-cell').textContent;
-                            content.push(artistName);
-                        }} else if (type === 'files') {{
-                            const filesList = row.querySelector('.files-list').innerHTML;
-                            content.push(...filesList.split('<br>'));
+                    const artistName = row.querySelector('.name-cell').textContent;
+                    if (checkbox) {{
+                        state[tableId === 'existing-table' ? 'existing' : 'new'][artistName] = checkbox.checked;
+                        if (checkbox.checked) {{
+                            if (type === 'artists') {{
+                                content.push(artistName);
+                            }} else if (type === 'files') {{
+                                const filesList = row.querySelector('.files-list').innerHTML;
+                                content.push(...filesList.split('<br>'));
+                            }}
                         }}
                     }}
                 }});
             }});
             
             if (content.length > 0) {{
-                const blob = new Blob([content.join('\\n')], {{ type: 'text/plain' }});
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = type === 'artists' ? 'selected_artists.txt' : 'selected_files.txt';
-                document.body.appendChild(a);
-                a.click();
-                URL.revokeObjectURL(url);
-                document.body.removeChild(a);
+                // 导出纯文本文件
+                const textBlob = new Blob([content.join('\\n')], {{ type: 'text/plain' }});
+                const textUrl = URL.createObjectURL(textBlob);
+                const textLink = document.createElement('a');
+                textLink.href = textUrl;
+                textLink.download = type === 'artists' ? 'selected_artists.txt' : 'selected_files.txt';
+                document.body.appendChild(textLink);
+                textLink.click();
+                URL.revokeObjectURL(textUrl);
+                document.body.removeChild(textLink);
+
+                // 导出带状态的JSON文件
+                const jsonData = {{
+                    content: content,
+                    state: state,
+                    exportType: type,
+                    exportTime: new Date().toISOString()
+                }};
+                const jsonBlob = new Blob([JSON.stringify(jsonData, null, 2)], {{ type: 'application/json' }});
+                const jsonUrl = URL.createObjectURL(jsonBlob);
+                const jsonLink = document.createElement('a');
+                jsonLink.href = jsonUrl;
+                jsonLink.download = type === 'artists' ? 'selected_artists_with_state.json' : 'selected_files_with_state.json';
+                document.body.appendChild(jsonLink);
+                jsonLink.click();
+                URL.revokeObjectURL(jsonUrl);
+                document.body.removeChild(jsonLink);
             }} else {{
                 alert('请先选择要导出的内容！');
             }}
         }}
 
+        // 生成预览链接
+        function generatePreviewUrl(artistName) {{
+            return `https://www.wn01.uk/search/?q=${{encodeURIComponent(artistName)}}`;
+        }}
+
         // 初始化
         setupSelectAll('#existing-table', 'existing-select-all');
         setupSelectAll('#new-table', 'new-select-all');
+
+        // 为每个画师名添加预览链接
+        document.querySelectorAll('.name-cell').forEach(cell => {{
+            const artistName = cell.textContent;
+            const previewUrl = generatePreviewUrl(artistName);
+            const previewLink = document.createElement('a');
+            previewLink.href = previewUrl;
+            previewLink.target = '_blank';
+            previewLink.className = 'preview-link btn';
+            previewLink.textContent = '预览';
+            previewLink.style.marginLeft = '10px';
+            previewLink.style.fontSize = '12px';
+            previewLink.style.padding = '2px 8px';
+            cell.innerHTML = `${{artistName}} `;
+            cell.appendChild(previewLink);
+        }});
     </script>
 </body>
 </html>
