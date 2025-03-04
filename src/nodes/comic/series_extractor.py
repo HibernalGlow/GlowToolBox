@@ -4,7 +4,9 @@ import re
 from difflib import SequenceMatcher
 import functools
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from src.nodes.logger.logger import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 class SeriesExtractor:
     """漫画系列提取器类"""
