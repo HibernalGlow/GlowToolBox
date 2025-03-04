@@ -78,7 +78,7 @@ class ArtistClassifier:
             # 获取所有画师文件夹
             folders = [f.name for f in base_dir.iterdir() 
                       if f.is_dir() and f.name.startswith('[') and 
-                      not any(x in f.name for x in ['待分类', '已找到画师', '去图', 'fanbox', 'COS'])]
+                      not any(x in f.name for x in ['待分类', '已找到画师', '已存在画师', '去图', 'fanbox', 'COS'])]
             
             logger.info(f"找到 {len(folders)} 个画师文件夹")
             

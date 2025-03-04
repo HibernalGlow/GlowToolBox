@@ -16,16 +16,38 @@ from multiprocessing import Pool, cpu_count
 # 配置日志记录器
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def extract_archive(archive_path):
-    """
-    使用zipfile解压压缩文件到同名文件夹
-    """
+def extract_archive(archive_path, check_content=False):
+    """新增check_content参数用于控制是否检查压缩包内容"""
     try:
         archive_path = Path(archive_path)
         dir_path = archive_path.parent
         file_name = archive_path.stem
         extract_path = dir_path / file_name
         
+        # 新增内容检查逻辑
+        if check_content:
+            # 检查ZIP文件内容
+            if archive_path.suffix.lower() == '.zip':
+                with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+                    has_target_files = any(f.lower().endswith(('.psd', '.pdf')) for f in zip_ref.namelist())
+                    if not has_target_files:
+                        print(f"跳过无PSD/PDF的压缩包: {archive_path}")
+                        return False
+            # 其他格式在解压后检查
+            else:
+                temp_extract = extract_path.with_name(extract_path.name + '_temp')
+                cmd = [
+                    '7z', 'l',
+                    str(archive_path),
+                    '-slt',
+                    '-scsUTF-8'
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+                has_target_files = any(line.strip().endswith(('.psd', '.pdf')) for line in result.stdout.split('\n'))
+                if not has_target_files:
+                    print(f"跳过无PSD/PDF的压缩包: {archive_path}")
+                    return False
+
         # 创建解压目标文件夹
         os.makedirs(extract_path, exist_ok=True)
 
@@ -73,8 +95,9 @@ def extract_archive(archive_path):
                 raise Exception(f"7z解压失败: {result.stderr}")
 
         # 解压成功后删除原压缩文件
-        os.remove(archive_path)
-        print(f"已解压并删除: {archive_path}")
+        if has_target_files:  # 只有包含目标文件时才删除原包
+            os.remove(archive_path)
+            print(f"已解压并删除: {archive_path}")
         return True
             
     except Exception as e:
@@ -82,20 +105,14 @@ def extract_archive(archive_path):
         return False
 
 def extract_all_archives(directory):
-    """
-    解压指定目录下的所有压缩文件
-    
-    参数:
-    directory -- 目标目录路径
-    """
-    # 支持的压缩文件扩展名
+    """解压指定目录下的所有压缩文件（仅含PSD/PDF）"""
     archive_extensions = {'.zip', '.7z', '.rar', '.cbz'}
     
     for root, _, files in os.walk(directory):
         for file in files:
             if any(file.lower().endswith(ext) for ext in archive_extensions):
                 archive_path = os.path.join(root, file)
-                extract_archive(archive_path)
+                extract_archive(archive_path, check_content=True)  # 新增参数
 
 def delete_files_by_extensions(directory, extensions):
     """
