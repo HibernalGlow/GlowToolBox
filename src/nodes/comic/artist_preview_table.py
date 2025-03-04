@@ -97,48 +97,57 @@ class ArtistPreviewGenerator:
         total_artists = len(existing_artists) + len(new_artists)
         processed_count = 0
         
-        # 异步处理所有画师
-        existing_previews = []
-        new_previews = []
-        
+        # 创建进度更新函数
+        async def update_progress(folder: str):
+            nonlocal processed_count
+            processed_count += 1
+            logger.info(f"进度: [{processed_count}/{total_artists}] - {folder}")
+
+        # 并行处理画师的函数
+        async def process_artist_batch(artists_dict: Dict[str, List[str]], is_existing: bool, 
+                                     batch_size: int = 10) -> List[ArtistPreview]:
+            results = []
+            artists_items = list(artists_dict.items())
+            
+            for i in range(0, len(artists_items), batch_size):
+                batch = artists_items[i:i + batch_size]
+                tasks = []
+                
+                for folder, files in batch:
+                    tasks.append(asyncio.create_task(self.process_artist(folder, files, is_existing)))
+                
+                # 等待当前批次完成
+                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # 更新进度并处理结果
+                for folder, result in zip([f[0] for f in batch], batch_results):
+                    await update_progress(folder)
+                    if isinstance(result, Exception):
+                        logger.error(f"处理画师失败 {folder}: {result}")
+                        # 添加空预览保持数据完整性
+                        results.append(ArtistPreview(
+                            name=folder.strip('[]'),
+                            folder=folder,
+                            preview_url="",
+                            files=artists_dict[folder],
+                            is_existing=is_existing
+                        ))
+                    else:
+                        results.append(result)
+            
+            return results
+
+        # 设置更大的批次大小以提高性能
+        BATCH_SIZE = 20
+
         # 处理已存在的画师
         logger.info(f"开始处理已存在画师 ({len(existing_artists)} 个)...")
-        for folder, files in existing_artists.items():
-            try:
-                preview = await self.process_artist(folder, files, True)
-                existing_previews.append(preview)
-            except Exception as e:
-                logger.error(f"处理已存在画师失败 {folder}: {e}")
-                # 添加一个空的预览，保持数据完整性
-                existing_previews.append(ArtistPreview(
-                    name=folder.strip('[]'),
-                    folder=folder,
-                    preview_url="",
-                    files=files,
-                    is_existing=True
-                ))
-            processed_count += 1
-            logger.info(f"进度: [{processed_count}/{total_artists}] - {folder}")
-        
+        existing_previews = await process_artist_batch(existing_artists, True, BATCH_SIZE)
+
         # 处理新画师
         logger.info(f"\n开始处理新画师 ({len(new_artists)} 个)...")
-        for folder, files in new_artists.items():
-            try:
-                preview = await self.process_artist(folder, files, False)
-                new_previews.append(preview)
-            except Exception as e:
-                logger.error(f"处理新画师失败 {folder}: {e}")
-                # 添加一个空的预览，保持数据完整性
-                new_previews.append(ArtistPreview(
-                    name=folder.strip('[]'),
-                    folder=folder,
-                    preview_url="",
-                    files=files,
-                    is_existing=False
-                ))
-            processed_count += 1
-            logger.info(f"进度: [{processed_count}/{total_artists}] - {folder}")
-        
+        new_previews = await process_artist_batch(new_artists, False, BATCH_SIZE)
+
         logger.info(f"\n处理完成! 总共处理了 {total_artists} 个画师")
         return existing_previews, new_previews
 
