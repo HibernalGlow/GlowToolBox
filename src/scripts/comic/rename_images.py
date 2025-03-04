@@ -206,6 +206,53 @@ def has_hash_files_in_zip(zip_path):
         print(f"⚠️ 检查压缩包失败 {zip_path}: {e}")
         return True  # 如果出现异常，仍然继续处理
 
+def process_with_bandizip(zip_path, temp_dir):
+    """使用 Bandizip 命令行工具处理压缩包"""
+    try:
+        # 使用 Bandizip 解压文件
+        extract_cmd = ['bz', 'x', '-o:', f'"{temp_dir}"', f'"{zip_path}"']
+        result = subprocess.run(' '.join(extract_cmd), shell=True, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            print(f"❌ Bandizip 解压失败: {result.stderr}")
+            return False
+            
+        # 重命名文件
+        renamed = False
+        for root, _, files in os.walk(temp_dir):
+            for filename in files:
+                new_filename = re.sub(r'\[hash-[0-9a-fA-F]+\]', '', filename)
+                if new_filename != filename:
+                    old_path = os.path.join(root, filename)
+                    new_path = os.path.join(root, new_filename)
+                    try:
+                        if os.path.exists(new_path):
+                            os.remove(new_path)
+                        os.rename(old_path, new_path)
+                        print(f"重命名: {filename} -> {new_filename}")
+                        renamed = True
+                    except Exception as e:
+                        print(f"⚠️ 重命名失败 {filename}: {str(e)}")
+                        continue
+        
+        if renamed:
+            # 使用 Bandizip 重新打包
+            create_cmd = ['bz', 'c', '-l:9', f'"{zip_path}"', f'"{temp_dir}\\*"']
+            result = subprocess.run(' '.join(create_cmd), shell=True, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                print(f"✅ Bandizip 打包成功：{zip_path}")
+                return True
+            else:
+                print(f"❌ Bandizip 打包失败: {result.stderr}")
+                return False
+                
+        return renamed
+        
+    except Exception as e:
+        print(f"❌ Bandizip 处理出错: {str(e)}")
+        return False
+
 def rename_images_in_zip(zip_path, input_base_path):
     if not has_hash_files_in_zip(zip_path):
         return
@@ -239,37 +286,53 @@ def rename_images_in_zip(zip_path, input_base_path):
                 print(f"❌ 删除文件失败: {delete_result.stderr}")
         
         # 处理hash文件名
-        # 使用7z重命名文件
         temp_dir = tempfile.mkdtemp()
         try:
-            # 解压文件
-            extract_cmd = ['7z', 'x', zip_path, f'-o{temp_dir}', '*']
-            subprocess.run(extract_cmd, check=True)
+            success = False
             
-            # 重命名文件
-            renamed = False
-            for root, _, files in os.walk(temp_dir):
-                for filename in files:
-                    new_filename = re.sub(r'\[hash-[0-9a-fA-F]+\]', '', filename)
-                    if new_filename != filename:
-                        old_path = os.path.join(root, filename)
-                        new_path = os.path.join(root, new_filename)
-                        os.rename(old_path, new_path)
-                        print(f"重命名: {filename} -> {new_filename}")
-                        renamed = True
+            # 首先尝试使用7z
+            try:
+                # 解压文件
+                extract_cmd = ['7z', 'x', f'"{zip_path}"', f'-o"{temp_dir}"', '*']
+                subprocess.run(extract_cmd, check=True)
+                
+                # 重命名文件
+                renamed = False
+                for root, _, files in os.walk(temp_dir):
+                    for filename in files:
+                        new_filename = re.sub(r'\[hash-[0-9a-fA-F]+\]', '', filename)
+                        if new_filename != filename:
+                            old_path = os.path.join(root, filename)
+                            new_path = os.path.join(root, new_filename)
+                            os.rename(old_path, new_path)
+                            print(f"重命名: {filename} -> {new_filename}")
+                            renamed = True
+                
+                if renamed:
+                    # 重新打包
+                    create_cmd = ['7z', 'a', '-tzip', zip_path, f'{temp_dir}\\*']
+                    subprocess.run(create_cmd, check=True)
+                    print(f"✅ 7z处理完成：{zip_path}")
+                    success = True
+                    
+            except Exception as e:
+                print(f"⚠️ 7z处理失败，尝试使用Bandizip: {str(e)}")
+                # 清理临时目录
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                temp_dir = tempfile.mkdtemp()
+                
+                # 尝试使用Bandizip
+                success = process_with_bandizip(zip_path, temp_dir)
             
-            if renamed:
-                # 重新打包
-                create_cmd = ['7z', 'a', '-tzip', zip_path, f'{temp_dir}\\*']
-                subprocess.run(create_cmd, check=True)
-                print(f"✅ 压缩包处理完成：{zip_path}")
+            if not success:
+                print("❌ 压缩包处理失败")
             
         finally:
             # 清理临时目录
             shutil.rmtree(temp_dir, ignore_errors=True)
             
     except subprocess.CalledProcessError as e:
-        print(f"❌ 7z命令执行失败: {str(e)}")
+        print(f"❌ 命令执行失败: {str(e)}")
     except Exception as e:
         print(f"❌ 处理压缩包时出错: {str(e)}")
     print("继续处理下一个文件...")

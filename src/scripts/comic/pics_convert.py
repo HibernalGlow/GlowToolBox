@@ -125,7 +125,9 @@ EFFICIENCY_CHECK_CONFIG = {
 }
 
 # 添加cjxl路径到全局配置
-EXE_RELATIVE = os.getenv('EXE_PATH', 'exe/jxl')
+EXE_RELATIVE = os.getenv('JXL_PATH')
+if EXE_RELATIVE is None:
+    raise EnvironmentError("环境变量 'JXL_PATH' 未设置")
 CJXL_PATH = Path(os.path.join(BASE_DIR, EXE_RELATIVE, 'cjxl.exe'))
 DJXL_PATH = Path(os.path.join(BASE_DIR, EXE_RELATIVE, 'djxl.exe'))
 
