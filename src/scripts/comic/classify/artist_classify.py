@@ -294,6 +294,123 @@ class ArtistClassifier:
             for file_name, folder, artist in found_files:
                 logger.info(f"  - {file_name} -> {artist} ({folder})")
 
+    def extract_artist_info_from_filename(self, filename: str) -> Dict[str, List[str]]:
+        """从文件名中提取画师信息"""
+        result = {
+            'artists': [],
+            'circles': [],
+            'raw_name': filename
+        }
+        
+        # 清理文件名
+        name_str = filename
+        for keyword in self.config['exclude_keywords']:
+            name_str = name_str.replace(keyword, "")
+        
+        # 提取方括号中的内容
+        pattern = r'\[([^\[\]]+)\]'
+        matches = re.finditer(pattern, name_str)
+        
+        for match in matches:
+            content = match.group(1).strip()
+            if '(' in content:
+                # 处理带括号的情况 - 社团(画师)格式
+                circle_part = content.split('(')[0].strip()
+                artist_part = content.split('(')[1].rstrip(')').strip()
+                
+                # 处理画师名（按顿号分割）
+                artist_names = [n.strip() for n in artist_part.split('、')]
+                result['artists'].extend(artist_names)
+                
+                # 处理社团名（按顿号分割）
+                circle_names = [n.strip() for n in circle_part.split('、')]
+                result['circles'].extend(circle_names)
+            else:
+                # 没有括号的情况，假定为画师名
+                result['artists'].append(content)
+        
+        # 过滤无效名称
+        result['artists'] = [name for name in result['artists'] 
+                           if name and not any(k in name for k in self.config['exclude_keywords'])]
+        result['circles'] = [name for name in result['circles'] 
+                           if name and not any(k in name for k in self.config['exclude_keywords'])]
+        
+        return result
+
+    def process_to_be_classified(self, txt_path: str) -> Dict:
+        """处理待分类的txt文件，生成分类结构"""
+        logger.info(f"开始处理待分类文件: {txt_path}")
+        
+        if not os.path.exists(txt_path):
+            raise FileNotFoundError(f"文件不存在: {txt_path}")
+        
+        # 读取txt文件
+        with open(txt_path, 'r', encoding='utf-8') as f:
+            filenames = [line.strip() for line in f if line.strip()]
+        
+        logger.info(f"读取到 {len(filenames)} 个文件名")
+        
+        # 初始化结果结构
+        result = {
+            'artists': {
+                'auto_detected': {},
+                'user_defined': {}
+            },
+            'unclassified': [],
+            'statistics': {
+                'total_files': len(filenames),
+                'classified_files': 0,
+                'unclassified_files': 0
+            }
+        }
+        
+        # 处理每个文件名
+        for filename in filenames:
+            info = self.extract_artist_info_from_filename(filename)
+            
+            if info['artists'] or info['circles']:
+                # 如果找到了画师或社团信息
+                folder_name = f"[{info['artists'][0]}]" if info['artists'] else f"[{info['circles'][0]}]"
+                
+                # 合并所有名称作为搜索关键词
+                all_names = info['artists'] + info['circles']
+                result['artists']['auto_detected'][folder_name] = all_names
+                result['statistics']['classified_files'] += 1
+            else:
+                # 未能分类的文件
+                result['unclassified'].append(filename)
+                result['statistics']['unclassified_files'] += 1
+        
+        logger.info(f"分类完成: ")
+        logger.info(f"- 总文件数: {result['statistics']['total_files']}")
+        logger.info(f"- 已分类: {result['statistics']['classified_files']}")
+        logger.info(f"- 未分类: {result['statistics']['unclassified_files']}")
+        
+        return result
+
+    def save_classification_result(self, result: Dict, output_path: str):
+        """保存分类结果到yaml文件"""
+        # 准备输出数据
+        output_data = {
+            'paths': self.config['paths'],
+            'categories': self.config['categories'],
+            'exclude_keywords': self.config['exclude_keywords'],
+            'artists': result['artists']
+        }
+        
+        # 添加未分类文件信息
+        if result['unclassified']:
+            output_data['unclassified'] = result['unclassified']
+        
+        # 添加统计信息
+        output_data['statistics'] = result['statistics']
+        
+        # 保存到yaml文件
+        with open(output_path, 'w', encoding='utf-8') as f:
+            yaml.dump(output_data, f, allow_unicode=True, sort_keys=False)
+        
+        logger.success(f"分类结果已保存到: {output_path}")
+
 def process_args():
     """处理命令行参数"""
     parser = argparse.ArgumentParser(description='画师分类工具')
@@ -305,6 +422,8 @@ def process_args():
                         help='启用中间模式')
     parser.add_argument('--update-list', action='store_true',
                         help='更新画师列表')
+    parser.add_argument('--text-mode', action='store_true',
+                        help='启用文本模式')
     
     args = parser.parse_args()
     
@@ -318,7 +437,15 @@ def process_args():
     elif args.path:
         path = args.path
     else:
-        return None, args
+        # 在文本模式下，自动查找同目录下的to_be_classified.txt
+        if args.text_mode:
+            default_txt = Path(__file__).parent / "to_be_classified.txt"
+            if default_txt.exists():
+                path = str(default_txt)
+            else:
+                path = None
+        else:
+            path = None
     
     return path, args
 
@@ -367,7 +494,39 @@ def run_classifier(path: Optional[str], args):
 
 def main():
     path, args = process_args()
-    run_classifier(path, args)
+    
+    # 文本模式处理
+    if args.text_mode or (path and path.endswith('to_be_classified.txt')):
+        # 确保txt_path是Path对象
+        txt_path = Path(path) if path else Path(__file__).parent / "to_be_classified.txt"
+        if not txt_path.exists():
+            logger.error(f"文本文件不存在: {txt_path}")
+            return
+        
+        classifier = ArtistClassifier()
+        result = classifier.process_to_be_classified(str(txt_path))
+        output_path = txt_path.parent / 'classified_result.yaml'
+        classifier.save_classification_result(result, str(output_path))
+    else:
+        # 创建TUI配置界面
+        checkbox_options = [
+            ("中间模式", "intermediate", "--intermediate"),
+            ("更新画师列表", "update_list", "--update-list"),
+            ("文本模式", "text_mode", "--text-mode"),
+        ]
+        
+        input_options = [
+            ("待处理路径", "path", "-p", "", "输入待处理文件夹路径"),
+        ]
+
+        app = create_config_app(
+            program=__file__,
+            checkbox_options=checkbox_options,
+            input_options=input_options,
+            title="画师分类配置",
+        )
+        
+        app.run()
 
 if __name__ == "__main__":
     main()
